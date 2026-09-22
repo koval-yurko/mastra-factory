@@ -9,5 +9,7 @@ node_modules/
 .DS_Store
 .bmad-loop/runs/
 .bmad-loop/cache/
-.bmad-loop/policy.toml
+# .bmad-loop/policy.toml is deliberately TRACKED: Story 1.2 must extend
+# [verify].commands, and a gitignored file cannot be committed or merged back
+# out of a story worktree. It holds configuration only, never secrets.
 _bmad/render/

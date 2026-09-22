@@ -1,0 +1,75 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 09-22-2026 00:00
+last_updated: 09-22-2026 00:00
+project: mastra-factory
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-pin-the-package-manager-so-a-fresh-worktree-resolves-identic: backlog
+  1-2-tests-for-the-entry-s-pure-helpers-running-inside-the-verify: backlog
+  1-3-one-datastore-drop-redis-and-harden-the-compose-file: backlog
+  1-4-operator-a-working-container-engine-and-a-healthy-postgres: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-operator-a-sandbox-image-that-carries-git-and-gh: backlog
+  2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider: backlog
+  2-3-identity-this-machine-owns-with-organizations: backlog
+  2-4-operator-sign-in-on-loopback-and-land-in-an-organization: backlog
+  2-5-operator-a-session-gets-a-real-container-and-the-cap-holds: backlog
+  2-6-operator-close-registration-before-anything-is-public: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-every-callback-url-recorded-where-its-subject-owns-it: backlog
+  3-2-operator-a-public-origin-with-no-inbound-ports: backlog
+  3-3-operator-a-github-app-that-belongs-to-yurii: backlog
+  3-4-operator-a-linear-app-that-belongs-to-yurii: backlog
+  3-5-operator-a-slack-app-created-from-a-manifest-this-repo-owns: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-the-supervision-artifacts-as-real-files-in-the-repo: backlog
+  4-2-operator-bring-the-agents-up: backlog
+  4-3-operator-prove-it-comes-back-on-its-own: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou: backlog
+  5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l: backlog
+  5-3-docs-links-out-and-the-path-loses-its-space: backlog
+  5-4-a-config-module-with-recorded-provenance-holding-storage-vec: backlog
+  5-5-extract-auth-integrations-and-sandbox: backlog
+  5-6-the-entry-is-four-things-and-the-build-proves-it: backlog
+  epic-5-retrospective: optional
