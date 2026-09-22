@@ -1,20 +1,20 @@
-# Local-dev backing services for MastraCode Web.
+# The backing datastore for this Factory deployment.
 #
 # app-db is the separate "application database" referenced by DATABASE_URL
 # (distinct from Mastra's own storage). The web server runs the GitHub schema
 # migrations automatically on boot when the feature is enabled. The
 # deprecated APP_DATABASE_URL name is still honored as a fallback.
 #
-# redis backs RedisStreamsPubSub (@mastra/redis-streams) for distributed event
-# delivery across web server processes.
-#
 # Usage:
-#   docker compose up -d
-#   export DATABASE_URL=postgres://user:pass@localhost:54329/mastracode_web
-#   export REDIS_URL=redis://localhost:63799
+#   npm run db:up            # docker compose up -d --wait
+#   npm run db:down          # docker compose down
 #
-# The default credentials below match the DATABASE_URL example in
-# src/web/.env.example.
+# POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB are read from .env, which
+# Compose loads automatically. POSTGRES_PASSWORD has no default, and Compose
+# interpolates this file for every command — up, down, ps, logs, config — so
+# all of them abort until it is set. See README.md ("Configure your Factory")
+# for what the values must contain. Set DATABASE_URL in the same .env to match:
+#   postgres://<POSTGRES_USER>:<POSTGRES_PASSWORD>@127.0.0.1:54329/<POSTGRES_DB>
 services:
   app-db:
     # pgvector build of the official postgres image — agent memory (recall +
@@ -22,34 +22,37 @@ services:
     # `vector` extension available.
     image: pgvector/pgvector:pg18
     container_name: mastracode-web-db
+    # Comes back with the host after a reboot, and after any crash, unless an
+    # operator stopped it on purpose.
+    restart: unless-stopped
     ports:
-      - '54329:5432'
+      # Loopback only — this host sits behind a public tunnel, and the database
+      # must never answer on the LAN or the public interface.
+      - '127.0.0.1:54329:5432'
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_USER: ${POSTGRES_USER:-factory}
+      # No default: a committed password would be a published credential.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env - every docker compose command needs it}
       POSTGRES_DB: ${POSTGRES_DB:-mastracode_web}
     volumes:
       # postgres:18+ images require the mount at /var/lib/postgresql (data
       # lives in a version-specific subdirectory to support pg_upgrade).
       - mastracode-web-pgdata:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-mastracode_web}']
+      # Probe over TCP, not the Unix socket: while initdb runs on a fresh
+      # volume the entrypoint starts a temporary socket-only server, and a
+      # socket probe would report healthy before 5432 is listening.
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER:-factory}" -d "${POSTGRES_DB:-mastracode_web}"',
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  redis:
-    # Backs RedisStreamsPubSub — pub/sub state lives in Redis Streams, so no
-    # persistence volume is needed for local dev.
-    image: redis:8-alpine
-    container_name: mastracode-web-redis
-    ports:
-      - '63799:6379'
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      # A first-ever initdb takes longer than interval x retries; failures in
+      # this window do not count against retries.
+      start_period: 30s
 
 volumes:
   mastracode-web-pgdata:

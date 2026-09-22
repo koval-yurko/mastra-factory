@@ -10,6 +10,7 @@
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "check": "tsc --noEmit",
+    "test": "vitest run --dir src",
     "build": "mastra build --dir src/mastra",
     "start": "varlock run -- mastra start",
     "deploy": "mastra deploy"
@@ -31,8 +32,10 @@
     "@types/node": "22.20.1",
     "mastra": "1.30.0",
     "typescript": "^5.9.2",
-    "varlock": "^1.9.0"
+    "varlock": "^1.9.0",
+    "vitest": "5.0.1"
   },
+  "packageManager": "npm@11.17.0",
   "engines": {
     "node": ">=22.19.0"
   }

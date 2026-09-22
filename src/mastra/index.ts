@@ -41,15 +41,24 @@ import type { IMastraAuthProvider } from '@mastra/core/server';
  * Fractional values are rejected rather than floored — flooring `0.5` to `0`
  * would silently disable a capacity knob or turn an idle window into
  * immediate expiry.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it.
  */
-function positiveInt(raw: string | undefined): number | undefined {
+export function positiveInt(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) return undefined;
   return parsed;
 }
 
-function decodeCredentialEncryptionKey(name: string, encodedKey: string): Buffer {
+/**
+ * Decode a base64 32-byte credential-encryption key. `name` is the environment
+ * variable the value came from and is carried into the failure message, so a
+ * boot failure points at the key rather than at the decoder.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it.
+ */
+export function decodeCredentialEncryptionKey(name: string, encodedKey: string): Buffer {
   const key = Buffer.from(encodedKey, 'base64');
   if (key.byteLength !== 32) throw new Error(`${name} must contain base64-encoded 32-byte keys.`);
   return key;
@@ -185,7 +194,8 @@ const linear =
 // (GITHUB_APP_PRIVATE_KEY, WORKOS_API_KEY, DATABASE_URL, …) never leak into
 // commands run against untrusted repo checkouts. PATH is always added by the
 // core LocalSandbox itself; the rest keeps git and TLS working normally.
-const LOCAL_SANDBOX_ENV_KEYS = [
+// Exported for `index.test.ts` only — nothing else imports it.
+export const LOCAL_SANDBOX_ENV_KEYS = [
   'HOME',
   'USER',
   'LOGNAME',
@@ -201,7 +211,8 @@ const LOCAL_SANDBOX_ENV_KEYS = [
   'SSL_CERT_DIR',
 ] as const;
 
-function localSandboxEnv(): Record<string, string> {
+/** Exported for `index.test.ts` only — nothing else imports it. */
+export function localSandboxEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of LOCAL_SANDBOX_ENV_KEYS) {
     const value = process.env[key];

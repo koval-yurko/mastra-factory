@@ -50,7 +50,17 @@ Choose authentication, storage, and sandboxes independently. Model providers and
 | [Storage](https://factory.mastra.ai/configure/storage)     | The database connection or Factory storage adapter.                           |
 | [Sandboxes](https://factory.mastra.ai/configure/sandboxes) | Mastra platform, local execution, or another Mastra sandbox provider.         |
 
-The generated server uses `DATABASE_URL` for PostgreSQL with pgvector. To use the included local PostgreSQL service, run `npm run db:up` and set `DATABASE_URL` to its connection string in `.env`. The generated `docker-compose.yml` contains the connection settings.
+The generated server uses `DATABASE_URL` for PostgreSQL with pgvector. To use the included local PostgreSQL service, start from `.env` — copy `.env.example` to `.env` if you have not already — and set the three values `docker-compose.yml` reads from it:
+
+- `POSTGRES_PASSWORD` — the database role's password. There is no default, and Compose reads `docker-compose.yml` for every command, so `npm run db:up`, `npm run db:down` and any other `docker compose` call stop with an error naming the variable until you set it. Generate a long random value with `openssl rand -hex 32` rather than choosing a memorable one; hex output stays safe in the connection URL below, in `.env`, and in Compose's own interpolation, which characters like `/`, `$` and `#` do not. Keep it only in `.env`.
+- `POSTGRES_USER` — the role the database is created with. Defaults to `factory`. Keep it to letters, digits and underscores: Compose expands a `$` while reading `.env`, and a `"` breaks the health check command the value is interpolated into.
+- `POSTGRES_DB` — the database name. Defaults to `mastracode_web`.
+
+Then run `npm run db:up` and set `DATABASE_URL` in the same `.env` to match the three values in use, for example `postgres://factory:<password>@127.0.0.1:54329/mastracode_web`. The service publishes port `54329` on loopback only, so nothing else on the network can reach it.
+
+The container applies all three values only when it initializes an empty data volume, so they fix the role, password, and database name at the first `npm run db:up` and are ignored on every later start. Changing one afterwards does not rename or re-password anything. To start over, run `docker compose down -v` — this deletes the database's contents — then `npm run db:up` again.
+
+If `POSTGRES_PASSWORD` goes missing from `.env` after the first start, no `docker compose` command runs — `npm run db:down` included — while the container keeps restarting and holding port `54329`. Put any value back in `.env` to regain control of it (the running database keeps the password it was created with, so `DATABASE_URL` still needs the original), or stop it directly with `docker stop mastracode-web-db && docker rm mastracode-web-db`.
 
 Mastra platform sandboxes use `MASTRA_PLATFORM_ACCESS_TOKEN` or `MASTRA_PLATFORM_SECRET_KEY`, together with `MASTRA_PROJECT_ID` and `MASTRA_ENVIRONMENT_ID`. To run commands on the Factory Server's machine, set this override in `.env`:
 
@@ -85,14 +95,14 @@ Keep the generated project's CLI dependencies installed for these commands. You 
 
 ## Scripts
 
-| Script                              | What it does                                                    |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `npm run dev`                       | Start the local Factory Server with its UI and API.             |
-| `npm run check`                     | Typecheck the Factory Server.                                   |
-| `npm run build`                     | Build the server and Factory UI in `.mastra/output`.            |
-| `npm run start`                     | Run the production build.                                       |
-| `npm run deploy`                    | Build and deploy to Mastra platform.                            |
-| `npm run db:up` / `npm run db:down` | Start or stop the optional local PostgreSQL and Redis services. |
+| Script                              | What it does                                         |
+| ----------------------------------- | ---------------------------------------------------- |
+| `npm run dev`                       | Start the local Factory Server with its UI and API.  |
+| `npm run check`                     | Typecheck the Factory Server.                        |
+| `npm run build`                     | Build the server and Factory UI in `.mastra/output`. |
+| `npm run start`                     | Run the production build.                            |
+| `npm run deploy`                    | Build and deploy to Mastra platform.                 |
+| `npm run db:up` / `npm run db:down` | Start or stop the optional local PostgreSQL service. |
 
 ## Troubleshooting
 

@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bmad-loop Operator Board</title>
+<style>
+  :root {
+    --ground:    #E9ECEC;
+    --surface:   #F6F8F8;
+    --sunk:      #DFE4E5;
+    --line:      #C3CBCD;
+    --line-soft: #D6DCDD;
+    --ink:       #14191B;
+    --ink-mid:   #475357;
+    --ink-low:   #6D797D;
+    --accent:    #2C5F7E;
+    --accent-ink:#1F4459;
+    --go:        #2C7A4F;
+    --hold:      #9A6508;
+    --stop:      #A33627;
+    --sheet:     #E6EAEA;
+    --sheet-edge:#B9C3C5;
+
+    --display: "Avenir Next Condensed", "Arial Narrow", "Helvetica Neue", Helvetica, sans-serif;
+    --body: "Helvetica Neue", Helvetica, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    --measure: 66ch;
+    --pad: clamp(1.25rem, 4vw, 3rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #14191B;
+      --surface:   #1B2124;
+      --sunk:      #101517;
+      --line:      #303A3E;
+      --line-soft: #252D31;
+      --ink:       #E2E8E9;
+      --ink-mid:   #9DA9AD;
+      --ink-low:   #78868A;
+      --accent:    #74ABCB;
+      --accent-ink:#A6CBE2;
+      --go:        #4FA877;
+      --hold:      #D9A23C;
+      --stop:      #DC7565;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:    #14191B;
+    --surface:   #1B2124;
+    --sunk:      #101517;
+    --line:      #303A3E;
+    --line-soft: #252D31;
+    --ink:       #E2E8E9;
+    --ink-mid:   #9DA9AD;
+    --ink-low:   #78868A;
+    --accent:    #74ABCB;
+    --accent-ink:#A6CBE2;
+    --go:        #4FA877;
+    --hold:      #D9A23C;
+    --stop:      #DC7565;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: var(--pad);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.5rem, 6vw, 4.5rem);
+  }
+
+  /* ---------- masthead ---------- */
+
+  .mast {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    border-bottom: 3px solid var(--ink);
+    padding-bottom: 1.5rem;
+  }
+
+  .eyebrow {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+    font-size: clamp(2.6rem, 9vw, 5rem);
+    line-height: 0.92;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .lede {
+    margin: 0;
+    max-width: var(--measure);
+    color: var(--ink-mid);
+    font-size: 1.0625rem;
+  }
+
+  /* ---------- config strip ---------- */
+
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .strip > div {
+    flex: 1 1 9rem;
+    padding: 0.7rem 0.9rem;
+    border-right: 1px solid var(--line-soft);
+  }
+  .strip > div:last-child { border-right: 0; }
+
+  .strip dt {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--ink-low);
+    margin: 0 0 0.15rem;
+  }
+  .strip dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    color: var(--ink);
+  }
+
+  /* ---------- sections ---------- */
+
+  section { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  h2 {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    font-size: clamp(1.35rem, 3.4vw, 1.9rem);
+    line-height: 1.05;
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+  }
+
+  h2 .num {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0;
+    color: var(--accent);
+    font-weight: 400;
+  }
+
+  h3 {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+  p + p { margin-top: 0.75rem; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--sunk);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+  }
+
+  /* ---------- drawing sheet (mermaid) ---------- */
+
+  figure.sheet {
+    margin: 0;
+    border: 1px solid var(--sheet-edge);
+    background: var(--sheet);
+  }
+
+  figure.sheet .sheet-bar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 0.8rem;
+    background: var(--sheet-edge);
+    color: #14191B;
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+  figure.sheet .sheet-bar .ref { font-family: var(--mono); letter-spacing: 0; opacity: 0.72; }
+
+  figure.sheet .canvas {
+    overflow-x: auto;
+    padding: 1.25rem 0.75rem;
+  }
+
+  figure.sheet pre.mermaid {
+    margin: 0;
+    background: transparent;
+    display: flex;
+    justify-content: center;
+    min-width: max-content;
+  }
+
+  figure.sheet figcaption {
+    padding: 0.7rem 0.85rem;
+    border-top: 1px dashed var(--sheet-edge);
+    color: #3A474B;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  /* ---------- signal cards ---------- */
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    gap: 1rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--sig, var(--accent));
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .card .lamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--sig, var(--accent));
+  }
+  .card .lamp::before {
+    content: "";
+    width: 0.55rem; height: 0.55rem;
+    background: var(--sig, var(--accent));
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .card p { font-size: 0.9375rem; color: var(--ink-mid); }
+  .card .fix {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    background: var(--sunk);
+    border: 1px solid var(--line-soft);
+    padding: 0.5rem 0.6rem;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--ink);
+  }
+
+  .sig-go   { --sig: var(--go); }
+  .sig-hold { --sig: var(--hold); }
+  .sig-stop { --sig: var(--stop); }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 40rem;
+    background: var(--surface);
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--ink-low);
+    padding: 0.6rem 0.85rem;
+    border-bottom: 2px solid var(--ink);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 0.62rem 0.85rem;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+    color: var(--ink-mid);
+  }
+  tr:last-child td { border-bottom: 0; }
+
+  td.cmd {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .when {
+    font-family: var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.66rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .w-any  { color: var(--go); }
+  .w-live { color: var(--accent); }
+  .w-hold { color: var(--hold); }
+  .w-term { color: var(--ink-low); }
+
+  /* ---------- sequences ---------- */
+
+  .seq {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 1rem 1.1rem;
+  }
+
+  .seq ol {
+    margin: 0;
+    padding-left: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .seq li { font-family: var(--mono); font-size: 0.84rem; color: var(--ink); }
+  .seq li span { font-family: var(--body); font-size: 0.85rem; color: var(--ink-low); }
+
+  .note {
+    border-left: 3px solid var(--hold);
+    padding-left: 0.9rem;
+    color: var(--ink-mid);
+    font-size: 0.9375rem;
+    max-width: var(--measure);
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1rem;
+    font-size: 0.8125rem;
+    color: var(--ink-low);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="eyebrow">Operator board · mastra-factory</div>
+    <h1>bmad&#8209;loop</h1>
+    <p class="lede">The line runs itself. Your job is the andon cord: know which lamp is lit, which command answers it, and what is legal to call next. Everything below is read off this project&rsquo;s own <code>.bmad-loop/policy.toml</code>.</p>
+    <dl class="strip">
+      <div><dt>Gates</dt><dd>per-epic</dd></div>
+      <div><dt>Isolation</dt><dd>worktree · branch/story</dd></div>
+      <div><dt>Adapter</dt><dd>claude (dev·review·triage)</dd></div>
+      <div><dt>Sweep</dt><dd>auto = never</dd></div>
+      <div><dt>Queue</dt><dd>24 stories</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span> The whole line, end to end</h2>
+    <p>Three commands start work, four answer a stopped line, two clean up after it. Nothing else is required to operate the loop.</p>
+
+    <figure class="sheet">
+      <div class="sheet-bar"><span>Lifecycle &mdash; cold start to teardown</span><span class="ref">SHT&nbsp;01</span></div>
+      <div class="canvas">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#E6EAEA','primaryColor':'#F4F7F7','primaryTextColor':'#14191B','primaryBorderColor':'#2C5F7E','lineColor':'#475357','secondaryColor':'#D8E0E3','tertiaryColor':'#EDF1F1','fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
+flowchart TD
+  V["bmad-loop validate"] -->|15 checks green| DR["bmad-loop run --dry-run"]
+  DR -->|plan reads right| RUN["bmad-loop run"]
+  RUN --> LIVE(["LINE RUNNING"])
+
+  LIVE -.->|watch, changes nothing| WATCH["tui · status · attach"]
+  WATCH -.-> LIVE
+
+  LIVE -->|epic's last story committed| GATE["PAUSED at epic gate"]
+  LIVE -->|spec contradiction| CRIT["PAUSED on CRITICAL"]
+  LIVE -->|external action owed| PARK["story parked awaiting-operator<br/>line keeps moving"]
+  LIVE -->|you pull the cord| STOP["bmad-loop stop --graceful"]
+  LIVE -->|queue empty| FIN(["FINISHED"])
+
+  GATE -->|review the epic's commits| RES["bmad-loop resume RUN_ID"]
+  CRIT --> RSV["bmad-loop resolve RUN_ID"]
+  RSV -->|re-arms the spec| RES
+  STOP -->|same command| RES
+  RES --> LIVE
+
+  PARK --> CONF["bmad-loop confirm STORY_KEY"]
+  CONF -.->|story completes| LIVE
+
+  FIN --> SWEEP["bmad-loop sweep"]
+  SWEEP --> CLEAN["bmad-loop cleanup · clean · archive"]
+</pre>
+      </div>
+      <figcaption>Solid arrows move the run between states; dotted arrows are observation or bookkeeping that leaves the run where it was. Every pause resolves with exactly one command, and three of the four end in <strong>resume</strong>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span> What is legal after what</h2>
+    <p>A run has five states. Most commands are only accepted in one of them &mdash; that is the whole grammar.</p>
+
+    <figure class="sheet">
+      <div class="sheet-bar"><span>Run state machine &mdash; commands on the edges</span><span class="ref">SHT&nbsp;02</span></div>
+      <div class="canvas">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#E6EAEA','primaryColor':'#F4F7F7','primaryTextColor':'#14191B','primaryBorderColor':'#2C5F7E','lineColor':'#475357','secondaryColor':'#D8E0E3','tertiaryColor':'#EDF1F1','fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
+stateDiagram-v2
+  direction TB
+  state "LIVE" as Live
+  state "PAUSED - epic gate" as Gate
+  state "PAUSED - CRITICAL" as Crit
+  state "STOPPED - graceful" as Soft
+  state "STOPPED - hard" as Hard
+  state "FINISHED" as Done
+
+  [*] --> Live : run
+  Live --> Live : attach / status / tui
+  Live --> Gate : epic complete
+  Live --> Crit : dev and review cannot agree
+  Live --> Soft : stop --graceful
+  Live --> Hard : stop
+  Live --> Done : queue empty
+
+  Gate --> Live : resume
+  Crit --> Live : resolve
+  Soft --> Live : resume
+
+  Hard --> [*] : no resume - start a fresh run
+  Done --> [*] : archive / delete / clean
+  Soft --> [*] : archive / delete / clean
+</pre>
+      </div>
+      <figcaption>The two stop flavours differ only here: <strong>stop --graceful</strong> finishes the in-flight story through its commit and stays resumable; a bare <strong>stop</strong> cuts immediately and you restart with a fresh <code>run</code>, which re-reads the board and skips everything already done.</figcaption>
+    </figure>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Command</th><th>Legal when</th><th>What it leaves you in / what follows</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">validate</td><td><span class="when w-any">any time</span></td><td>Read-only preflight. Non-zero exit means <code>run</code> will not work yet.</td></tr>
+          <tr><td class="cmd">run --dry-run</td><td><span class="when w-any">any time</span></td><td>Prints the dispatch plan, spawns nothing. Always the step before <code>run</code>.</td></tr>
+          <tr><td class="cmd">run</td><td><span class="when w-any">no live run</span></td><td>&rarr; LIVE. Accepts <code>--epic</code>, <code>--story</code>, <code>--max-stories</code>, <code>--spec</code>.</td></tr>
+          <tr><td class="cmd">list · ls</td><td><span class="when w-any">any time</span></td><td>Run ids and short refs &mdash; where you get the <code>RUN_ID</code> every other command wants.</td></tr>
+          <tr><td class="cmd">status [id]</td><td><span class="when w-any">any time</span></td><td>Run + sprint state. <code>--json</code> for scripting.</td></tr>
+          <tr><td class="cmd">tui</td><td><span class="when w-any">any time</span></td><td>Live dashboard. Cheaper than polling <code>status</code>.</td></tr>
+          <tr><td class="cmd">attach [id]</td><td><span class="when w-live">live only</span></td><td>tmux into the agent session. Detach with <code>Ctrl-b d</code> &mdash; do not kill the pane.</td></tr>
+          <tr><td class="cmd">stop --graceful</td><td><span class="when w-live">live only</span></td><td>&rarr; STOPPED (resumable). Also suppresses pending auto-sweeps.</td></tr>
+          <tr><td class="cmd">stop</td><td><span class="when w-live">live only</span></td><td>&rarr; STOPPED (hard). Next <code>run</code>/<code>sweep</code> reconciles leaked worktrees.</td></tr>
+          <tr><td class="cmd">stop --cancel-graceful</td><td><span class="when w-live">graceful pending</span></td><td>Withdraws the request; the run keeps going.</td></tr>
+          <tr><td class="cmd">resume RUN_ID</td><td><span class="when w-hold">paused / stopped clean</span></td><td>&rarr; LIVE, from the same point.</td></tr>
+          <tr><td class="cmd">resolve RUN_ID</td><td><span class="when w-hold">CRITICAL only</span></td><td>Disambiguates the spec, re-arms, then prompts to resume. <code>--no-interactive</code> if you already fixed it by hand.</td></tr>
+          <tr><td class="cmd">confirm --list</td><td><span class="when w-any">any time</span></td><td>Which stories are parked and what each one owes you.</td></tr>
+          <tr><td class="cmd">confirm STORY_KEY</td><td><span class="when w-hold">story parked</span></td><td>Completes it. Independent of whether a run is live. <code>--reverify</code> re-runs the verify gate first.</td></tr>
+          <tr><td class="cmd">decisions</td><td><span class="when w-hold">sweep left questions</span></td><td>Answers triage questions a sweep could not settle alone.</td></tr>
+          <tr><td class="cmd">sweep</td><td><span class="when w-any">no live run</span></td><td>Works the deferred-work ledger. <code>auto = never</code> here, so it is always your call.</td></tr>
+          <tr><td class="cmd">diagnose [id]</td><td><span class="when w-any">any time</span></td><td>Sanitized dump to hand to maintainers. Never mutates the run.</td></tr>
+          <tr><td class="cmd">cleanup</td><td><span class="when w-term">terminal runs</span></td><td>Kills leftover tmux sessions and windows.</td></tr>
+          <tr><td class="cmd">clean</td><td><span class="when w-term">terminal runs</span></td><td>Reclaims disk. Paused runs are never touched, so they stay resumable.</td></tr>
+          <tr><td class="cmd">archive RUN_ID</td><td><span class="when w-term">terminal runs</span></td><td>Compresses into <code>.bmad-loop/archive</code>. <code>--force</code> stops a live run first.</td></tr>
+          <tr><td class="cmd">delete RUN_ID</td><td><span class="when w-term">terminal runs</span></td><td>Removes the run directory. Progress survives &mdash; it lives in git and sprint-status.yaml.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">Rule of thumb: <strong>green</strong> commands are read-only and never wrong to run. <strong>Blue</strong> ones need a live run, <strong>amber</strong> ones need something waiting on you, and <strong>grey</strong> ones need the run to be over.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span> Inside one story</h2>
+    <p>This is the cycle the loop repeats 24 times. You are not in it &mdash; unless it hits one of the two exits on the left.</p>
+
+    <figure class="sheet">
+      <div class="sheet-bar"><span>Single story &mdash; worktree to merge</span><span class="ref">SHT&nbsp;03</span></div>
+      <div class="canvas">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#E6EAEA','primaryColor':'#F4F7F7','primaryTextColor':'#14191B','primaryBorderColor':'#2C5F7E','lineColor':'#475357','secondaryColor':'#D8E0E3','tertiaryColor':'#EDF1F1','fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
+flowchart TD
+  P["story taken off sprint-status.yaml"] --> WT["fresh worktree + branch<br/>gitignored MCP/CLI configs seeded in"]
+  WT --> DEV["dev session<br/>claude /bmad-build-auto STORY_KEY"]
+
+  DEV -->|spec is contradictory| ESC["escalate &mdash; run PAUSES<br/>you run: resolve"]
+  DEV -->|needs your hands| OPR["commit, park at awaiting-operator<br/>you run: confirm"]
+  DEV -->|flags followup_review_recommended| REV["review session<br/>max 3 cycles"]
+  DEV -->|clean, no review asked| GATE
+  REV --> GATE["VERIFY GATE &mdash; orchestrator runs it, not the agent"]
+
+  GATE --> G1["npm ci --no-audit --no-fund"]
+  G1 --> G2["npm run check"]
+  G2 --> G3["no first-party .ts/.js outside src/"]
+  G3 --> G4[".agents/skills/ unmodified"]
+
+  G4 -->|all four pass| OK["commit &rarr; merge branch into main &rarr; delete branch"]
+  G4 -->|any fail| AGAIN["retry dev &mdash; 2 attempts max"]
+  AGAIN --> DEV
+  AGAIN -->|attempts spent| KEPT["worktree + branch kept for inspection"]
+  OK --> NEXT["next story"]
+</pre>
+      </div>
+      <figcaption>The verify gate is deterministic and runs <em>after</em> review, <em>before</em> commit &mdash; which is why <code>npm ci</code> comes first (a fresh worktree has no <code>node_modules</code>) and why the <code>.agents/skills/</code> check catches uncommitted edits a self-committing session would have hidden.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span> When a lamp lights</h2>
+    <p>A desktop notification fires and an <code>ATTENTION</code> file lands in <code>.bmad-loop/runs/&lt;run-id&gt;/</code>. One <code>status</code> call tells you which of five things happened.</p>
+
+    <figure class="sheet">
+      <div class="sheet-bar"><span>Triage &mdash; notification to command</span><span class="ref">SHT&nbsp;04</span></div>
+      <div class="canvas">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#E6EAEA','primaryColor':'#F4F7F7','primaryTextColor':'#14191B','primaryBorderColor':'#2C5F7E','lineColor':'#475357','secondaryColor':'#D8E0E3','tertiaryColor':'#EDF1F1','fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
+flowchart LR
+  N["notification<br/>+ ATTENTION file"] --> Q{"bmad-loop status"}
+  Q -->|paused, epic done| A["read the epic's commits<br/>bmad-loop resume RUN_ID"]
+  Q -->|paused, CRITICAL| B["bmad-loop resolve RUN_ID"]
+  Q -->|running, story parked| C["confirm --list<br/>do the external action<br/>confirm STORY_KEY"]
+  Q -->|sweep needs an answer| D["bmad-loop decisions"]
+  Q -->|looks broken| E["bmad-loop diagnose RUN_ID"]
+</pre>
+      </div>
+      <figcaption>Only the first two hold the line. A parked story does not stop the run &mdash; the loop commits what it built and moves on, and you clear the backlog of parked stories whenever it suits you.</figcaption>
+    </figure>
+
+    <div class="cards">
+      <div class="card sig-hold">
+        <span class="lamp">Epic gate</span>
+        <h3>The normal checkpoint</h3>
+        <p>Fires after the last story of an epic commits, because <code>gates = "per-epic"</code>. Read the diff, then release the line.</p>
+        <div class="fix">git log --oneline main
+bmad-loop resume RUN_ID</div>
+      </div>
+
+      <div class="card sig-stop">
+        <span class="lamp">CRITICAL escalation</span>
+        <h3>The spec is wrong</h3>
+        <p>Dev and review found a gap or a contradiction neither can safely settle &mdash; including review writing a story back off <code>done</code>.</p>
+        <div class="fix">bmad-loop resolve RUN_ID
+# or, spec fixed by hand:
+bmad-loop resolve RUN_ID --no-interactive</div>
+      </div>
+
+      <div class="card sig-go">
+        <span class="lamp">awaiting-operator</span>
+        <h3>Code is done, the world is not</h3>
+        <p>The story shipped and committed, but its criteria need a human: start Docker, publish DNS, grant a key. Several stories here are shaped exactly this way.</p>
+        <div class="fix">bmad-loop confirm --list
+bmad-loop confirm STORY_KEY --reverify</div>
+      </div>
+
+      <div class="card">
+        <span class="lamp">Deferred work</span>
+        <h3>The ledger, on your schedule</h3>
+        <p><code>sweep.auto = "never"</code>, so nothing is swept behind your back. Work it between runs.</p>
+        <div class="fix">bmad-loop sweep --dry-run
+bmad-loop sweep --min-severity high
+bmad-loop decisions</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span> Muscle memory</h2>
+    <p>Two chains cover almost every session. Learn these and read the tables only when something unusual happens.</p>
+
+    <div class="cards">
+      <div class="seq">
+        <h3>Starting a shift</h3>
+        <ol>
+          <li>bmad-loop validate <span>&mdash; is the bench clean?</span></li>
+          <li>bmad-loop run --epic 1 --dry-run <span>&mdash; is the plan right?</span></li>
+          <li>bmad-loop run --epic 1 <span>&mdash; start the line</span></li>
+          <li>bmad-loop tui <span>&mdash; second terminal, watch it</span></li>
+          <li>bmad-loop resume RUN_ID <span>&mdash; at the gate</span></li>
+        </ol>
+      </div>
+
+      <div class="seq">
+        <h3>Ending a shift</h3>
+        <ol>
+          <li>bmad-loop stop RUN_ID --graceful <span>&mdash; finish the story first</span></li>
+          <li>bmad-loop status RUN_ID <span>&mdash; confirm it landed</span></li>
+          <li>bmad-loop resume RUN_ID <span>&mdash; tomorrow, same point</span></li>
+          <li>bmad-loop confirm --list <span>&mdash; clear anything parked</span></li>
+          <li>bmad-loop cleanup &amp;&amp; bmad-loop clean <span>&mdash; once finished</span></li>
+        </ol>
+      </div>
+    </div>
+
+    <p class="note">One thing this board cannot show you: <code>session_budget_mode = "warn"</code> means a runaway session gets a notification but is <strong>not</strong> killed at the 4M-token cap. Before leaving the line unattended overnight, consider setting it to <code>"enforce"</code>.</p>
+  </section>
+
+  <footer>
+    Read off <code>.bmad-loop/policy.toml</code> and <code>bmad-loop --help</code> in <code>mastra-factory</code>, 22 September 2026. Change the policy and the diagrams above stop being true &mdash; particularly <code>gates</code>, <code>scm.isolation</code>, <code>sweep.auto</code> and <code>operator.enabled</code>.
+  </footer>
+
+</div>
+
+<script type="module">
+  // Diagrams need network access the first time this page is opened.
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+</script>
+</body>
+</html>
