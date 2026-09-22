@@ -1,4 +1,5 @@
 node_modules/
+.idea/
 .env
 .env.*
 !.env.example
@@ -6,3 +7,7 @@ node_modules/
 .mastra/
 *.log
 .DS_Store
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+_bmad/render/
