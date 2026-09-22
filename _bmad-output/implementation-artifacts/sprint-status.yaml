@@ -43,12 +43,12 @@ development_status:
   epic-1-retrospective: optional
 
   epic-2: backlog
-  2-1-operator-a-sandbox-image-that-carries-git-and-gh: backlog
-  2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider: backlog
-  2-3-identity-this-machine-owns-with-organizations: backlog
-  2-4-operator-sign-in-on-loopback-and-land-in-an-organization: backlog
-  2-5-operator-a-session-gets-a-real-container-and-the-cap-holds: backlog
-  2-6-operator-close-registration-before-anything-is-public: backlog
+  2-1-operator-a-sandbox-image-that-carries-git-and-gh: done
+  2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider: done
+  2-3-identity-this-machine-owns-with-organizations: done
+  2-4-operator-sign-in-on-loopback-and-land-in-an-organization: done
+  2-5-operator-a-session-gets-a-real-container-and-the-cap-holds: done
+  2-6-operator-close-registration-before-anything-is-public: done
   epic-2-retrospective: optional
 
   epic-3: backlog

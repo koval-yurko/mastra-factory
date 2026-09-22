@@ -51,9 +51,27 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 # keeping the scan from descending into the worktree copies under
 # .bmad-loop/runs/, which vitest's defaults DO collect (they are gitignored, but
 # vitest does not read .gitignore).
+#
+# `varlock load` resolves .env.schema, which nothing else in the gate opens:
+# `tsc` is include: ["src/**/*"], vitest runs --dir src and its preamble deletes
+# every variable the entry reads, and neither guard below looks at a non-.ts
+# file. So an unresolvable schema — an unbalanced quote in a decorator, a key
+# wrongly marked required — ships green and first appears as a crash-looping
+# launchd job, because `npm start` is `varlock run -- mastra start`. It resolves
+# the schema alone here: .env is gitignored and absent from a story worktree.
+#
+# That absence is also the constraint this command imposes: with no .env every
+# value is empty, so an UNCONDITIONAL `@required` anywhere in .env.schema fails
+# this gate in every story worktree, whether or not the declaration is right.
+# Every @required in the schema today is conditional (`@required=not(isEmpty(
+# $OTHER_KEY))`) and stays false while its dependency is empty, which is why the
+# gate is green. A key that genuinely must be supplied in production is declared
+# the same conditional way, or documented as required in prose — never as a bare
+# `@required`, which this gate cannot distinguish from the mistake above.
 commands = [
   "npm ci --no-audit --no-fund",
   "npm run check",
+  "npx varlock load --format json",
   '''sh -c 'git ls-files "*.ts" "*.js" "*.mjs" "*.cjs" | grep -v "^src/" && exit 1 || exit 0' ''',
   '''sh -c 'git status --porcelain -- .agents/skills | grep . && exit 1 || exit 0' ''',
   "npm test",

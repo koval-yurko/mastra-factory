@@ -164,3 +164,138 @@ source_spec: `spec-1-4-operator-a-working-container-engine-and-a-healthy-postgre
 severity: low
 reason: NFR18 requires the example file to mirror the schema shape-for-shape, and this change hand-mirrored an eleven-line comment block plus the key into both. The five `[verify].commands` never parse either file, so a one-sided edit ships green. Pre-existing: both files and the mirroring convention predate this story. Smallest fix: a check asserting the set of key names in `.env.example` (commented out) equals the set declared in `.env.schema`.
 status: open
+
+### DW-22: `docs/Self-hosting research.md` §2.1 still carries a verbatim, unmarked copy of the image definition, and its build commands name an `-f` path that no longer resolves from the repository root plus a
+origin: spec-deferred a1e0fb683d69
+location: docs/Self-hosting research.md §2.1 / §2.2 / §8 vs sandbox/
+source_spec: `spec-2-1-operator-a-sandbox-image-that-carries-git-and-gh.md`
+severity: medium
+reason: A `diff` of §2.1 lines 96–117 against `sandbox/factory-sandbox.Dockerfile` shows only the two fences and the filename comment differing — every instruction line is identical. AD-5 requires a code block in `docs/` to be illustrative and marked non-normative; `grep -rn "non-normative" docs/` returns nothing. §2.1 line 120 and §8 line 490 both read `-f factory-sandbox.Dockerfile` (unresolvable from root now that the file lives under `sandbox/`) with `-t factory-sandbox:2026-09-22`, a date the `date +%F` build will never produce. §2.2 additionally states the `FACTORY_SANDBOX_MEMORY_GIB` / `FACTORY_SANDBOX_CPUS` / `MASTRACODE_SANDBOX_WORKDIR` values that `sandbox/README.md` now owns, so two documents can drift about the same keys. Not done here: this story sets `docs/` read-only because its section numbers are stable citation anchors. Making `docs/` link out rather than restate is Story 5.3's work (FR32), and Story 5.2 audits key ownership. Second instance of open DW-20, which records the
+status: open
+
+### DW-23: No gate command can read a Dockerfile, so the no-`COPY`, no-`latest` and `WORKDIR /workspace` invariants this story's acceptance criteria assert are hand-checked once and unenforced afterwards.
+origin: spec-deferred c63fae638826
+location: .bmad-loop/policy.toml [verify].commands / sandbox/factory-sandbox.Dockerfile
+source_spec: `spec-2-1-operator-a-sandbox-image-that-carries-git-and-gh.md`
+severity: medium
+reason: The five `[verify].commands` are `npm ci`, `npm run check` (`tsc --noEmit`, `include: ["src/**/*"]`), a path guard filtering `*.ts *.js *.mjs *.cjs`, a `.agents/skills` status guard, and `npm test` (`vitest run --dir src`). None of them parses a `.Dockerfile` or a `.md`: adding a `COPY . /workspace`, retagging to `latest`, or moving `WORKDIR` leaves all five exiting 0. Smallest fix: three `sh -c` grep guards appended to `[verify].commands`, following the `&& exit 1 || exit 0` idiom the two existing guards already use. Not done here: `.bmad-loop/policy.toml` is orchestrator surface this story's intent sets read-only. Same shape as open DW-14 (nothing can parse `docker-compose.yml`).
+status: open
+
+### DW-24: Whether `/usr/share/keyrings` exists in `node:22-bookworm-slim` is unverified; if it does not, the `curl -o` write fails and the build dies at the operator's first action.
+origin: spec-deferred d9cff73d2206
+location: sandbox/factory-sandbox.Dockerfile:5-6
+source_spec: `spec-2-1-operator-a-sandbox-image-that-carries-git-and-gh.md`
+reason: The image writes `/usr/share/keyrings/githubcli-archive-keyring.gpg` with `curl -o` and never creates the directory, while GitHub's own Debian instructions open with `mkdir -p -m 755 /usr/share/keyrings` precisely because it is not guaranteed. Debian base images normally ship it via `debian-archive-keyring`, which is why the inherited §2.1 recipe omits the `mkdir` — but no container engine exists on this host, so it could not be observed either way, and the Dockerfile is pinned to §2.1's content by this story's acceptance criteria. What would settle it: `docker run --rm node:22-bookworm-slim ls -d /usr/share/keyrings`, or simply the operator's first `docker build`. The failure is loud and immediate, and `sandbox/README.md`'s "If the build fails" section already names the `mkdir -p` fix, so the cost of being wrong is one retry rather than a silent defect.
+status: open
+
+### DW-25: The build context is the repository root with no `.dockerignore`, so `node_modules/`, `.git/`, `_bmad-output/` and `.env` are transferred to the engine on every build even though the image copies
+origin: spec-deferred dfd1f11b1a9d
+location: sandbox/README.md build command / repository root (.dockerignore absent)
+source_spec: `spec-2-1-operator-a-sandbox-image-that-carries-git-and-gh.md`
+severity: low
+reason: `docker build … -f sandbox/factory-sandbox.Dockerfile … .` makes the repo root the context; there is no `.dockerignore` anywhere in the tree, and `node_modules/` alone is over 1 GB here before the `.bmad-loop/runs/` worktrees. Nothing lands in the image — the Dockerfile has no `COPY`/`ADD` — so the cost is transfer time, plus `.env` (which holds `POSTGRES_PASSWORD`) being sent to the daemon. Not done here, two ways: the epic's acceptance criterion pins the build command's trailing `.`, and a root `.dockerignore` would add a file to the closed root set AD-3 defines, which is a spine decision rather than a local call. Either fix — narrowing the context to `sandbox/`, or adding the ignore file to the root allowlist — needs that decision first. `sandbox/README.md` documents the cost in the meantime.
+status: open
+
+### DW-26: Session containers are long-lived, one per session, with no idle teardown and nothing reaping them, so they accumulate for the life of the host and the VM disk is the real limit.
+origin: spec-deferred 76029d7616d5
+location: sandbox/README.md / src/mastra/index.ts dockerSandboxOptions
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: medium
+reason: `@mastra/docker`'s `clone()` doc states `idleTimeoutMinutes` is ignored because "Docker containers have no provider-side idle teardown", and the entry stops nothing. Each container holds a checkout plus `node_modules`. The package labels every one `mastra.sandbox`, so `docker ps -a --filter label=mastra.sandbox=true` is the handle a cleanup procedure would use. Not done here: lifecycle and the concurrency cap are Story 2.5's subject ("a session gets a real container, and the cap holds"), and nothing can be observed without a running engine.
+status: open
+
+### DW-27: No concurrency cap exists at all — `MASTRACODE_MAX_SANDBOXES` is read by nothing, so Story 2.5's acceptance criterion that a session past the maximum returns an actionable error naming the cap is not
+origin: spec-deferred cc76107e9bd6
+location: _bmad-output/planning-artifacts/epics.md Story 2.5 / .env.schema MASTRACODE_MAX_SANDBOXES
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: medium
+reason: `grep -rl MAX_SANDBOXES node_modules` returns nothing, and `@mastra/factory/dist/factory.js:259` states: "'maxSandboxes' is gone with the sandbox fleet — there is one sandbox per session and no pool to cap." Every statement this story could reach was corrected to say the key records the sizing rather than enforcing it, but the capability itself is absent: a fourth concurrent session gets its own full 10 GiB / 4-core ceiling and the 32 GiB VM is oversubscribed. What this needs: either a first-party cap in the entry (new behaviour, and the actionable-error wording is Story 2.5's to specify) or Story 2.5 re-scoped against what `@mastra/factory@0.15.0` actually offers. Not a call this story can make.
+status: open
+
+### DW-28: `ARCHITECTURE-SPINE.md` and the canonical `SPEC.md` both still state that `@mastra/docker` is not installed, which this story makes false.
+origin: spec-deferred 5b69817a8e29
+location: ARCHITECTURE-SPINE.md:236-243 / spec-self-hosted-factory/SPEC.md:110
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: low
+reason: `ARCHITECTURE-SPINE.md` lines 236-243 list `@mastra/docker` under "**Planned, not yet resolved** — … Neither is in `package.json` or `node_modules` as of 2026-09-22", and `_bmad-output/specs/spec-self-hosted-factory/SPEC.md:110` says "neither is installed". Both were accurate when written and both carry "Re-verify at install", which this story did: `0.8.0` resolved, peer `>=1.67.0-0 <2.0.0-0` satisfied by core `1.67.0`. Not done here: `SPEC.md` is the canonical requirements contract and the spine is the architecture record; a story amending either from inside an epic is how those documents stop being trustworthy. `@mastra/auth-better-auth` in the same table is still genuinely uninstalled, so the row cannot simply be deleted — Story 2.3 will falsify that half.
+status: open
+
+### DW-29: `AGENTS.md` states `.bmad-loop/policy.toml` is gitignored and exists only in the main checkout. It is tracked, deliberately, and that false sentence caused Story 2.1 to defer a gate fix it could have
+origin: spec-deferred da23966be0e8
+location: AGENTS.md:46-49 vs .gitignore:10-12
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: medium
+reason: `git check-ignore -v .bmad-loop/policy.toml` exits 1 and `git ls-files .bmad-loop/` lists it, while `.gitignore:12` carries the comment "`.bmad-loop/policy.toml` is deliberately TRACKED: Story 1.2 must extend …". `AGENTS.md:46-49` says the opposite. Story 2.1's deferred item 2 ("no gate command can read a Dockerfile") was parked on the premise that the file "is gitignored orchestrator surface"; this story verified otherwise and added a gate command directly. Story 2.1's item 2 is therefore actionable now, not blocked. Not done here: `AGENTS.md` is an agent-context file and is regenerated by `bmad-project-context`; editing the managed block by hand is replaced on refresh.
+status: open
+
+### DW-30: Three keys in `.env.schema` still use `@type=string(matches=...)`, a form varlock deprecates in favour of `regex(...)`, and the new gate command surfaces the warning.
+origin: spec-deferred ae8f1165f22e
+location: .env.schema MASTRACODE_MAX_SANDBOXES / MASTRA_PLATFORM_GITHUB_POLLING_INTERVAL_MS / MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: low
+reason: Running `npx varlock load --format json` against an invalid config prints, for each of `MASTRACODE_MAX_SANDBOXES`, `MASTRA_PLATFORM_GITHUB_POLLING_INTERVAL_MS` and `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS`: "string patterns are deprecated, use regex() instead … a future major version will stop reading a string as a regex". `varlock` is pinned `^1.9.0`, so that major is reachable by a routine update, and the constraint would then be read as a literal string rather than a pattern — silently admitting any value. Not done here: the three annotations are pre-existing and this story added none of them (its own two were deleted in the first review pass). Two of the three keys are interval knobs with nothing to do with the sandbox, and the fix is one substitution per key across a file three stories now edit — better done once, deliberately, than folded into an unrelated change.
+status: open
+
+### DW-31: The DW-27 and DW-29 headings in the deferred-work ledger end mid-sentence, because the writer truncates the summary it copies from a spec's `deferred` entry.
+origin: spec-deferred 6edfb51f08df
+location: _bmad-output/implementation-artifacts/deferred-work.md DW-27 / DW-29
+source_spec: `spec-2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider.md`
+severity: low
+reason: `deferred-work.md` DW-27 ends "… naming the cap is not" and DW-29 ends "… a gate fix it could have"; the corresponding `summary` fields in this spec's frontmatter end "… is not implementable with the installed packages" and "… a gate fix it could have made". Both entries' `reason:` fields carry the full claim, so no information is lost — only the one-line heading a sweep reads first is cut. Every earlier DW entry written from a shorter summary is intact, which points at a length limit in the writer rather than at these two entries. Not done here: `deferred-work.md` is the orchestrator's ledger and this session is instructed not to modify existing entries; the fix belongs in whatever writes them.
+status: open
+
+### DW-32: `@mastra/auth-workos` is now an unused root dependency: this story removed its only first-party import, and nothing under `src/` references it.
+origin: spec-deferred ea94c665404a
+location: package.json dependencies['@mastra/auth-workos']
+source_spec: `spec-2-3-identity-this-machine-owns-with-organizations.md`
+severity: low
+reason: `grep -n 'MastraAuthWorkos\|@mastra/auth-workos' src/mastra/index.ts` returns nothing after this change, while `package.json` still carries `"@mastra/auth-workos": "1.6.5"`. Removing it is safe in principle — `@mastra/factory@0.15.0` declares the same exact `1.6.5` as a direct dependency, so the package stays in the tree and its `envFallbackAuthProvider` keeps working — which is also why nothing observable changes either way. Not done here: NFR20 makes a dependency-tree change something to re-verify and record deliberately, and this story's package.json task is the single addition it was scoped to. The natural owner is Epic 5's dependency and extraction work.
+status: open
+
+### DW-33: `AGENTS.md` tells agents to leave `WORKOS_*` unset, while the env files now tell an operator to keep `WORKOS_COOKIE_PASSWORD` set so the OAuth/link `state` signer survives a restart.
+origin: spec-deferred 030fc2a55be0
+location: AGENTS.md:66-69 vs .env.schema "WorkOS (legacy)" section / src/mastra/index.ts stateSecret
+source_spec: `spec-2-3-identity-this-machine-owns-with-organizations.md`
+severity: low
+reason: `AGENTS.md:66-69` lists `WORKOS_*` among the variables that must stay unset or "self-hosting silently defers back to Mastra's platform". After this story that is only half true: the credential pair is inert, but `WORKOS_COOKIE_PASSWORD` is still read at `src/mastra/index.ts` in the `stateSecret` fallback chain, and `.env.schema` now says so explicitly. The cleaner resolution is to stop depending on a WorkOS key at all: this story introduced `BETTER_AUTH_SECRET`, a deployment-stable secret that is a better `state`-signer fallback than a WorkOS cookie password, which would retire the last reason any `WORKOS_*` key stays alive. Not done here: the fix edits `AGENTS.md`, an agent-context file regenerated by `bmad-project-context`, and changing the signer chain is behaviour this story did not need.
+status: open
+
+### DW-34: `MASTRACODE_BOOTSTRAP_PERSONAL_ORG` remains declared, `@public` and `@type`-validated in `.env.schema` while nothing in the server or the installed packages reads it.
+origin: spec-deferred 8effee78b917
+location: .env.schema MASTRACODE_BOOTSTRAP_PERSONAL_ORG / .env.example
+source_spec: `spec-2-3-identity-this-machine-owns-with-organizations.md`
+severity: low
+reason: `grep -rn MASTRACODE_BOOTSTRAP_PERSONAL_ORG src node_modules/@mastra` returns nothing; the only hits are the declarations in `.env.schema` and `.env.example`. It was already unread before this story — the WorkOS provider never consulted it — so this is pre-existing, and this diff only documents it as unused. A fully-typed declaration in the canonical key list still reads as a live switch, and an operator who sets it to `0` gets personal organizations anyway. Not done here: deleting a declared key is a decision about the key list rather than about auth selection, and `.env.schema` is edited by several stories in sequence.
+status: open
+
+### DW-35: `MASTRA_HOST` and `PORT` appear in neither `.env.schema` nor `.env.example`, so "copy `.env.example` to `.env`" cannot produce two of the seven values the first sign-in needs, and `.env.example`'s
+origin: spec-deferred 5796d418a22c
+location: .env.schema / .env.example vs README.md "Start the Factory Server" step 1
+source_spec: `spec-2-4-operator-sign-in-on-loopback-and-land-in-an-organization.md`
+severity: low
+reason: `grep -nE 'MASTRA_HOST|^PORT' .env.schema .env.example` returns nothing, while `README.md`'s step 1 now requires both. `.env.example:2-3` reads "every value is optional — features light up as their variables are set", which is false for these two on the loopback path: unset, `MASTRA_HOST` puts the open sign-up form on every interface and an unset `PORT` lets the CLI drift off the origin `MASTRACODE_PUBLIC_URL` names. `AGENTS.md:61-63` makes `.env.schema` the only list of keys, so an undeclared key the committed procedure requires is off-list by the repo's own rule. Not done here: `epics.md:681-684` is Story 3.2's acceptance criterion verbatim — "`MASTRA_HOST` and `PORT` are declared in `.env.schema` rather than left undeclared … and their values are marked `@public`". Declaring them in this story would take that criterion. Verified this session that the gap is inert for the path this story documents: `varlock load --format json` against a `.env` carrying both keys exits 0 and passes
+status: open
+
+### DW-36: The concurrency cap counts the session sandboxes the CURRENT server process handed out, so containers that outlive a restart are not counted and the host can end up running more session containers
+origin: spec-deferred b294a61a59c6
+location: src/mastra/index.ts `liveDockerSandboxes` / `admitDockerSession`
+source_spec: `spec-2-5-operator-a-session-gets-a-real-container-and-the-cap-holds.md`
+severity: low
+reason: `src/mastra/index.ts` `liveDockerSandboxes` is a module-level `Map` populated by `selectSandbox`'s docker branch, so it starts empty on every boot. Session containers have no idle teardown (`deferred-work.md` DW-26) and `@mastra/docker/dist/index.js:794-804` reattaches by querying the daemon for `mastra.sandbox.id=<id>`, so the containers themselves survive a restart while the registry does not: restart with three containers still up and three more sessions are admitted, for six containers on a host sized for three. Not done here: closing it needs the real occupancy from the engine — `listContainers` filtered on `mastra.sandbox=true` — which is async, while the slot Factory calls is `(ctx: FactorySandboxContext) => MastraSandbox`, synchronous, with the documented contract that "construction must be cheap and side-effect-free" (`sandbox/session-sandbox.d.ts:36,54`). There is nowhere to await it without either an async slot the type forbids or a dockerode client in the entry, which AD-2
+status: open
+
+### DW-37: Closing registration leaves no self-service password recovery and no documented way to add a second operator — and a second account would not see the first account's work anyway.
+origin: spec-deferred 116064269ef9
+location: README.md "Start the Factory Server" step 3 / Troubleshooting
+source_spec: `spec-2-6-operator-close-registration-before-anything-is-public.md`
+severity: low
+reason: No email sending is configured anywhere in this deployment, so better-auth's reset-password flow has no transport; with sign-up closed, a locked-out operator's only path is the same source edit README step 3 now documents, which is not labelled as recovery. Separately, the personal-org bootstrap keys on the user id (`personal-<user id>`, `@mastra/auth-better-auth/dist/index.js` `ensureOrganization`), so a second account lands in its own organization and sees none of the first account's projects, stored credentials or GitHub connection — every integration is org-scoped. Not done here: both are pre-existing consequences of the Story 2.3/2.4 identity design rather than of this diff, and documenting multi-operator semantics is new content about a scenario this single-operator deployment has not reached. The natural owner is whichever story first adds a second human.
+status: open
+
+### DW-38: `docs/Self-hosting research.md` is now the one committed document describing a different account-creation mechanism from `README.md` step 3.
+origin: spec-deferred d0b5746eb552
+location: docs/Self-hosting research.md §6-7 vs README.md step 3
+source_spec: `spec-2-6-operator-close-registration-before-anything-is-public.md`
+severity: low
+reason: `docs/Self-hosting research.md:235,497-502,597` describe the sequence as "create the account on loopback with `signUpEnabled: true`, then flip to `false` before the tunnel" — accurate as the plan and as history, but a reader who lands there rather than in `README.md` will not find the reopen-and-restore procedure step 3 now specifies, nor the probe that verifies it. Not done here: `AGENTS.md:26-27` makes that file's section numbers stable citation anchors used across the spec and stories, and `epics.md` assigns the file to Story 5.3, which renames and rewrites it. Editing its prose from this story risks the anchors for a divergence that is currently only a difference of detail, not a false statement.
+status: open

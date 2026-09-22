@@ -11,7 +11,7 @@ obtain it, and for the order the bring-up commands run in.
 
 `colima start` creates and activates a docker context for its socket, so the `docker` CLI and
 `docker compose` usually resolve it without this variable. `DOCKER_HOST` covers the consumers that do not
-read docker contexts — dockerode, which the server will use once the Docker sandbox lands, and any
+read docker contexts — dockerode, which the server uses for the Docker sandbox provider, and any
 process `launchd` starts — and it overrides the context when set, which is why bring-up exports it.
 
 **What the value must contain.** A `unix://` URL whose path is the absolute path to the Unix socket of

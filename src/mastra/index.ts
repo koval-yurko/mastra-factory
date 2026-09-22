@@ -23,18 +23,21 @@ import { Mastra } from '@mastra/core/mastra';
 import { LibSQLFactoryStorage } from '@mastra/libsql';
 import { PgVector, PgFactoryStorage } from '@mastra/pg';
 import { LocalSandbox } from '@mastra/core/workspace';
+import { DockerSandbox, type DockerSandboxOptions } from '@mastra/docker';
 import { PlatformSandbox, createRepoTemplate as createPlatformRepoTemplate } from '@mastra/platform-workspace';
 import { E2BSandbox, createRepoTemplate as createE2BRepoTemplate } from '@mastra/e2b';
 import { RedisStreamsPubSub } from '@mastra/redis-streams';
 import { getDatabasePath } from '@mastra/code-sdk/utils/project';
 import { DEFAULT_RETENTION } from '@mastra/code-sdk/utils/storage-maintenance';
-import { MastraAuthWorkos } from '@mastra/auth-workos';
+import { MastraAuthBetterAuth } from '@mastra/auth-better-auth';
 import { createFactorySecretEncryption, MastraFactory } from '@mastra/factory';
 import { GithubIntegration } from '@mastra/factory/integrations/github/integration';
 import { parseAuthorizedBotsEnv } from '@mastra/factory/integrations/github/webhook';
 import { LinearIntegration } from '@mastra/factory/integrations/linear/integration';
 import { SlackIntegration } from '@mastra/factory/integrations/slack/integration';
 import type { IMastraAuthProvider } from '@mastra/core/server';
+import type { MastraSandbox } from '@mastra/core/workspace';
+import type { FactorySandboxContext } from '@mastra/factory';
 
 /**
  * Parse a positive-integer env knob; anything else means "use the default".
@@ -116,40 +119,94 @@ if (redisUrl) {
   console.log(`[PubSub] REDIS_URL set — event bus on Redis Streams (${redisTarget}), cross-process leases enabled.`);
 }
 
-// Auth selection, ordered by how explicit the operator's intent is:
-//   1. MASTRACODE_AUTH_DISABLED=1 — explicit opt-out, auth off entirely.
-//   2. MASTRA_SHARED_API_URL — explicit platform deferral; identity rides the
-//      shared platform API (`.env.schema` names this the highest-precedence
-//      auth config), so it wins even over a configured WORKOS_* pair — but
-//      loudly, because silently ignoring sign-in config is how self-hosted
-//      logins end up 302-ing somewhere that rejects their redirect_uri.
-//   3. WORKOS_API_KEY + WORKOS_CLIENT_ID — self-managed WorkOS sign-in. The
-//      constructor reads the rest of the WORKOS_* group from env, and
-//      `init()` derives the /auth/callback redirect from the deployment's
-//      publicUrl when WORKOS_REDIRECT_URI is unset. `fetchMemberships` lets
-//      token auth resolve the user's organization so the bootstrapped
-//      personal org works without re-auth. Note MASTRA_PLATFORM_ACCESS_TOKEN /
-//      MASTRA_PLATFORM_SECRET_KEY do NOT defer to the platform here: they are
-//      compute/integration credentials (sandboxes, GitHub/Linear slots), not
-//      identity signals — platform compute plus self-managed sign-in is a
-//      supported combination.
-//   4. Nothing configured — leave undefined and MastraFactory installs its
-//      platform-backed default provider.
-const authDisabled = process.env.MASTRACODE_AUTH_DISABLED === '1';
-const workosConfigured = Boolean(process.env.WORKOS_API_KEY?.trim() && process.env.WORKOS_CLIENT_ID?.trim());
-let auth: IMastraAuthProvider | null | undefined;
+/**
+ * Auth selection, ordered by how explicit the operator's intent is:
+ *   1. MASTRACODE_AUTH_DISABLED=1 — explicit opt-out, auth off entirely.
+ *   2. MASTRA_SHARED_API_URL — explicit platform deferral; identity rides the
+ *      shared platform API (`.env.schema` names this the highest-precedence
+ *      auth config), so it wins even over a configured BETTER_AUTH_SECRET —
+ *      but loudly, because silently ignoring sign-in config is how self-hosted
+ *      logins end up 302-ing somewhere that rejects their redirect_uri.
+ *   3. BETTER_AUTH_SECRET — self-managed sign-in this deployment owns, with no
+ *      external identity provider in the path. The provider is constructed in
+ *      DEFERRED-INSTANCE mode (a `secret`, no `auth` instance): `MastraFactory`
+ *      calls `init()` with the auth-database handle `FactoryStorage` exposes,
+ *      so the provider builds its own Better Auth instance on the SAME database
+ *      and connection string as the app tables (`DATABASE_URL`, or the local
+ *      libSQL file in bare dev), owns its migrations — lazily, on first
+ *      request, never at boot — and registers the organization plugin itself,
+ *      which is what gives org-scoped features a real org without a hosted IdP.
+ *      Nothing is passed here for the database or the browser-facing origin:
+ *      `init()` takes the handle from the host and derives the origin from the
+ *      factory's `publicUrl` (MASTRACODE_PUBLIC_URL, wired below), and a
+ *      bring-your-own `auth` instance would skip the plugin, the migrations and
+ *      the `/auth/api` base path entirely.
+ *      Note MASTRA_PLATFORM_ACCESS_TOKEN / MASTRA_PLATFORM_SECRET_KEY do NOT
+ *      defer to the platform here: they are compute/integration credentials
+ *      (sandboxes, GitHub/Linear slots), not identity signals — platform
+ *      compute plus self-managed sign-in is a supported combination.
+ *   4. Nothing configured — leave undefined and MastraFactory installs its
+ *      platform-backed default provider: `MastraAuthStudio`, which verifies
+ *      identity against https://platform.mastra.ai. That is a third party in
+ *      the sign-in path, and it is where a typo in BETTER_AUTH_SECRET's name
+ *      lands silently — so deleting or reordering an arm above is not a
+ *      failed sign-in, it is a working sign-in somewhere else.
+ *
+ * The chain is a function rather than module-level `if`/`else` because the
+ * ORDER is the guarantee — that a stray MASTRA_SHARED_API_URL still wins, and
+ * that nothing else does — and `vitest` cannot observe statements. Same reason
+ * `selectSandbox` below is exported.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it.
+ */
+export function selectAuth(): IMastraAuthProvider | null | undefined {
+  if (process.env.MASTRACODE_AUTH_DISABLED === '1') return null;
 
-if (authDisabled) {
-  auth = null;
-} else if (process.env.MASTRA_SHARED_API_URL?.trim()) {
-  if (workosConfigured) {
-    console.warn(
-      '[Auth] WORKOS_API_KEY/WORKOS_CLIENT_ID are set but ignored: MASTRA_SHARED_API_URL takes precedence, so sign-in defers to the platform. Unset MASTRA_SHARED_API_URL to use self-managed WorkOS auth.',
-    );
+  // A blank secret must never reach the constructor: `new MastraAuthBetterAuth({})`
+  // throws ("Better Auth instance is required…") at module load, taking the whole
+  // deployment down at boot with a message that names the wrong cause for an
+  // operator who simply forgot the key. So gate on a trimmed, non-empty value and
+  // otherwise fall through — exactly as an unconfigured WorkOS group did before.
+  const betterAuthSecret = process.env.BETTER_AUTH_SECRET?.trim();
+
+  if (process.env.MASTRA_SHARED_API_URL?.trim()) {
+    if (betterAuthSecret) {
+      console.warn(
+        '[Auth] BETTER_AUTH_SECRET is set but ignored: MASTRA_SHARED_API_URL takes precedence, so sign-in defers to the platform. Unset MASTRA_SHARED_API_URL to use self-managed Better Auth sign-in.',
+      );
+    }
+    return undefined;
   }
-} else if (workosConfigured) {
-  auth = new MastraAuthWorkos({ fetchMemberships: true });
+
+  if (betterAuthSecret) {
+    return new MastraAuthBetterAuth({
+      secret: betterAuthSecret,
+      // Registration is CLOSED: no one can create an account against this
+      // deployment, whoever reaches the sign-in page. This line is the whole
+      // switch, and it is written out rather than omitted because the package
+      // default is the opposite — `options.signUpEnabled ?? true` — so deleting
+      // it silently reopens sign-up with a diff that never mentions sign-up.
+      // It is deliberately NOT read from the environment: the guarantee is that
+      // no `.env` value, stray export or bad deploy config can reopen
+      // registration, so there is no key to set and nothing here to override.
+      // To add a second account, open this file, set the field to `true`,
+      // restart the server, create the account, set it back to `false` and
+      // restart again — a reviewable edit and a restart, on purpose, twice.
+      signUpEnabled: false,
+      // `MastraAuthBetterAuthOptions` is declared but not exported by the
+      // package, so the option type is named inline through the constructor
+      // rather than imported. It documents the shape; it does not enforce
+      // deferred-instance mode. `auth?` is a legal option on this type, so
+      // adding an `auth:` instance here would typecheck while skipping the
+      // organization plugin, the migrations and the `/auth/api` base path.
+      // Only review keeps that out.
+    } satisfies ConstructorParameters<typeof MastraAuthBetterAuth>[0]);
+  }
+
+  return undefined;
 }
+
+const auth = selectAuth();
 const secretEncryption = auth === null ? undefined : credentialEncryption();
 
 // Direct GitHub App fallback: when the platform-backed integration isn't in
@@ -219,6 +276,231 @@ export function localSandboxEnv(): Record<string, string> {
     if (value) env[key] = value;
   }
   return env;
+}
+
+// Hard ceilings for one Docker-sandbox session container. They are ceilings,
+// not reservations: `sandbox/README.md` explains why the numbers for this host
+// are what they are. That sizing assumes a concurrent-session count, and
+// `MASTRACODE_MAX_SANDBOXES` is that count — applied by `admitDockerSession`
+// below, which is the only place it can be applied: no installed package caps
+// concurrent sessions (`maxSandboxes` went away with the sandbox fleet — there
+// is one sandbox per session and no pool to cap), and the `sandbox:` slot is
+// the one piece of first-party code that runs before a session's container is
+// created.
+//
+// Docker's CPU limit is a CFS quota, which only means "N cores" relative to the
+// period it is divided by — so the period is pinned here rather than left to
+// the daemon's default, and the quota is always derived from it.
+const DOCKER_SANDBOX_CPU_PERIOD_US = 100_000;
+const DOCKER_SANDBOX_DEFAULT_CPUS = 4;
+const DOCKER_SANDBOX_DEFAULT_MEMORY_GIB = 10;
+// The third leg of the same arithmetic as the two ceilings above: 3 × 10 GiB is
+// this host's whole memory budget. Like them it is a default, not a switch —
+// there is no value meaning "unlimited", and a malformed one falls back here.
+const DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES = 3;
+const BYTES_PER_GIB = 1024 ** 3;
+// `HostConfig.PidsLimit`. An init process (`HostConfig.Init`, pinned below)
+// reaps the zombies an aborted command leaves behind, which is what keeps this
+// from leaking away over a long-lived session container.
+const DOCKER_SANDBOX_PIDS_LIMIT = 4096;
+// Default per-command timeout. The package default is 5 minutes, which a repo
+// install or a test suite routinely exceeds.
+const DOCKER_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_SANDBOX_WORKDIR = '/workspace';
+
+/**
+ * Build the Docker sandbox options for one session.
+ *
+ * Extracted from the `sandbox:` callback because these numbers are the part of
+ * the Docker branch that can silently be wrong — a quota computed against the
+ * wrong period, or gibibytes passed where bytes were meant, is invisible until
+ * a container either ignores its cap or is OOM-killed on sight. Nothing else in
+ * this repository can observe a `DockerSandboxOptions`, so they are asserted in
+ * `index.test.ts` instead.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it.
+ */
+export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
+  // No honest default exists. `DockerSandboxOptions.image` falls back to
+  // `node:22-slim`, which carries neither `git` nor `gh`, so a session started
+  // on it fails at first use with Factory's `git-missing` — the exact failure
+  // the purpose-built image exists to prevent. The only correct value is a tag
+  // someone built on this host, so refuse and name the key. The slot is called
+  // per session, so this surfaces at the first session rather than at boot.
+  const image = process.env.FACTORY_SANDBOX_IMAGE?.trim();
+  if (!image) {
+    throw new Error(
+      'FACTORY_SANDBOX_IMAGE is required when the docker sandbox provider is selected. Set it to an image ' +
+        'built on this host that carries git and the GitHub CLI (see sandbox/README.md); there is no safe default.',
+    );
+  }
+
+  const memoryGib = positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
+  const cpus = positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
+  const memoryBytes = memoryGib * BYTES_PER_GIB;
+
+  return {
+    // The sandbox identity Factory keys its get-or-create on, so a reconnecting
+    // session reattaches to its container instead of provisioning a second one.
+    id: sessionId,
+    image,
+    memory: memoryBytes,
+    // Equal to `memory`, which disables swap. Omitted, Docker defaults
+    // MemorySwap to twice Memory, so a "10 GiB cap" would really be 10 GiB of
+    // RAM plus 10 GiB of swap — double the budget this host is sized against.
+    memorySwap: memoryBytes,
+    cpuPeriod: DOCKER_SANDBOX_CPU_PERIOD_US,
+    cpuQuota: cpus * DOCKER_SANDBOX_CPU_PERIOD_US,
+    pidsLimit: DOCKER_SANDBOX_PIDS_LIMIT,
+    // `HostConfig.Init`. Pinned rather than left to the package's own default:
+    // Docker's `--init` is off by default and only `@mastra/docker` turns it
+    // on, so the zombie reaping `pidsLimit` above depends on — and that
+    // `sandbox/README.md` states as a property of every session container —
+    // would otherwise be a package default a minor upgrade could flip silently.
+    init: true,
+    timeout: DOCKER_SANDBOX_TIMEOUT_MS,
+    // The base-class option, NOT the package's deprecated same-named alias
+    // (`index.test.ts` pins that the alias is absent).
+    workingDirectory: process.env.MASTRACODE_SANDBOX_WORKDIR?.trim() || DEFAULT_SANDBOX_WORKDIR,
+    // No `dockerOptions`: dockerode reads DOCKER_HOST itself, and ops/README.md
+    // owns that key — re-reading it here would be a second source of truth.
+  };
+}
+
+/**
+ * The Docker session sandboxes this process has handed out, keyed by session id.
+ *
+ * Factory memoizes the instance the `sandbox:` slot returns
+ * (`@mastra/factory/dist/sandbox/session-sandbox.js`), so the slot is called
+ * once per NEW session id — which makes this map's size the number of session
+ * containers this process has asked for and not yet seen retired.
+ *
+ * It is module-level rather than a `selectSandbox` local because the cap has to
+ * outlive a single call, and it is passed into `selectSandbox` as a defaulted
+ * parameter so a test can supply its own instead of leaking state between tests.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it. Without the
+ * export no test can reach the map the production call site actually binds to,
+ * and defaulting the parameter to a fresh `new Map()` — which disables the cap
+ * entirely — would leave `tsc` and every test green.
+ */
+export const liveDockerSandboxes = new Map<string, MastraSandbox>();
+
+/**
+ * Refuse a new Docker session once `MASTRACODE_MAX_SANDBOXES` are already live.
+ *
+ * Occupancy is read from each sandbox's own lifecycle `status` rather than from
+ * a counter, because nothing hands this file a release hook: Factory retires a
+ * session by calling `stop()`/`destroy()` on the very instance the slot returned,
+ * and the core base class moves `status` to `stopped`/`destroyed` in those calls.
+ * Reading the status therefore IS the release hook, with nothing to keep in sync.
+ * Release is not instantaneous, though: `_executeStop` sets `stopping` and only
+ * reaches `stopped` once the container stop has completed, so the slot is held
+ * for the duration of the teardown. And a teardown that FAILS leaves `error`
+ * instead — the base class sets it when `stop()`/`destroy()` throws, and
+ * `SessionRetirementCoordinator` only warns — so that slot is held until the
+ * server process restarts.
+ *
+ * `error` is deliberately not treated as released. It is set when the start
+ * lifecycle throws, and the session setup (clone, checkout, setup command) runs
+ * after the container has already been created and started — so an errored
+ * sandbox very often still owns a running container, and freeing its slot would
+ * overcommit the host exactly when something is already wrong.
+ *
+ * The count is per server process. Containers have no idle teardown and a
+ * resumed session reattaches by a daemon label query, so containers outlive this
+ * map across a restart; closing that would need an async `docker ps` and the slot
+ * is a synchronous `(ctx) => MastraSandbox` whose construction must stay cheap.
+ * `sandbox/README.md` states the per-process scope.
+ */
+function admitDockerSession(sessionId: string, liveSessions: Map<string, MastraSandbox>): void {
+  for (const [id, sandbox] of liveSessions) {
+    if (sandbox.status === 'stopped' || sandbox.status === 'destroyed') liveSessions.delete(id);
+  }
+
+  // A session this process already holds a sandbox for is reattaching, not
+  // claiming a slot. Refusing it would make a resumed session unreachable
+  // whenever the server happens to be at its cap.
+  if (liveSessions.has(sessionId)) return;
+
+  const maxSandboxes = positiveInt(process.env.MASTRACODE_MAX_SANDBOXES) ?? DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
+  if (liveSessions.size < maxSandboxes) return;
+
+  throw new Error(
+    `MASTRACODE_MAX_SANDBOXES is ${maxSandboxes} and this server process already holds sandboxes for ` +
+      `${liveSessions.size} live sessions, so this session cannot be given one. Let a running session's work ` +
+      'item reach a terminal stage, or delete one of those sessions, to free a slot. Raise ' +
+      'MASTRACODE_MAX_SANDBOXES only if this host has memory for another container at ' +
+      'FACTORY_SANDBOX_MEMORY_GIB (see sandbox/README.md); there is no value that disables the cap.',
+  );
+}
+
+/**
+ * Pick the sandbox a session runs in. This is the `sandbox:` slot's whole body,
+ * named and exported so `index.test.ts` can pin the branch ORDER — which is the
+ * only thing holding agent work on this host, and is otherwise invisible to
+ * every check this repository has.
+ *
+ * `platformSandboxConfigured` is passed in rather than read here because the
+ * platform env group is evaluated once at module load (see
+ * `hasPlatformSandboxEnv`); keeping that read where it was makes this extraction
+ * behavior-preserving, and lets a test exercise the "platform IS configured"
+ * arm without smuggling a second read of those keys into this function.
+ * `liveSessions` is injected the same way, and for the same reason: the cap is
+ * per process, so its registry has to outlive the call.
+ *
+ * Exported for `index.test.ts` only — nothing else imports it.
+ */
+export function selectSandbox(
+  ctx: FactorySandboxContext,
+  platformSandboxConfigured: boolean,
+  liveSessions: Map<string, MastraSandbox> = liveDockerSandboxes,
+): MastraSandbox {
+  // The one and only read of the sandbox-provider key (the const below is it;
+  // `.env.schema` lists the name). `docker` is deliberately the FIRST branch,
+  // evaluated ahead of the platform and E2B checks: on a self-hosted deployment
+  // the guarantee that agent work stays on this host has to be structural, not
+  // contingent on a stray MASTRA_PROJECT_ID or E2B_API_KEY never appearing in
+  // `.env`. Any other value falls through unchanged, so an unrecognised
+  // provider never turns into a boot failure.
+  const sandboxProvider = process.env.FACTORY_SANDBOX_PROVIDER?.trim();
+  if (sandboxProvider === 'docker') {
+    // Order matters twice here. The image is resolved FIRST: a missing image
+    // breaks every session on this deployment, while the cap only refuses this
+    // one, so the more general failure is the one to report. And the sandbox is
+    // registered only after construction succeeded, so a throw never burns a
+    // slot. Both failures leave the docker branch by throwing rather than
+    // returning, which is what keeps a refusal from falling through to the
+    // Platform or E2B arms below and relocating the work off this host.
+    const options = dockerSandboxOptions(ctx.sessionId);
+    admitDockerSession(ctx.sessionId, liveSessions);
+    const sandbox = new DockerSandbox(options);
+    liveSessions.set(ctx.sessionId, sandbox);
+    return sandbox;
+  }
+
+  const useLocalSandbox = sandboxProvider === 'local';
+  if (!useLocalSandbox && platformSandboxConfigured) {
+    return new PlatformSandbox({
+      id: ctx.sessionId,
+      template: createPlatformRepoTemplate(ctx),
+    });
+  }
+
+  if (!useLocalSandbox && process.env.E2B_API_KEY?.trim()) {
+    return new E2BSandbox({
+      id: ctx.sessionId,
+      template: createE2BRepoTemplate(ctx),
+    });
+  }
+
+  return new LocalSandbox({
+    workingDirectory: join(
+      process.env.MASTRACODE_LOCAL_SANDBOX_ROOT?.trim() || join(homedir(), '.mastracode', 'web', 'sandboxes'),
+      ctx.sessionId,
+    ),
+    env: localSandboxEnv(),
+  });
 }
 
 // One FactoryStorage backend powers agent storage, the factory app tables,
@@ -299,30 +581,7 @@ export const factory = new MastraFactory({
   secretEncryption,
   integrations,
   configVersion: factoryConfigVersion,
-  sandbox: ctx => {
-    const useLocalSandbox = process.env.FACTORY_SANDBOX_PROVIDER?.trim() === 'local';
-    if (!useLocalSandbox && hasPlatformSandboxEnv) {
-      return new PlatformSandbox({
-        id: ctx.sessionId,
-        template: createPlatformRepoTemplate(ctx),
-      });
-    }
-
-    if (!useLocalSandbox && process.env.E2B_API_KEY?.trim()) {
-      return new E2BSandbox({
-        id: ctx.sessionId,
-        template: createE2BRepoTemplate(ctx),
-      });
-    }
-
-    return new LocalSandbox({
-      workingDirectory: join(
-        process.env.MASTRACODE_LOCAL_SANDBOX_ROOT?.trim() || join(homedir(), '.mastracode', 'web', 'sandboxes'),
-        ctx.sessionId,
-      ),
-      env: localSandboxEnv(),
-    });
-  },
+  sandbox: ctx => selectSandbox(ctx, hasPlatformSandboxEnv),
   // Per-replica cap on concurrent Factory background dispatches. Unset means
   // the dispatcher default; invalid and non-positive values are ignored.
   dispatcher: {
