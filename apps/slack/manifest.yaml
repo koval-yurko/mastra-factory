@@ -1,0 +1,91 @@
+# Slack app manifest for this deployment. Paste into api.slack.com/apps →
+# Create New App → From a manifest → YAML. See apps/slack/README.md for the
+# procedure, the scope-by-scope justification and the checkpoints.
+#
+# Structure mirrors the shape @mastra/slack's own buildManifest() emits
+# (node_modules/@mastra/slack/dist/index.js:276-320), which is never called on
+# this deployment's path — the URLs below are this deployment's, and two values
+# deliberately depart from that builder's defaults. Both departures are marked.
+display_information:
+  name: Mastra Factory
+  description: Self-hosted Mastra Factory — mention it in a channel or DM it to start a coding session.
+features:
+  app_home:
+    # The messages tab is what makes the bot addressable in a DM at all; with it
+    # off, a direct message to the app has nowhere to arrive.
+    messages_tab_enabled: true
+    # Off because Factory never calls views.publish — the adapter can publish a
+    # home view (@chat-adapter/slack/dist/index.js:3509-3510) but nothing in
+    # @mastra/factory reaches it, so the home tab would render empty.
+    home_tab_enabled: false
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Mastra Factory
+    always_online: true
+  # Present for exactly one call: Slack gates assistant.threads.setStatus on
+  # the assistant surface, and Factory always installs a typing-status function
+  # that reaches it (@mastra/factory/dist/integrations/slack/integration.js:5-12,61).
+  # That is also all the assistant:write scope below is for. The events this
+  # surface would deliver — assistant_thread_started and
+  # assistant_thread_context_changed — are deliberately NOT subscribed: bot
+  # events stay at the five the URL registry records.
+  assistant_view:
+    assistant_description: Ask Factory to pick up work, review a change, or explain what it just did.
+oauth_config:
+  redirect_urls:
+    - https://factory.kovalchuk.win/connect/slack/oidc/callback
+  scopes:
+    bot:
+      - chat:write
+      - chat:write.public
+      - im:write
+      - channels:history
+      - channels:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - app_mentions:read
+      - users:read
+      - reactions:write
+      - files:read
+      # DEPARTURE 1 from the vendor defaults: the adapter calls
+      # files.uploadV2 (@chat-adapter/slack/dist/index.js:4479) but
+      # buildManifest() omits the scope, so an agent reply carrying an
+      # attachment fails with missing_scope without this line.
+      - files:write
+      - assistant:write
+    # DEPARTURE 2 from the vendor defaults: buildManifest() emits no user
+    # scopes at all. This deployment's account linking is OIDC and requests
+    # exactly "openid profile"
+    # (@mastra/factory/dist/integrations/slack/connect-route.js:65). Slack
+    # forbids mixing openid with any other user scope, so this list stays at
+    # two — no email, nothing else.
+    user:
+      - openid
+      - profile
+settings:
+  event_subscriptions:
+    # The mastra-code segment is the agent controller's own id and is not
+    # derivable: Factory registers that controller with Mastra under the
+    # shorter key "code", but the route is built from the id. A path using
+    # "code" verifies nothing and silently receives no deliveries.
+    request_url: https://factory.kovalchuk.win/api/agent-controllers/mastra-code/channels/slack/webhook
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  interactivity:
+    # Enabled, on the same URL as events, because core's tool-approval buttons
+    # post block_actions there. No slash_commands and no shortcuts are declared:
+    # the package registers no command names and its interactive payload switch
+    # has no shortcut branch (@chat-adapter/slack/dist/index.js:2313-2328).
+    is_enabled: true
+    request_url: https://factory.kovalchuk.win/api/agent-controllers/mastra-code/channels/slack/webhook
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

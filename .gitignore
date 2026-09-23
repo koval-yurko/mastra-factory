@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 !.env.schema
 .mastra/
+src/mastra/public/
 *.log
 .DS_Store
 .bmad-loop/runs/

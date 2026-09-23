@@ -68,10 +68,21 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 # gate is green. A key that genuinely must be supplied in production is declared
 # the same conditional way, or documented as required in prose — never as a bare
 # `@required`, which this gate cannot distinguish from the mistake above.
+#
+# The `json-full` guard covers what `json` cannot see: sensitivity. The header of
+# .env.schema is `@defaultSensitive=true`, so a key that loses its `# @public`
+# line is masked in the stdout of `varlock run -- mastra start` — the deployment's
+# only diagnostic surface, and the one ops/README.md teaches the operator to read
+# for a wrong bind address. `--format json` emits resolved values only and carries
+# no sensitivity field, and unset keys do not appear in it at all, so dropping the
+# annotation exits 0 through every other command here. Verified both ways in a
+# story worktree: the guard passes as written and fails naming the key when a
+# `# @public` line is removed.
 commands = [
   "npm ci --no-audit --no-fund",
   "npm run check",
   "npx varlock load --format json",
+  '''sh -c 'npx varlock load --format json-full | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{const c=JSON.parse(s).config||{};for(const k of [\"MASTRA_HOST\",\"PORT\",\"DOCKER_HOST\"]){if(!c[k]||c[k].isSensitive!==false){console.error(\"env key not marked @public in .env.schema: \"+k);process.exit(1)}}})"' ''',
   '''sh -c 'git ls-files "*.ts" "*.js" "*.mjs" "*.cjs" | grep -v "^src/" && exit 1 || exit 0' ''',
   '''sh -c 'git status --porcelain -- .agents/skills | grep . && exit 1 || exit 0' ''',
   "npm test",

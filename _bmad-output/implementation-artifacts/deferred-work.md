@@ -299,3 +299,99 @@ source_spec: `spec-2-6-operator-close-registration-before-anything-is-public.md`
 severity: low
 reason: `docs/Self-hosting research.md:235,497-502,597` describe the sequence as "create the account on loopback with `signUpEnabled: true`, then flip to `false` before the tunnel" — accurate as the plan and as history, but a reader who lands there rather than in `README.md` will not find the reopen-and-restore procedure step 3 now specifies, nor the probe that verifies it. Not done here: `AGENTS.md:26-27` makes that file's section numbers stable citation anchors used across the spec and stories, and `epics.md` assigns the file to Story 5.3, which renames and rewrites it. Editing its prose from this story risks the anchors for a divergence that is currently only a difference of detail, not a false statement.
 status: open
+
+### DW-39: `.env.schema` and `.env.example` still carry the provider-console prose the three new subject READMEs now own, so two committed documents describe how to obtain the same thirteen values.
+origin: spec-deferred 9c30fba52681
+location: .env.schema:45-65,312-315,364-365 and .env.example vs apps/*/README.md
+source_spec: `spec-3-1-every-callback-url-recorded-where-its-subject-owns-it.md`
+severity: medium
+reason: `.env.schema:45-65` tells the operator where each Slack credential lives ("Basic Information → App Credentials", "starts xoxb-"), `:312-315` gives the GitHub callback-registration instruction, and `:364-365` the Linear one; `.env.example` duplicates all of it verbatim with the decorator lines stripped. AD-6 and `AGENTS.md:61-63` give that half to the owning subject's README and say neither side restates the other's, so before this change the schema was the only copy and after it there are two. Nothing checks either way, and the schema copy is the one an operator editing `.env` meets first. Not done here: `epics.md:1014-1019` is Story 5.2's acceptance criterion verbatim — "`.env.schema` does not restate how to obtain a value from a provider console" — so stripping the prose here would take that story's criterion. The duplication is inert in the meantime: the two copies agree today, and the READMEs are the normative half under AD-6 from the moment they exist.
+status: open
+
+### DW-40: The Cloudflare public-hostname mapping is the one row in the §4.1 registry that still has no subject README, so "every callback URL recorded where its subject owns it" is not yet literally true for
+origin: spec-deferred ec2a70d67cc7
+location: ops/README.md (absent section) vs docs/Self-hosting research.md §4.1 Cloudflare row
+source_spec: `spec-3-1-every-callback-url-recorded-where-its-subject-owns-it.md`
+severity: low
+reason: `docs/Self-hosting research.md` §4.1 carries `Cloudflare | Public Hostname → URL | 127.0.0.1:4111 (type HTTP)`, and the paragraph this story added to §4.1 concedes the gap by naming Cloudflare and Better Auth as the rows with no subject README. AD-3 makes the tunnel host infrastructure, which puts it in the existing `ops/` subject rather than a new root directory — so the owner exists and is simply unwritten. Not done here: `epics.md:689-691` is Story 3.2's acceptance criterion verbatim — "`ops/README.md` gains the tunnel section describing the install and the public-hostname mapping" — so writing the mapping here would take it. Until 3.2 lands, §4.1 remains that row's only record, which is why this story kept the table rather than emptying it.
+status: open
+
+### DW-41: `MASTRACODE_PUBLIC_URL` is the origin all three README URL tables derive from, yet no subject README owns it, and the one file that does specify it still pins it to loopback.
+origin: spec-deferred 02199c0f7aaa
+location: README.md:41 vs apps/github/README.md:24 and apps/linear/README.md:21
+source_spec: `spec-3-1-every-callback-url-recorded-where-its-subject-owns-it.md`
+severity: medium
+reason: `apps/github/README.md:24` and `apps/linear/README.md:21` both state that Factory derives their callback path from the public origin held in `MASTRACODE_PUBLIC_URL`, and both write that path as `https://factory.kovalchuk.win/...`. The key itself falls outside this story's partition (`GITHUB_APP_*`, `LINEAR_*`, `SLACK_APP_*`, `MASTRACODE_CHANNELS_PUBLIC_URL`), so it gained no `##` section anywhere. Its only specification in the repo is root `README.md:41` — "exactly `http://127.0.0.1:4111`: scheme, host and port" — written for the loopback-only deployment that preceded this epic. An operator who configures `.env` from the root README therefore registers loopback-derived callbacks, which is the exact failure `docs/Self-hosting research.md:292-293` warns about. The two statements are both live and they contradict each other. Not done here: AD-6 puts the host/origin-facing keys in the `ops/` subject, and the intent's Never list leaves `ops/` untouched for Story 3.2, which is also the story
+status: open
+
+### DW-42: `ops/README.md` now holds two subjects at one heading level, so it carries two checkpoint sequences and two bring-up procedures with nothing structural separating them.
+origin: spec-deferred 883292299578
+location: ops/README.md
+source_spec: `spec-3-2-operator-a-public-origin-with-no-inbound-ports.md`
+severity: low
+reason: The H1 is `# Host infrastructure` and the container-engine half still runs as a flat sequence of H2s (`## DOCKER_HOST`, `## Before you start`, `## Bring-up`, `## Checkpoints`, `## Teardown`) with no section heading of its own, while the ingress half appended below it opens with `## Ingress — Cloudflare Tunnel` and ends with `## Ingress checkpoints`. A reader who lands on "Checkpoints" from a search cannot tell from the heading which subject it belongs to. Not done here: grouping the container-engine half under a heading means demoting five existing H2s to H3s, and `README.md:15,64` plus the Story 1.4 spec cite this file's checkpoints by number. Epic 4 adds supervision content to the same file, which is the change that should settle the structure for all three subjects at once rather than twice.
+status: open
+
+### DW-43: Five `MASTRACODE_GITHUB_*` keys that `@mastra/factory@0.15.0` and `src/mastra/index.ts` read are declared in neither `.env.schema` nor `.env.example`, so Story 5.2's criterion "every key the
+origin: spec-deferred b47d8d43466a
+location: .env.schema, .env.example, src/mastra/index.ts:233
+source_spec: `spec-3-3-operator-a-github-app-that-belongs-to-yurii.md`
+severity: low
+reason: `src/mastra/index.ts:233` reads `MASTRACODE_GITHUB_AUTHORIZED_BOTS` and passes it to the integration as `authorizedBots`. `node_modules/@mastra/factory/dist/integrations/github/ integration.js:1006-1014` reads four more as the per-sweep overrides that take precedence over the declared legacy pair: `MASTRACODE_GITHUB_PR_RECONCILE_ENABLED`, `MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED`, `MASTRACODE_GITHUB_PR_RECONCILE_INTERVAL_MS` and `MASTRACODE_GITHUB_ISSUE_RECONCILE_INTERVAL_MS`. `grep -c` for each over `.env.schema` and `.env.example` returns 0. Not done here: this spec's Never list forbids declaring them, because declaring a key is a schema decision with `@public`/sensitivity and type consequences and the audit that decides them is Story 5.2's (`epics.md:1014-1017`). `apps/github/README.md` documents only the keys that are declared, so the README and the schema stay consistent with each other in the meantime; the four reconcile overrides are unset in this deployment, and
+status: open
+
+### DW-44: `epics.md:730` still states "the 5-minute reconcile sweep" as the premise of Story 3.3's own acceptance criterion, so the frozen plan and the operator documentation now disagree about the one number
+origin: spec-deferred 2df6ab13ac92
+location: _bmad-output/planning-artifacts/epics.md:730
+source_spec: `spec-3-3-operator-a-github-app-that-belongs-to-yurii.md`
+severity: low
+reason: This story established, against `node_modules/@mastra/factory/dist/integrations/github/ reconcile-worker.js:35`, that the sweep interval defaults to `36e5` — one hour — and corrected `apps/github/README.md`, `.env.schema`, `.env.example` and `docs/Self-hosting research.md` §5 accordingly. `epics.md:730` is the source of the five-minute figure and was not touched, so it is now the only place in the repository still asserting it, and it is the surface the next reader of this story's intent meets first. Not done here: `epics.md` is the frozen sprint plan that this and every other story is dispatched from, and rewriting a story's own acceptance premise mid-run would change the record the run is judged against. The operator-facing documents are corrected and are the ones AD-6 makes normative; the epics correction belongs to a retrospective or a plan amendment.
+status: open
+
+### DW-45: Four `MASTRACODE_LINEAR_*RECONCILE*` keys that `@mastra/factory@0.15.0` reads are declared in neither `.env.schema` nor `.env.example`, so Story 5.2's criterion "every key the deployment sets is
+origin: spec-deferred d1a75f7453b0
+location: .env.schema, .env.example, node_modules/@mastra/factory/dist/integrations/linear/reconciliation-config.js:12-17
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: low
+reason: `node_modules/@mastra/factory/dist/integrations/linear/reconciliation-config.js:12-17` reads `MASTRACODE_LINEAR_ISSUE_RECONCILE_ENABLED`, `MASTRACODE_LINEAR_RECONCILE_ENABLED`, `MASTRACODE_LINEAR_ISSUE_RECONCILE_INTERVAL_MS` and `MASTRACODE_LINEAR_RECONCILE_INTERVAL_MS` straight off `process.env`, child name first and legacy name as the fallback, defaulting to enabled at the five-minute interval of `node_modules/@mastra/factory/dist/integrations/issue-reconcile-worker.js:5,25`. `grep -c` for each over `.env.schema` and `.env.example` returns 0. This is the same gap DW-43 records for GitHub, one integration over. Not done here: this spec's Tasks list forbids declaring them, because declaring a key is a schema decision with `@public`/sensitivity and type consequences and the audit that decides them is Story 5.2's (`epics.md:1014-1017`). `apps/linear/README.md` documents all four as read-but-undeclared and unset, with the precedence rule and the default, so the operator can still explain
+status: open
+
+### DW-46: `epics.md:749-751,768` still carries the five-scope list and makes "an @-mention of the app is received" a criterion of this story, so the frozen plan asserts a scope set and a capability that
+origin: spec-deferred d8bdca98a444
+location: _bmad-output/planning-artifacts/epics.md:749-751,768
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: medium
+reason: This story established, against `node_modules/@mastra/factory/dist/integrations/linear/ integration.js:330`, that the authorize URL requests exactly `read,comments:create`, and that `app:mentionable` plus @-mentions are unreachable at this version for three independent reasons — the scope is not requested, `actor=app` is never sent (`integration.js:326-332`), and neither a Linear webhook route nor an `AgentSessionEvent` handler exists anywhere in the package (`grep -rn "webhook" .../integrations/linear/` and `grep -rn "app:mentionable\|actor=app\|AgentSession" node_modules/@mastra/` both return nothing). `apps/linear/README.md`, `.env.schema`, `.env.example` and §6 of `docs/Self-hosting research.md` are corrected; `epics.md` is not, so it is now the only place still asserting both. Not done here: `epics.md` is the frozen sprint plan this story is dispatched from, and rewriting a story's own acceptance premise mid-run would change the record the run is judged against. The
+status: open
+
+### DW-47: The §11 trap-table row at `docs/Self-hosting research.md:670` still reads "all-or-nothing; one alone is a boot error", the symmetric claim this story disproved, because the row is a table row and this
+origin: spec-deferred 84966d1ee1fa
+location: docs/Self-hosting research.md:670
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: low
+reason: `docs/Self-hosting research.md:670` is `| `LINEAR_CLIENT_ID` / `_SECRET` | all-or-nothing; one alone is a boot error |`. The real behaviour is asymmetric: the secret without the id fails varlock at `npm run start` and names `LINEAR_CLIENT_ID` (`.env.schema:395`), while the id without the secret passes validation and leaves the integration unbuilt and unlogged (`src/mastra/index.ts:242-243`, a ternary). The boot error that does exist is the state-signer one (`node_modules/@mastra/factory/dist/factory.js:369`, `.../integrations/linear/integration.js:306`), which the row does not mention. Not done here: this spec's Never list forbids adding, removing or changing any table row or heading in that file — §6 and §11 are a dated research record corrected by appending, and the appended 2026-09-23 paragraph under §6 now carries the correction. §6 already tells the reader that `apps/linear/README.md` wins on disagreement, so the stale row is shadowed rather than authoritative; a §11 pass that
+status: open
+
+### DW-48: The user-level memory note "Mastra Factory Linear OAuth scopes" still records the five-scope list and singles out `app:mentionable` as the easily-missed one, so the note contradicts the repository it
+origin: spec-deferred cdaa6b085816
+location: user memory: mastra-factory-linear-oauth-scopes.md
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: medium
+reason: The note records five permissions observed on a consent screen on 2026-09-21 and maps them to `read`, `write`, `issues:create`, `comments:create`, `app:mentionable`, adding "`app:mentionable` is the easily-missed one: without it Factory can't be @-mentioned in Linear". This story established that the observation is of Mastra's *hosted* consent screen and is true of a client this deployment never constructs: `src/mastra/index.ts:36` imports `LinearIntegration`, whose `buildAuthorizeUrl` requests `read,comments:create` (`node_modules/@mastra/factory/dist/integrations/linear/integration.js:330`), and mentions are unreachable at `0.15.0` for three independent reasons. The note also repeats the symmetric boot-error claim this story disproved. Not done here: the memory store is outside the repository and outside this story's diff, and rewriting a user-level note is not a change a story worktree can commit or a reviewer can see. The correction is the same one already recorded for `epics.md`;
+status: open
+
+### DW-49: `epic-3-context.md` still carries the two claims this story disproved, and it is the file the remaining Epic 3 stories load as their primary planning context.
+origin: spec-deferred 02eb9f7111e9
+location: _bmad-output/implementation-artifacts/epic-3-context.md:45-49
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: low
+reason: `_bmad-output/implementation-artifacts/epic-3-context.md:45-46` states "The mention-capability scope is easy to miss and its absence silently prevents the app being addressed inside Linear", and `:47-49` states "Env-key groups are all-or-nothing … the integration stays inert (or, for one provider, fails at boot) by design". Both were falsified here: the scope is never requested and no endpoint could receive a mention, and the Linear pair is asymmetric with the real boot failure being the state signer. Story 3.5 loads this file as its context. Not done here: the file is a regenerable compiled cache — its own header says "Regenerate with compile-epic-context if planning docs change" — and it is derived from `epics.md`, whose correction is already deferred above. Editing the cache without editing its source would make the next regeneration silently undo the fix.
+status: open
+
+### DW-50: The §11 trap table carries a second row this story's evidence falsifies — the `GITHUB_APP_WEBHOOK_SECRET` row still describes an unset signer as a degraded mode when a registered Linear or GitHub
+origin: spec-deferred 124a0d597e72
+location: docs/Self-hosting research.md, §11 trap table, GITHUB_APP_WEBHOOK_SECRET row
+source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
+severity: low
+reason: `docs/Self-hosting research.md` §11 says an unset `GITHUB_APP_WEBHOOK_SECRET` with no `WORKOS_COOKIE_PASSWORD`/`SLACK_APP_SIGNING_SECRET` means "random per process ⇒ OAuth breaks across restarts". With any integration declaring `requiresStableStateSigner` registered — Linear at `node_modules/@mastra/factory/dist/integrations/linear/integration.js:306`, GitHub likewise — `node_modules/@mastra/factory/dist/factory.js:369` throws during `prepare()` and the server does not start. Story 3.3 corrected the same claim in `.env.schema`, `.env.example` and `apps/github/README.md` and left this row; this story corrects the Linear row's equivalent and leaves it too. Not done here: this spec's Never list forbids adding, removing or changing any table row or heading in that file — §6 and §11 are a dated research record corrected by appending. The row is pre-existing rather than caused by this change, and a §11 pass that re-reads every trap row at once is the right owner; §6 and §5 both already
+status: open

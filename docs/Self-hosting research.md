@@ -245,6 +245,9 @@ credential encryption as a side effect.
 
 ## 4. Ingress — Cloudflare Tunnel
 
+`ops/README.md` is the canonical record for the install, the public-hostname mapping, the `.env` switch and
+the checkpoints below; if it and this section ever disagree, that file wins.
+
 ```bash
 sudo cloudflared service install <TOKEN>     # Zero Trust → Networks → Tunnels
 # Public Hostname: factory / kovalchuk.win → HTTP → 127.0.0.1:4111
@@ -274,6 +277,14 @@ Every path below was read out of the packages **[verified]** — none of it is g
 | Slack | Events **and** Interactivity | `https://factory.kovalchuk.win/api/agent-controllers/mastra-code/channels/slack/webhook` |
 | Slack | OAuth redirect | `https://factory.kovalchuk.win/connect/slack/oidc/callback` |
 
+`apps/github/README.md`, `apps/linear/README.md` and `apps/slack/README.md` are the canonical record for the
+rows that belong to them — each one states its provider's URLs alongside the console settings and env values
+that go with them, and if that file and this table ever disagree, the file wins. The Cloudflare row belongs
+the same way to `ops/README.md`, which owns the tunnel as host infrastructure and states the public-hostname
+mapping there alongside `MASTRA_HOST`, `PORT` and `MASTRACODE_PUBLIC_URL`. The table stays here as the
+narrative index across all providers at once, and as the provenance note for the Better Auth row, which has
+no subject README of its own.
+
 The Slack path is `` `/api/agent-controllers/${controller.id}` `` + `` `/channels/${platform}/webhook` ``
 (core `channels-*.js:78`, `agent-*.js:21362`), and the controller is `new AgentController({ id: 'mastra-code' })`
 (`@mastra/code-sdk` `index.js:636`) — correct even though Factory registers it on Mastra under the key `code`.
@@ -285,6 +296,9 @@ that send the browser somewhere only the server can reach.
 ---
 
 ## 5. Own GitHub App
+
+`apps/github/README.md` is the canonical record for the permissions, webhook events and env values below; if
+it and this section ever disagree, that file wins.
 
 Cross-referencing Mastra's own consent screen (2026-09-21) against the API calls actually present in
 `@mastra/factory@0.15.0` **[verified]**:
@@ -315,9 +329,28 @@ forever; it is also the primary OAuth-state signer (fallbacks: `WORKOS_COOKIE_PA
 `MASTRACODE_GITHUB_RECONCILE_ENABLED` on — the 5-min sweep is the only merge-state writer when webhooks can't
 land.
 
+**Re-cross-referenced 2026-09-23 against the installed `@mastra/factory@0.15.0` in `node_modules`, and four
+of the claims above did not survive.** The *Commit statuses* and *Checks* rows name uses the package does not
+have: no `checks.*` call, no `repos.createCommitStatus` and no `/actions/` path exists in the shipped
+JavaScript, and `status` is not in the webhook handler's allowlist, so the `status` webhook is not handled —
+both permissions are granted as headroom for CI signal, not because a call needs them. Of the ten webhook
+events, only six are allowlisted (`issues`, `issue_comment`, `pull_request`, `pull_request_review`,
+`pull_request_review_comment`, `push`); `installation`, `status`, `label` and `repository` are accepted and
+return `202 {"ok":true,"ignored":true}`, and `push`, though allowlisted, matches no rule branch and drives
+nothing. The sweep runs **hourly**, not every five minutes (`intervalMs ?? 36e5`), and it covers issues as
+well as pull requests; `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` is what shortens it. And the state-signer
+chain is fatal rather than merely unstable: the GitHub integration requires a replica-stable state secret, so
+a configured GitHub App with none of `GITHUB_APP_WEBHOOK_SECRET` → `WORKOS_COOKIE_PASSWORD` →
+`SLACK_APP_SIGNING_SECRET` set refuses to boot rather than falling back to a per-process random value. The
+corrected form of all four, with the `file:line` citations behind each and the registration, installation and
+checkpoint procedure that goes with them, lives in `apps/github/README.md`.
+
 ---
 
 ## 6. Linear + Slack
+
+`apps/linear/README.md` and `apps/slack/README.md` are the canonical record for the scopes, settings and env
+values below; if one of them and this section ever disagree, that file wins.
 
 **Linear.** Own OAuth app, redirect `https://factory.kovalchuk.win/auth/linear/callback`.
 `LINEAR_CLIENT_ID` + `LINEAR_CLIENT_SECRET` are **all-or-nothing — one alone is a boot error**, and the
@@ -326,7 +359,28 @@ integration also needs auth, a database and an org. Scopes from Mastra's consent
 can't be @-mentioned inside Linear. Read/write is workspace-wide; Linear has no per-project narrowing at the
 OAuth layer, so scoping happens in Factory's intake selection.
 
-**Slack.** Own app from the Factory manifest.
+**Re-cross-referenced 2026-09-23 against the installed `@mastra/factory@0.15.0` in `node_modules`, and the
+Linear paragraph above did not survive intact.** The five-scope list is an accurate record of Mastra's
+*hosted* consent screen and of nothing else: this deployment constructs `LinearIntegration`, the self-hosted
+direct-OAuth integration, whose `buildAuthorizeUrl` sets `scope` to the string literal
+`"read,comments:create"` with no env var, config field or console setting that changes it — so two scopes are
+requested, not five, and Linear's console declares no scopes at all. **`app:mentionable` and @-mentions are
+unreachable at this version** for three independent reasons: the scope is not requested, `actor=app` is never
+put on the authorize URL, and the package registers no Linear webhook route and carries no
+`AgentSessionEvent` handler anywhere, so nothing would receive a mention even if the scope were granted out
+of band — the application's webhooks should be left disabled. The all-or-nothing claim is asymmetric rather
+than symmetric: the secret without the id fails varlock at `npm run start` and names `LINEAR_CLIENT_ID`,
+while the id without the secret passes validation and leaves the integration silently unbuilt. And the boot
+error that actually exists is a different one — `LinearIntegration` requires a replica-stable state secret,
+so a configured Linear pair with none of `GITHUB_APP_WEBHOOK_SECRET` → `WORKOS_COOKIE_PASSWORD` →
+`SLACK_APP_SIGNING_SECRET` set refuses to start. The corrected form of all four, with the `file:line`
+citations behind each and the registration, connection, intake-selection and checkpoint procedure that goes
+with them, lives in `apps/linear/README.md`.
+
+**Slack.** Own app, created from `apps/slack/manifest.yaml` — this repository's file, not one
+`@mastra/factory` ships, which carries no Slack manifest at all. That file is the record of the bot
+token scopes and the settings below as one diffable unit; the scope-by-scope justification, the
+create-from-manifest procedure and the checkpoints live in `apps/slack/README.md`.
 
 | Setting | Value |
 |---|---|
@@ -567,8 +621,18 @@ ANTHROPIC_API_KEY=
 **Keys absent from `.env.schema` still reach the process.** `varlock run` builds the child env as
 `{ ...process.env, ...resolvedEnv }` (`run.command-*.mjs:158-162`) **[verified]**, confirmed by experiment.
 Declaring a key only adds validation, `@public` (undeclared keys default to *sensitive*, so varlock redacts
-their values in the server's own stdout) and generated types. Undeclared here: `MASTRA_HOST`, `PORT`,
-`NODE_ENV`, the three `FACTORY_SANDBOX_*`, `MASTRACODE_DISPATCH_MAX_IN_FLIGHT`, `BETTER_AUTH_SECRET`.
+their values in the server's own stdout) and generated types. Undeclared **as of this research (2026-09-22)**:
+`MASTRA_HOST`, `PORT`, `NODE_ENV`, the three `FACTORY_SANDBOX_*`, `MASTRACODE_DISPATCH_MAX_IN_FLIGHT`,
+`BETTER_AUTH_SECRET`.
+
+Four of that list's six entries have been declared since: `MASTRA_HOST` and `PORT` in `.env.schema`'s
+*Server socket* section, and `BETTER_AUTH_SECRET` and all three keys of the `FACTORY_SANDBOX_*` entry
+in their own sections. Only `NODE_ENV` and `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` are still undeclared.
+Declaring a key gives it no default — a declared-but-unset key is absent from the child environment
+entirely, not an empty string — so the behaviour described above is unchanged, and the validation and
+`@public` marking apply only under `varlock run` (`npm run start`), never under `npm run dev`, which does
+not read `.env.schema`. `.env.schema` is the list of keys either way; `ops/README.md` is the record for what
+`MASTRA_HOST` and `PORT` must contain.
 
 ---
 

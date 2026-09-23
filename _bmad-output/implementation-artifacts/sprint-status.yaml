@@ -52,11 +52,11 @@ development_status:
   epic-2-retrospective: optional
 
   epic-3: backlog
-  3-1-every-callback-url-recorded-where-its-subject-owns-it: backlog
-  3-2-operator-a-public-origin-with-no-inbound-ports: backlog
-  3-3-operator-a-github-app-that-belongs-to-yurii: backlog
-  3-4-operator-a-linear-app-that-belongs-to-yurii: backlog
-  3-5-operator-a-slack-app-created-from-a-manifest-this-repo-owns: backlog
+  3-1-every-callback-url-recorded-where-its-subject-owns-it: done
+  3-2-operator-a-public-origin-with-no-inbound-ports: done
+  3-3-operator-a-github-app-that-belongs-to-yurii: done
+  3-4-operator-a-linear-app-that-belongs-to-yurii: done
+  3-5-operator-a-slack-app-created-from-a-manifest-this-repo-owns: done
   epic-3-retrospective: optional
 
   epic-4: backlog
