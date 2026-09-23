@@ -12,7 +12,10 @@ written. Ready to execute §8.
 > Facts marked **[verified]** were read out of the shipped packages (`@mastra/factory@0.15.0`,
 > `@mastra/auth-better-auth@1.1.5`, `@mastra/docker@0.8.0`, `@mastra/core`/`server`/`deployer@1.67.0`,
 > `@mastra/pg@1.25.0`, `@mastra/code-sdk@1.7.2`, `varlock@1.20.0`), not the docs. The published documentation
-> is thin and contradicts itself; trust the packages and this repo's `.env.schema` / `src/mastra/index.ts`.
+> is thin and contradicts itself; trust the packages and this repo's `.env.schema`, `src/mastra/index.ts` and
+> `src/mastra/config/` (which now holds every concern the entry used to construct: storage, vector, pubsub,
+> auth, the integrations, the sandbox — and the `MastraFactory` call that assembles them, in
+> `config/factory.ts`).
 
 ---
 
@@ -21,8 +24,8 @@ written. Ready to execute §8.
 | Decision | Notes |
 |---|---|
 | **Colima `--vm-type vz`** | Apple's Virtualization.framework + a Docker socket. Apple's own `container` speaks XPC, not the Docker API — `dockerode` can't connect, and `@mastra/apple-container` has no `SandboxProcessManager` |
-| **`@mastra/docker` sandboxes**, 10 GiB / 4 cores, max 3 | needs an `index.ts` edit + a custom image (§2) |
-| **Postgres 18 + pgvector** in a container | mandatory — `index.ts:233` throws without `DATABASE_URL` outside dev/test. Also holds the Better Auth tables |
+| **`@mastra/docker` sandboxes**, 10 GiB / 4 cores, max 3 | needs a first-party sandbox module + a custom image (§2) |
+| **Postgres 18 + pgvector** in a container | mandatory — `src/mastra/config/database-url.ts` throws without `DATABASE_URL` outside dev/test. Also holds the Better Auth tables |
 | **Better Auth**, deferred-instance mode | the only fully self-hosted provider that supplies the orgs GitHub/Linear require (§3) |
 | **Cloudflare Tunnel** → `https://factory.kovalchuk.win` | §4 |
 | **LaunchAgents**, no auto-login, FileVault on | §7 |
@@ -39,15 +42,17 @@ written. Ready to execute §8.
 
 **Must stay unset**, or something silently reaches back to Mastra or a cloud:
 `MASTRA_SHARED_API_URL` (highest-precedence auth path — defers identity to `platform.mastra.ai` with only a
-warning, `index.ts:135-140`) · `MASTRA_PLATFORM_ACCESS_TOKEN` / `_SECRET_KEY` / `MASTRA_PROJECT_ID` /
-`MASTRA_ENVIRONMENT_ID` (together they switch sandboxes to Platform VMs, `index.ts:283-285`) · `E2B_API_KEY` ·
-`SANDBOX_PROVIDER` · `WORKOS_*` · `MASTRA_LICENSE_KEY` (not needed — §3.1). The `DockerSandbox` branch goes
-**ahead** of the platform/E2B chain, so even a stray var can't move sandboxes off this machine.
+warning, `src/mastra/config/auth.ts:124-131`) · `MASTRA_PLATFORM_ACCESS_TOKEN` / `_SECRET_KEY` /
+`MASTRA_PROJECT_ID` / `MASTRA_ENVIRONMENT_ID` (together they switch sandboxes to Platform VMs,
+`src/mastra/config/sandbox.ts:287-289`) · `E2B_API_KEY` · `SANDBOX_PROVIDER` · `WORKOS_*` ·
+`MASTRA_LICENSE_KEY` (not needed — §3.1). The `DockerSandbox` branch goes **ahead** of the platform/E2B chain,
+so even a stray var can't move sandboxes off this machine.
 
 ---
 
 ## 1. Architecture
 
+Non-normative — the record is the AD-12 deployment envelope diagram in `ARCHITECTURE-SPINE.md`.
 ```
                     ┌──────────────── this machine, 24/7 ──────────────────────┐
   Internet          │  LaunchDaemon: cloudflared ──┐                           │
@@ -81,6 +86,7 @@ is cloned **inside** the session's sandbox."* So `git` and `gh` must exist in th
 `docker exec` for commands, label-based reconnection by session id, and a real `DockerProcessManager`
 **[verified]** for setup commands and LSP sessions.
 
+Non-normative — the record is `ops/launchagents/ai.mastra.colima.plist`, which is what starts the VM here.
 ```bash
 colima start --cpu 12 --memory 32 --disk 200 --vm-type vz --mount-type virtiofs
 ```
@@ -91,34 +97,12 @@ rather than relying on a `/var/run/docker.sock` symlink.
 ### 2.1 The image
 
 `node:22-slim` ships no `git` and no `gh`, and Factory has explicit `'git-missing'` / `'gh-missing'` error
-codes **[verified]** — it fails at first use.
+codes **[verified]** — it fails at first use, so the session image has to carry both plus a generic
+toolchain, and no target-repo specifics, because there is no specific target repo.
 
-```dockerfile
-# factory-sandbox.Dockerfile
-FROM node:22-bookworm-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates curl gnupg openssh-client less \
- && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
- && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-      > /etc/apt/sources.list.d/github-cli.list \
- && apt-get update && apt-get install -y --no-install-recommends gh \
- && rm -rf /var/lib/apt/lists/*
-
-# generic toolchain — no specific target repo yet
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential python3 python3-pip python3-venv ripgrep jq unzip \
- && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
-
-WORKDIR /workspace
-CMD ["sleep", "infinity"]
-```
-
-```bash
-docker build --platform linux/arm64 -f factory-sandbox.Dockerfile -t factory-sandbox:2026-09-22 .
-```
+That image is `sandbox/factory-sandbox.Dockerfile` — one real file, built and edited in place.
+`sandbox/README.md` is the canonical record for the build, smoke-test and retag commands and for the tag
+history; if it and this section ever disagree, that file wins.
 
 Tag by date and point `FACTORY_SANDBOX_IMAGE` at it, so a bad image is an env-var rollback. A package the
 target repo needs but the image lacks shows up as a failing setup command — extend the toolchain layer and
@@ -127,8 +111,9 @@ retag.
 ### 2.2 The code change
 
 Factory's sandbox slot is `(ctx: FactorySandboxContext) => MastraSandbox` **[verified]**, so any
-`MastraSandbox` is accepted. Add ahead of the existing provider chain (`src/mastra/index.ts:291-314`):
+`MastraSandbox` is accepted. Add ahead of the existing provider chain (`src/mastra/config/sandbox.ts:263-285`):
 
+Non-normative — the record is `src/mastra/config/sandbox.ts`.
 ```ts
 import { DockerSandbox } from '@mastra/docker';
 
@@ -157,8 +142,8 @@ Every option name exists on `DockerSandboxOptions` **[verified]**. `workingDirec
 `pidsLimit` depends on; `memory`/`cpuQuota` are hard ceilings, unlike the relative-weight `cpuShares`.
 
 **`FACTORY_SANDBOX_PROVIDER=docker` does nothing until this edit exists** — the template only tests
-`=== 'local'` and anything else falls through to `LocalSandbox`. The entry now diverges from upstream: keep the
-diff small and commented.
+`=== 'local'` and anything else falls through to `LocalSandbox`. This deployment now diverges from upstream in
+`src/mastra/config/sandbox.ts`, which owns the branch: keep the diff small and commented.
 
 ### 2.3 Capacity and lifecycle
 
@@ -183,11 +168,11 @@ Mastra's ownership label weekly.
 
 `@mastra/auth-better-auth@1.1.5`, from first boot. There is no interim provider: Factory's tenant is
 `(orgId, userId)` and the integrations are org-scoped — *"the org owns the GitHub App installation and
-connected projects"*, and *"callers gate org-scoped GitHub features on its presence"* **[verified]**. Orgs come
-from `IOrganizationsProvider`, which `SimpleAuth` and plain JWT do not implement, so neither can ever reach
-GitHub connect or Linear intake. Neither is wired in this template anyway (the chain is platform → WorkOS →
-nothing, `index.ts:130-143`). WorkOS would work with zero code change but is hosted SaaS identity — out of
-scope here.
+connected projects"*, and *"callers gate org-scoped GitHub features on its presence"* **[verified]**. Orgs
+come from `IOrganizationsProvider`, which `SimpleAuth` and plain JWT do not implement, so neither can ever
+reach GitHub connect or Linear intake. Neither is wired in this template anyway (the chain is platform →
+WorkOS → nothing, `src/mastra/config/auth.ts:114-159`). WorkOS would work with zero code change but is hosted
+SaaS identity — out of scope here.
 
 ### 3.1 What the provider gives us **[verified in package]**
 
@@ -214,8 +199,9 @@ IAuthHttpHandler` — every capability Factory composes against.
 
 ### 3.2 Wiring
 
-Replaces the WorkOS branch in `src/mastra/index.ts`:
+Replaces the WorkOS branch in `src/mastra/config/auth.ts`:
 
+Non-normative — the record is `src/mastra/config/auth.ts`.
 ```ts
 import { MastraAuthBetterAuth } from '@mastra/auth-better-auth';
 
@@ -238,8 +224,8 @@ your account while still on loopback (§8 step 6), then flip to `false`. The sin
 ⚠️ **`ensureOrganization` is best-effort** — *"any failure is swallowed and leaves the user no-org."* A failed
 bootstrap looks like "GitHub connect isn't there", not like an error. Check the org tables first.
 
-❌ **Never `MASTRACODE_AUTH_DISABLED=1`** on a public origin: undocumented, and `index.ts:144` makes it disable
-credential encryption as a side effect.
+❌ **Never `MASTRACODE_AUTH_DISABLED=1`** on a public origin: undocumented, and `src/mastra/config/auth.ts:162`
+makes it disable credential encryption as a side effect.
 
 ---
 
@@ -248,6 +234,7 @@ credential encryption as a side effect.
 `ops/README.md` is the canonical record for the install, the public-hostname mapping, the `.env` switch and
 the checkpoints below; if it and this section ever disagree, that file wins.
 
+Non-normative — the record is `ops/README.md`.
 ```bash
 sudo cloudflared service install <TOKEN>     # Zero Trust → Networks → Tunnels
 # Public Hostname: factory / kovalchuk.win → HTTP → 127.0.0.1:4111
@@ -401,105 +388,50 @@ Agents, not daemons: Colima runs inside a user login session, so a daemon would 
 and Factory would crash-loop with no Docker socket. `UserName=koval` doesn't help — it changes the uid, not the
 session. Any logout kills Factory, so disable fast user switching.
 
-### 7.1 Colima — `~/Library/LaunchAgents/ai.mastra.colima.plist`
+### 7.1 Colima — `ops/launchagents/ai.mastra.colima.plist`
 
-`--foreground` keeps launchd supervising the VM instead of watching a wrapper exit.
+The agent is `ops/launchagents/ai.mastra.colima.plist`. `ops/install.sh` symlinks it into
+`~/Library/LaunchAgents/` rather than copying it, so the repo copy stays the only copy; `ops/README.md` is
+the canonical record for bootstrapping, addressing and tearing the job down.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key>            <string>ai.mastra.colima</string>
-  <key>ProgramArguments</key>
-    <array>
-      <string>/opt/homebrew/bin/colima</string><string>start</string>
-      <string>--cpu</string><string>12</string>
-      <string>--memory</string><string>32</string>
-      <string>--disk</string><string>200</string>
-      <string>--vm-type</string><string>vz</string>
-      <string>--mount-type</string><string>virtiofs</string>
-      <string>--foreground</string>
-    </array>
-  <key>EnvironmentVariables</key>
-    <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-  <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <true/>
-  <key>ThrottleInterval</key> <integer>30</integer>
-  <key>StandardOutPath</key>  <string>/Users/koval/Library/Logs/mastra-factory/colima.log</string>
-  <key>StandardErrorPath</key><string>/Users/koval/Library/Logs/mastra-factory/colima.err.log</string>
-</dict></plist>
-```
+`--foreground` is the flag that earns its keep: it keeps launchd supervising the VM itself instead of
+watching a `colima start` that returns the moment the VM is up and treating the job as finished.
 
-### 7.2 Wait-for-socket wrapper — `~/bin/factory-start.sh` (`chmod +x`)
+### 7.2 Wait-for-socket wrapper — `ops/factory-start.sh`
 
-launchd has no dependency ordering, so Factory waits for Docker itself.
+launchd has no dependency ordering: this agent and the Colima one are started independently, so Factory has
+to wait for Docker itself rather than crash-loop against a socket that is not there yet.
 
-```bash
-#!/bin/zsh
-set -eu
-export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"   # dockerode reads this
+That wait is `ops/factory-start.sh`, exec'd by the Factory agent (§7.3) straight out of the repo — it is
+copied nowhere, and `ops/install.sh` refuses to proceed if it has lost its executable bit.
+`ops/README.md` is the canonical record for what each line it prints means.
 
-for _ in {1..120}; do                                           # up to 10 minutes
-  if [ -S "$HOME/.colima/default/docker.sock" ] && docker info >/dev/null 2>&1; then break; fi
-  sleep 5
-done
+Two properties are worth knowing without opening it. The wait is bounded by **wall clock** rather than by a
+count of attempts, because against a half-started engine a single probe can block for tens of seconds and N
+attempts × 5 s would promise ten minutes and deliver an hour. And it ends in a non-zero exit rather than
+hanging, because a job that exits is a job launchd retries.
 
-if ! docker info >/dev/null 2>&1; then
-  print -u2 "[factory] docker socket not ready after 10m — exiting for launchd to retry"
-  exit 1
-fi
+### 7.3 Factory — `ops/launchagents/ai.mastra.factory.plist`
 
-cd /Users/koval/dev/test/mastra-factory
-exec npm run start
-```
-
-### 7.3 Factory — `~/Library/LaunchAgents/ai.mastra.factory.plist`
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key>               <string>ai.mastra.factory</string>
-  <key>WorkingDirectory</key>    <string>/Users/koval/dev/test/mastra-factory</string>
-  <key>ProgramArguments</key>
-    <array>
-      <string>/usr/bin/caffeinate</string><string>-dimsu</string>
-      <string>/Users/koval/bin/factory-start.sh</string>
-    </array>
-  <key>EnvironmentVariables</key>
-    <dict>
-      <key>PATH</key>        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-      <key>NODE_ENV</key>    <string>production</string>
-      <key>DOCKER_HOST</key> <string>unix:///Users/koval/.colima/default/docker.sock</string>
-    </dict>
-  <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <true/>
-  <key>ThrottleInterval</key> <integer>30</integer>
-  <key>ProcessType</key>      <string>Interactive</string>
-  <key>StandardOutPath</key>  <string>/Users/koval/Library/Logs/mastra-factory/out.log</string>
-  <key>StandardErrorPath</key><string>/Users/koval/Library/Logs/mastra-factory/err.log</string>
-</dict></plist>
-```
+The agent is `ops/launchagents/ai.mastra.factory.plist`, symlinked into `~/Library/LaunchAgents/` by
+`ops/install.sh` exactly as the Colima one is, and it runs the §7.2 wrapper under `caffeinate`.
 
 `PATH` must be explicit (a LaunchAgent inherits a minimal one and won't find `node`/`docker`/`git`);
 `ProcessType: Interactive` avoids the throttled default that would give agent work low CPU/IO priority;
-`ThrottleInterval: 30` keeps a bad `.env` from a tight crash-loop. `mkdir -p ~/Library/Logs/mastra-factory`
-first — launchd does **not** create the log directory and the agent won't spawn without it.
+`ThrottleInterval: 30` keeps a bad `.env` from a tight crash-loop. The log directory has to exist before
+either agent will spawn — launchd does **not** create it — which is the other thing `ops/install.sh` does.
 
 ### 7.4 Log rotation and power
 
-`/etc/newsyslog.d/ai.mastra.factory.conf` (root-owned, 644) — launchd never rotates:
+launchd never rotates its own logs. The rotation conf is `ops/newsyslog/ai.mastra.factory.conf`;
+`ops/install.sh` installs it into `/etc/newsyslog.d/` root-owned and 644, because newsyslog may refuse a
+root-read file that lives in a user-writable repo — which also means a change to that conf has to be
+followed by re-running the installer. `ops/README.md` is the canonical record for the dry run and for the
+rows to expect from it.
 
-```
-# logfilename                                       [owner:group]  mode  count  size   when  flags
-/Users/koval/Library/Logs/mastra-factory/out.log    koval:staff    644   7      10240  *     NJ
-/Users/koval/Library/Logs/mastra-factory/err.log    koval:staff    644   7      10240  *     NJ
-/Users/koval/Library/Logs/mastra-factory/colima.log koval:staff    644   7      10240  *     NJ
-```
+`N` = no process to signal, `J` = bzip2.
 
-`N` = no process to signal, `J` = bzip2; 7 generations of 10 MB. Dry-run with `sudo newsyslog -nvv`.
-
+Non-normative — the record is `ops/README.md`, which owns the power settings.
 ```bash
 sudo pmset -c sleep 0 disablesleep 1 autorestart 1 powernap 0
 ```
@@ -520,6 +452,11 @@ Accepted.
 
 One pass, loopback first, public last. Each step has a checkpoint; don't move on until it holds.
 
+The eleven-step **order** below is normative — `epics.md` treats it as a hard sequence and `AGENTS.md`
+counts §2–§11 as normative operational detail, and this section is where that order is recorded. The
+commands inside the block are not, which is what the marker covers:
+
+Non-normative (the commands) — the records are `sandbox/README.md`, `ops/README.md` and the three `apps/*/README.md`.
 ```bash
 # 1 — engine + tools
 brew install colima docker docker-compose gh
@@ -540,8 +477,7 @@ npm install @mastra/docker
 npm install @mastra/auth-better-auth          # peer hono@^4 — add `hono` if npm insists
 # ✔ no unmet peers left
 
-# 4 — sandbox image
-docker build --platform linux/arm64 -f factory-sandbox.Dockerfile -t factory-sandbox:2026-09-22 .
+# 4 — sandbox image: build and retag it per sandbox/README.md, which owns those commands
 # ✔ `docker run --rm factory-sandbox:2026-09-22 sh -c 'git --version && gh --version'`
 
 # 5 — code: DockerSandbox branch (§2.2) + Better Auth (§3.2)
@@ -567,15 +503,15 @@ npm run build && npm run start                # production path: varlock + NODE_
 # ✔ an issue routed from each source
 
 # 11 — only once all of the above works by hand: LaunchAgents (§7)
-mkdir -p ~/Library/Logs/mastra-factory
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.colima.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.factory.plist
+ops/install.sh                                # log dir, both agents, the rotation conf; starts nothing
+# then bootstrap both agents per ops/README.md
 sudo pmset -c sleep 0 disablesleep 1 autorestart 1 powernap 0
 # ✔ survives `launchctl kickstart -k gui/$(id -u)/ai.mastra.factory` and a full logout→login
 ```
 
 ### `.env` target state
 
+Non-normative — the records are `.env.schema` for the key list and the six owned-keys READMEs for the values.
 ```dotenv
 NODE_ENV=production
 PORT=4111
@@ -588,7 +524,7 @@ DATABASE_URL=postgres://factory:<strong-pw>@127.0.0.1:54329/mastracode_web
 FACTORY_CREDENTIAL_ENCRYPTION_KEY=<openssl rand -base64 32>   # else credentials persist as PLAINTEXT
 FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID=v1
 
-FACTORY_SANDBOX_PROVIDER=docker            # only meaningful AFTER the index.ts edit
+FACTORY_SANDBOX_PROVIDER=docker            # only meaningful AFTER the config/sandbox.ts edit
 FACTORY_SANDBOX_IMAGE=factory-sandbox:2026-09-22
 FACTORY_SANDBOX_MEMORY_GIB=10
 FACTORY_SANDBOX_CPUS=4
@@ -663,13 +599,13 @@ without the encryption key is worthless — store them together or not at all.
 | Losing `FACTORY_CREDENTIAL_ENCRYPTION_KEY` ⇒ credentials unreadable with the DB intact | **High** | key in a password manager (§9) |
 | No unattended recovery from a panic/hardware reboot | **High** | ✅ accepted — battery covers power loss, `authrestart` covers planned reboots (§7.5) |
 | `ensureOrganization` failures are swallowed ⇒ silent no-org | Medium | first place to look if GitHub connect is missing (§3.3) |
-| `src/mastra/index.ts` diverges from the template | Medium | keep the diff small + commented |
+| `src/mastra/index.ts` diverges from the template | Medium | divergence is expected and growing; `src/mastra/config/README.md` records the fork point so a reconciliation is a three-way diff rather than archaeology |
 | Container/disk accumulation over months | Medium | `MASTRACODE_MAX_SANDBOXES=3` + weekly prune (§2.3) |
 | Colima socket absent at LaunchAgent start | Medium | ✅ wait-for-socket wrapper + `DOCKER_HOST` (§7.2) |
 | Sandbox image lacks a package the target repo needs | Medium | expected with a generic image; one-line fix + retag |
 | Domain expiry breaks every callback | Medium | keep auto-renew on |
 | Mastra Studio shows no login UI in production | Low | cosmetic EE-gate artifact; Factory's `/signin` is fine (§3.1) |
-| Docs ≠ source (undocumented `MASTRACODE_AUTH_DISABLED`, polling defaults) | Low | trust `.env.schema` + `index.ts` |
+| Docs ≠ source (undocumented `MASTRACODE_AUTH_DISABLED`, polling defaults) | Low | trust `.env.schema` + `src/mastra/config/` (the entry reads no key) |
 
 ---
 

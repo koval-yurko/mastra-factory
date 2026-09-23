@@ -2,7 +2,7 @@
 id: SPEC-self-hosted-factory
 companions:
   - '../../planning-artifacts/architecture/architecture-mastra-factory-2026-09-22/ARCHITECTURE-SPINE.md'
-  - '../../../docs/Self-hosting research.md'
+  - '../../../docs/self-hosting-research.md'
   - 'extension-seams.md'
   - 'brownfield.md'
 sources:
@@ -69,7 +69,7 @@ A vision to realize, with a mandate attached. Yurii wants Mastra Factory running
 - Single machine, single process, no Redis. Any design assuming multiple replicas, shared external queues, or cross-process leases contradicts this and is a conflict to surface, not a local choice. (AD-12)
 - Environment-key truth is split by nature: `.env.schema` is normative for validation, generated types and `@public`/sensitive marking and is the only list of keys; the **owning subject's README** is normative for what the value must contain and how to obtain it. Every key has exactly one owning subject, and neither side restates the other's half. (AD-6)
 - `process.env.X` for any given `X` appears at exactly one location in first-party code; every consumer receives the parsed value by argument or export. (AD-7 — adopted 2026-09-22.)
-- Files are canonical; prose links out. One real file per operational artifact; `docs/` references artifacts by repo-relative path and marks any code block non-normative. Section numbers in `docs/Self-hosting research.md` are stable citation anchors — do not renumber. The file is renamed to a space-free path in Story 5.3, and that rename lands in the same change as every citation update; until then, quote the path. (AD-5 — rename resolved 2026-09-22.)
+- Files are canonical; prose links out. One real file per operational artifact; `docs/` references artifacts by repo-relative path and marks any code block non-normative. Section numbers in `docs/self-hosting-research.md` are stable citation anchors — do not renumber. That space-free path is what Story 5.3 renamed the document to, landing in the same change as every citation of it. (AD-5 — rename resolved 2026-09-22.)
 - The repo root path and npm script names are an external contract: `npm run start` stays the production entry point and must work with the repo root as cwd. Renaming the script or moving the repo requires updating the LaunchAgent plist, `ops/factory-start.sh` and the newsyslog conf in the same change. (AD-11)
 - `MASTRA_HOST` must be `127.0.0.1` — unset binds **all** interfaces, LAN included. Use the literal `127.0.0.1`, not `localhost`. TLS terminates at Cloudflare; `MASTRA_HTTPS_KEY`/`_CERT` stay unset.
 - These must stay unset or self-hosting silently breaks: `MASTRA_SHARED_API_URL` (highest-precedence auth path — defers identity to Mastra's platform with a warning only), `MASTRA_PLATFORM_ACCESS_TOKEN`/`_SECRET_KEY`/`MASTRA_PROJECT_ID`/`MASTRA_ENVIRONMENT_ID` (together they move sandboxes to Platform VMs), `E2B_API_KEY`, `SANDBOX_PROVIDER`, `WORKOS_*`, `MASTRACODE_AUTH_DISABLED` (undocumented, and also disables credential encryption).
@@ -104,7 +104,7 @@ One issue filed in GitHub, one routed from Linear, and one raised by a Slack men
 
 ## Assumptions
 
-- `docs/Self-hosting research.md` is the document the sprint-plan notes call `SELF_HOSTING_RESEARCH.md` — same content, renamed.
+- `docs/self-hosting-research.md` is the document the sprint-plan notes call `SELF_HOSTING_RESEARCH.md` — same content, renamed.
 - The brownfield facts in `brownfield.md` are observed from the working tree on 2026-09-22; none of the three sources states them.
 - `factory.kovalchuk.win` on an Active `kovalchuk.win` zone remains the intended public origin.
 - `@mastra/docker@0.8.0` and `@mastra/auth-better-auth@1.1.5` are intent, not pins — neither is installed, and both versions are inherited rather than verified against this tree. Re-verify at install.

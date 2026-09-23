@@ -14,7 +14,7 @@ mastra-factory/
   tsconfig.json              # include: ["src/**/*"] — as required
   pnpm-workspace.yaml        # template residue
   skills-lock.json
-  docs/Self-hosting research.md
+  docs/self-hosting-research.md
   .agents/ .bmad-loop/ .claude/ _bmad/ _bmad-output/   # outside both planes (AD-13)
 ```
 

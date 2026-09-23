@@ -3,12 +3,33 @@
 The operator-plane subject for the Slack application this deployment registers and owns — the app
 that carries mentions and messages between a Slack workspace and Factory's agent. This file is
 normative for the URLs Slack's console asks for, the events and settings that app is registered with,
-and what the four `SLACK_APP_*` values and `MASTRACODE_CHANNELS_PUBLIC_URL` must contain and how to
-obtain them.
+and what each key under "Keys this subject owns" below must contain and how to obtain it.
 
-`.env.schema` is the list of keys. `docs/Self-hosting research.md` §4.1 keeps the same URLs as a
+`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
+
+## Keys this subject owns
+
+The table below is the closed list of the keys this file owns, and this file is the only record
+for what each must contain and how to obtain it. The
+other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
+owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
+once.
+
+| Key | What the value must contain | Full record |
+|---|---|---|
+| `SLACK_APP_SIGNING_SECRET` | the app's signing secret — and the master switch for Slack | the `SLACK_APP_SIGNING_SECRET` section below |
+| `SLACK_APP_BOT_TOKEN` | the bot user's OAuth token, beginning `xoxb-` | the `SLACK_APP_BOT_TOKEN` section below |
+| `SLACK_APP_CLIENT_ID` | the app's OAuth client ID | the `SLACK_APP_CLIENT_ID` section below |
+| `SLACK_APP_CLIENT_SECRET` | the client secret of that same app | the `SLACK_APP_CLIENT_SECRET` section below |
+| `MASTRACODE_CHANNELS_PUBLIC_URL` | the public HTTPS origin Slack must reach | the `MASTRACODE_CHANNELS_PUBLIC_URL` section below |
+
+`.env.schema` declares and validates every key in that table and is the only list of key names;
+this file never
+restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
+by path and never copied.
 
 ## Console URLs
 
@@ -148,7 +169,7 @@ Two preconditions, both checked before the app exists rather than after:
 **Read this before step 1: the Request URL in the manifest cannot answer Slack at creation time.**
 `SLACK_APP_SIGNING_SECRET` comes *from* the app, so it does not exist until the app does — and until
 that value is in `.env` and the server has been restarted, no Slack integration is constructed and
-the webhook path `404`s (`src/mastra/index.ts:558-560`). Slack tries to verify
+the webhook path `404`s (`src/mastra/config/integrations.ts:93-95`). Slack tries to verify
 `settings.event_subscriptions.request_url` while creating the app, and it may refuse to create the
 app on that ground. That is a chicken-and-egg in the console, not a fault in the manifest, and the
 recovery is two minutes long:
@@ -319,10 +340,10 @@ reaching a rejection proves the route is registered, which means `SLACK_APP_SIGN
 when the server booted and the Slack integration was constructed.
 
 - **`404`** — no route. `SLACK_APP_SIGNING_SECRET` is unset or blank, so no integration was built
-  (`src/mastra/index.ts:558-560`) and nothing listens on that path. It is not a URL typo on this
-  side, because the URL came out of the Console URLs table; check `.env` and restart. A `404` is also
-  what a mistyped path gives, so compare the line above with the table character for character before
-  concluding anything, especially the `mastra-code` segment.
+  (`src/mastra/config/integrations.ts:93-95`) and nothing listens on that path. It is not a URL typo
+  on this side, because the URL came out of the Console URLs table; check `.env` and restart. A `404`
+  is also what a mistyped path gives, so compare the line above with the table character for character
+  before concluding anything, especially the `mastra-code` segment.
 - **A connection error or a Cloudflare `502`/`530`** — nothing to do with Slack. The tunnel is down
   or the server is not listening; go to `ops/README.md` ingress checkpoints 3 and 4 and come back.
 
@@ -371,11 +392,11 @@ Approve it and the browser should return through that callback.
   an empty or missing `SLACK_APP_CLIENT_ID` or `SLACK_APP_CLIENT_SECRET` disables them outright;
   `MASTRACODE_CHANNELS_PUBLIC_URL` disables them only when it is **present and empty** — which yields
   `""` — or when it and `MASTRACODE_PUBLIC_URL` are both unset. Merely *unset* is not enough, because
-  `src/mastra/index.ts:567` uses `??` and falls back to `MASTRACODE_PUBLIC_URL`, which this
-  deployment always sets; that fallback leaves the routes enabled and pointing at the wrong origin
-  instead, which is the `bad_redirect_uri` below rather than this bullet. The signing secret being
-  present is what makes the route exist at all, so this is a *different* failure from checkpoint 2's
-  `404`.
+  `src/mastra/config/integrations.ts:102` uses `??` and falls back to `MASTRACODE_PUBLIC_URL`, which
+  this deployment always sets; that fallback leaves the routes enabled and pointing at the wrong
+  origin instead, which is the `bad_redirect_uri` below rather than this bullet. The signing secret
+  being present is what makes the route exist at all, so this is a *different* failure from checkpoint
+  2's `404`.
 - **A redirect to `/auth/login?returnTo=…`** — the browser carries no session. Sign in first; this is
   a GET you can land on directly, and doing so signed out is the usual cause.
 - **Slack answering `bad_redirect_uri`** — the `redirect_uri` the start route built does not match

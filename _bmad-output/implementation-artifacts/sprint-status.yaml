@@ -66,10 +66,10 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: backlog
-  5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou: backlog
-  5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l: backlog
-  5-3-docs-links-out-and-the-path-loses-its-space: backlog
-  5-4-a-config-module-with-recorded-provenance-holding-storage-vec: backlog
-  5-5-extract-auth-integrations-and-sandbox: backlog
-  5-6-the-entry-is-four-things-and-the-build-proves-it: backlog
+  5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou: done
+  5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l: done
+  5-3-docs-links-out-and-the-path-loses-its-space: done
+  5-4-a-config-module-with-recorded-provenance-holding-storage-vec: done
+  5-5-extract-auth-integrations-and-sandbox: done
+  5-6-the-entry-is-four-things-and-the-build-proves-it: done
   epic-5-retrospective: optional

@@ -23,7 +23,7 @@ TypeScript on Node 22, npm, one package. The requirements contract is
 - Never hand-edit `.agents/skills/` — it is hash-locked in `skills-lock.json`, so an edit either
   breaks the hash or is overwritten. Repo-local skill overrides go to
   `src/mastra/public/factory-skills/<skill-name>/SKILL.md`.
-- Never renumber sections in `docs/Self-hosting research.md` — the numbers are cited as stable
+- Never renumber sections in `docs/self-hosting-research.md` — the numbers are cited as stable
   anchors across the spec and stories.
 - Keep secrets out of the repo: `.env` is gitignored; `.env.schema` and `.env.example` carry key
   names and shapes only.
@@ -32,12 +32,17 @@ TypeScript on Node 22, npm, one package. The requirements contract is
 
 ## Where things are
 
-- Deployment entry, and the only first-party source today: `src/mastra/index.ts`
+- Deployment entry: `src/mastra/index.ts` — a fork of a generated template entry, now reduced to
+  four things: its imports, `factory.prepare()`, the literal `new Mastra(...)` and
+  `factory.finalize()`. It reads no environment key and constructs nothing else.
+- Local deltas lifted out of that entry, plus the record of what it was forked from and how to
+  reconcile it: `src/mastra/config/` (`README.md` there; storage, vector, pubsub, auth, the three
+  integrations and the sandbox branch are all constructed in that directory, not in the entry, and
+  so is the `new MastraFactory({…})` call that assembles them — `config/factory.ts`)
 - Architecture decisions AD-1…AD-13, cited by ID throughout the stories:
   `_bmad-output/planning-artifacts/architecture/architecture-mastra-factory-2026-09-22/ARCHITECTURE-SPINE.md`
 - Epics and stories: `_bmad-output/planning-artifacts/epics.md`
-- Normative operational detail in §2–§11, not background: `docs/Self-hosting research.md` — quote
-  the path, it contains a space until Story 5.3 renames it.
+- Normative operational detail in §2–§11, not background: `docs/self-hosting-research.md`
 
 ## Running and verifying
 

@@ -3,9 +3,10 @@
 The operator-plane subject for the GitHub App this deployment registers and owns — the app that
 clones repositories, opens and reviews pull requests, and delivers repository events back to Factory.
 This file is normative for the URLs that app's console asks for, the permissions and webhook events
-it is registered with, and what each `GITHUB_APP_*` value must contain and how to obtain it.
+it is registered with, and what each key under "Keys this subject owns" below must contain and how
+to obtain it.
 
-`.env.schema` is the list of keys. `docs/Self-hosting research.md` §4.1 keeps the same URLs as a
+`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
 
@@ -13,6 +14,33 @@ Everything below that describes what the installed software does was read out of
 `node_modules/@mastra/factory` at version `0.15.0` and is cited by `file:line` against that package,
 with paths relative to `node_modules/@mastra/factory/dist/integrations/github/`. Re-read the citation
 before trusting a claim after a dependency bump.
+
+## Keys this subject owns
+
+The table below is the closed list of the keys this file owns, and this file is the only record
+for what each must contain and how to obtain it. The
+other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
+owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
+once. The `MASTRA_PLATFORM_GITHUB_*` keys are **not** here: they belong to the Mastra Platform
+integration rather than to this deployment's own GitHub App, and `README.md` owns them.
+
+| Key | What the value must contain | Full record |
+|---|---|---|
+| `GITHUB_APP_ID` | the numeric App ID GitHub assigns | the `GITHUB_APP_ID` section below |
+| `GITHUB_APP_PRIVATE_KEY` | the whole PEM on one line, newlines escaped | the `GITHUB_APP_PRIVATE_KEY` section below |
+| `GITHUB_APP_CLIENT_ID` | the app's OAuth client identifier | the `GITHUB_APP_CLIENT_ID` section below |
+| `GITHUB_APP_CLIENT_SECRET` | a client secret belonging to that same app | the `GITHUB_APP_CLIENT_SECRET` section below |
+| `GITHUB_APP_SLUG` | the final path segment of the app's public page | the `GITHUB_APP_SLUG` section below |
+| `GITHUB_APP_WEBHOOK_SECRET` | the one random string the console field and `.env` both carry | the `GITHUB_APP_WEBHOOK_SECRET` section below |
+| `MASTRACODE_GITHUB_RECONCILE_ENABLED` | left unset, so the sweep runs | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` | left unset, so the cycle is an hour | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_AUTHORIZED_BOTS` | extra reviewer bot logins to trust, if any | the `MASTRACODE_GITHUB_AUTHORIZED_BOTS` section below |
+
+`.env.schema` declares and validates every key in that table and is the only list of key names;
+this file never
+restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
+by path and never copied.
 
 ## Console URLs
 
@@ -122,13 +150,13 @@ them — `installation` most plausibly — and the alternative is another trip t
 
 `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` and
 `GITHUB_APP_SLUG` are all-or-nothing. Fill all five, or leave all five blank and run without GitHub.
-A partial fill is not a third option, and it does not announce itself the same way in both
-directions. Filling the group from the top — the App ID first, the rest "later" — stops the server
-before it starts: env validation names the first key left empty and refuses to load. Filling only
-keys from the end of the group passes validation instead, and GitHub then stays inert with nothing
-logged, because an incomplete group is never wired up (`src/mastra/index.ts:222-223` builds the
-integration only when all five are non-empty). Only all five blank is the supported way to run
-without GitHub.
+A partial fill is not a third option, and it does not announce itself the same way in both directions.
+Filling the group from the top — the App ID first, the rest "later" — stops the server before it
+starts: env validation names the first key left empty and refuses to load. Filling only keys from the
+end of the group passes validation instead, and GitHub then stays inert with nothing logged, because
+an incomplete group is never wired up (`src/mastra/config/integrations.ts:48-49` builds the
+integration only when all five are non-empty). Only all five blank is the supported way to run without
+GitHub.
 
 ## Register the app
 
@@ -319,11 +347,12 @@ the console will not show the value back to you afterwards.
 
 **It is required even with webhooks disabled.** This value is not only the webhook signature key: it
 is the first source in this deployment's chain for the secret that signs GitHub OAuth and
-installation state. `src/mastra/index.ts:548-551` resolves that secret as
+installation state. `src/mastra/config/integrations.ts:86-87` resolves that secret as
 `GITHUB_APP_WEBHOOK_SECRET` → `WORKOS_COOKIE_PASSWORD` → `SLACK_APP_SIGNING_SECRET`, and hands the
-result to the factory as `stateSecret` (`src/mastra/index.ts:616`). The GitHub integration declares
-`requiresStableStateSigner = true` (`integration.js:228`), and the factory throws while starting if a
-registered integration requires a stable signer and none is configured (`factory.js:369`).
+result to the factory as `stateSecret` (`src/mastra/config/factory.ts:85`). The GitHub integration
+declares `requiresStableStateSigner = true` (`integration.js:228`), and the factory throws while
+starting if a registered integration requires a stable signer and none is configured
+(`factory.js:369`).
 
 So the failure is a boot refusal, not a wobble: **a configured GitHub App with none of the three set
 does not start at all**, and the error names the integration —
@@ -383,6 +412,24 @@ no per-sweep interval override of their own. Left alone, an hour is what runs.
 Do not confuse either key with `MASTRA_PLATFORM_GITHUB_RECONCILE_ENABLED`, a separate key that does
 not control this sweep and stays unset in this deployment.
 
+## `MASTRACODE_GITHUB_AUTHORIZED_BOTS`
+
+**What the value must contain.** A comma-separated list of GitHub login names — reviewer bots this
+deployment trusts to trigger review and comment notifications, **on top of** the two built-in
+defaults rather than instead of them (`webhook.js:283-287`). Bare logins including the `[bot]`
+suffix GitHub actually uses (`renovate[bot]`, say); not display names, not `@`-prefixed mentions,
+and not numeric user ids. Case does not matter and neither does surrounding whitespace — each entry
+is trimmed and lower-cased, and matched against a lower-cased sender
+(`webhook.js:296-303`) — but the `[bot]` suffix is part of the login and dropping it does not match.
+
+**How to obtain it.** Nothing issues it: it is a list you choose. Read a login off a review or
+comment that bot has already left on one of your repositories — the author name on that event is the
+string this key wants. Unset is the supported state and is what this deployment runs: the defaults
+`coderabbitai[bot]` and `devin-ai-integration[bot]` (`webhook.js:287`) are then the whole trusted
+set, and a review from anything else is ignored rather than refused, which is the symptom to
+recognise. Adding a login widens what can start work on this deployment's behalf, so add one
+deliberately and only for a bot you installed.
+
 ## Checkpoints
 
 Run these in order from the repository root. Checkpoints 1 to 3 need no installation; 4 and 5 do.
@@ -405,9 +452,9 @@ Expected: six rows, every one reading `lines=1` and `set`. A plain `grep -c` is 
 because two of the three ways this goes wrong still produce the right count:
 
 - **`EMPTY`** — the key is present but its value is blank, whitespace, or `""`.
-  `src/mastra/index.ts:217-223` trims before testing, so all three are the same as absent: with any
-  of the five identity keys in that state the integration is never constructed and **nothing is
-  logged about it**. This row is the only warning you get.
+  `src/mastra/config/integrations.ts:42-49` trims before testing, so all three are the same as absent:
+  with any of the five identity keys in that state the integration is never constructed and **nothing
+  is logged about it**. This row is the only warning you get.
 - **`lines=2`** or more — the key is written twice. `.env` keeps the last occurrence, which is why
   the check reads the last line; the danger is that a duplicate of one key plus a missing other key
   gives a total of five and looks correct.

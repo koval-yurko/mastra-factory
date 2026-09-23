@@ -115,8 +115,9 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #      and its failure mode is silence, since an unrotated log just grows.
 #   7. The log paths agree between the conf and the plists, and sit under the
 #      EXPECTED_HOME that ops/install.sh creates. This is the drift these files
-#      exist to eliminate and the one docs/Self-hosting research.md §7 actually
-#      has: a conf row naming a file no plist writes rotates nothing, and a
+#      exist to eliminate and the one docs/self-hosting-research.md §7 carried
+#      until Story 5.3 replaced its copies of these artifacts with path
+#      references: a conf row naming a file no plist writes rotates nothing, and a
 #      plist log path outside the directory the installer creates is an agent
 #      that will not spawn. Guard 4 reconciles the repo root only.
 #      Together, 4 and 7 are AD-11's "update the plist, the wrapper and the conf
@@ -128,16 +129,18 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #      the prose, and the prose is what the operator actually runs, so a fifth
 #      row added to the conf or a renamed one leaves the README teaching the
 #      wrong expected list and the right one as a fault.
-#      docs/Self-hosting research.md §7.4 is the live proof that a conf and its
-#      narrative drift apart in silence: it still carries the superseded
-#      three-row version. Scoped and compared deliberately: the README side is
-#      the `### 4 — rotation is in force` section only (sliced to the next
-#      `### 5 `), so prose elsewhere — a rotated-generation glob in checkpoint 3,
-#      a bare `out.log` in a sentence — is neither a claim nor a false failure;
-#      and both sides are compared as whole absolute paths rather than bare
-#      basenames or a shared tail, so a home or directory rewritten on either
-#      side alone is caught too — a tail-only comparison passed a checkpoint 4
-#      that named /Users/bob, which is the drift this guard exists for.
+#      docs/self-hosting-research.md §7.4 was the live proof that a conf and
+#      its narrative drift apart in silence: it carried the superseded
+#      three-row version until Story 5.3 replaced the block with a reference to
+#      the conf itself, which is what guard 32 below now keeps true. Scoped and
+#      compared deliberately: the README side is the `### 4 — rotation is in
+#      force` section only (sliced to the next `### 5 `), so prose elsewhere —
+#      a rotated-generation glob in checkpoint 3, a bare `out.log` in a
+#      sentence — is neither a claim nor a false failure; and both sides are
+#      compared as whole absolute paths rather than bare basenames or a shared
+#      tail, so a home or directory rewritten on either side alone is caught
+#      too — a tail-only comparison passed a checkpoint 4 that named
+#      /Users/bob, which is the drift this guard exists for.
 #      Verified both ways in this worktree: passes as written, and fails naming
 #      ops/README.md when a conf row is dropped, when a fabricated path is added
 #      to checkpoint 4, when one of checkpoint 4's four expected paths is
@@ -196,6 +199,1031 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #      row it names is renamed, and when the path argument is dropped from the
 #      command altogether — which is the bare `-F` form that would trim every
 #      log on the host.
+#
+# The last six guards are structural: they check WHERE files are, which every
+# command above takes for granted. All eighteen read particular files by path, so
+# each of them is silent about a file that moved, vanished or appeared — the
+# layout rules in ARCHITECTURE-SPINE.md (AD-3, AD-4, AD-5) were enforced by
+# nothing until these. Guards 1, 2, 4 and 6 read the tree through `git`, so
+# gitignored paths (.env, node_modules/, .mastra/, .bmad-loop/runs/) are out of
+# view by construction and a story worktree — which checks out tracked files only
+# — sees exactly what the gate asserts; guard 2 additionally reads the spine it
+# enforces, guard 3 reads tsconfig.json from disk because that file IS its
+# subject, and guard 5 is deliberately a working-tree check (see below).
+#
+# TWO SURFACES, BOTH ASSERTED. The index and the working tree can disagree, and
+# each catches what the other cannot. A fresh story worktree checks out the INDEX,
+# so a staged 0-byte blob or a staged symlink ships the wrong bytes even when the
+# file on disk is perfect. But the orchestrator does NOT commit the index it
+# verified: `bmad_loop.verify.finalize_commit` runs `git add -A` after this gate
+# passes, so the WORKING TREE is what the story commit carries — an unstaged `rm`
+# or `: >` of a seeded artifact, or a stray untracked file at root, would be
+# verified green and then committed. Guards 1 and 5 are therefore the same rule at
+# the two surfaces, and guard 2 reads both (`git ls-files` plus `git ls-files -o
+# --exclude-standard`, which keeps gitignored paths out of view exactly as before).
+#   1. All 12 operational artifacts the spine's Structural Seed names are tracked
+#      as real, non-empty files (AD-5: "every operational artifact exists as
+#      exactly one real file at its own path"). Nothing above notices a deleted
+#      artifact as a deletion: guards 8-11 compare ops/README.md against the conf,
+#      the plists and the wrapper, and report a missing file only when they happen
+#      to open it; apps/*/README.md, apps/slack/manifest.yaml, sandbox/README.md
+#      and sandbox/factory-sandbox.Dockerfile are opened by no command here at
+#      all, so any of them could be deleted or emptied with the gate staying
+#      green. Asserted against the INDEX — `git ls-files -s` mode and
+#      `git cat-file -s :<path>` — because the index is what a fresh worktree
+#      checks out; guard 5 below asserts the same twelve paths in the working
+#      tree, which is what the story commit carries. Both
+#      halves matter and were verified: a path staged as a 0-byte blob with the
+#      full file still on disk passes a working-tree `test -s` but fails here, and
+#      a path staged as mode 120000 (symlink) likewise — `test -s` follows the
+#      link and sees the target's bytes, while the worktree would check out a
+#      symlink rather than the artifact. Mode must be 100644 or 100755.
+#   2. Root is the closed set AD-3 enumerates, and the two lists are DERIVED from
+#      ARCHITECTURE-SPINE.md rather than copied here: the allowlist from the AD-3
+#      table's rows, the directories from its closed-set bullet. That is the whole
+#      point — a hand copy would let a session widen root by appending one name to
+#      a `case` pattern with the spine untouched, which is exactly the silent
+#      local root addition AD-3 forbids and this guard exists to prevent. Now the
+#      only way to admit a new root entry is to amend AD-3, which is the spine
+#      change AD-3 asks for. Resolves exactly one spine file and fails loudly if
+#      the glob matches none or several, or if either extraction comes back
+#      without `package.json` / `src` — a silently empty list would admit
+#      everything. Emptiness is not the only way an extraction goes wrong, and the
+#      other way widens instead of narrowing: both `sed` ranges must actually
+#      TERMINATE on their closing anchor, or sed prints to end of file and the
+#      closed set absorbs every backticked path in the rest of the spine. Verified:
+#      with the directory bullet's old prose end anchor reworded, a tracked root
+#      `config/` was admitted, because `config` is backticked further down the
+#      document. So the directory range now ends on the next bullet (`**Root
+#      allowlist — closed set`) rather than on a sentence, and both ranges assert
+#      their last extracted line matches the closing anchor. Three assertions on
+#      the sets themselves: every root file is in the allowlist, every root
+#      directory is in the closed set, and every allowlist entry git does not
+#      report as ignored is actually tracked. The third is what makes "root is
+#      exactly these" true in both directions; without it `git rm --cached
+#      docker-compose.yml` left the gate green. It asks `git check-ignore` rather
+#      than hardcoding `.env` — the one hand-copied element left in an otherwise
+#      derived guard, which made a second gitignored AD-3 row (`.env.local`, say)
+#      fail as "not tracked at root". The directory side stays a subset check
+#      because node_modules/ is never tracked. Paths are
+#      read with `git -c core.quotePath=false ls-files` AND `ls-files -o
+#      --exclude-standard` (see TWO SURFACES above — an untracked stray root file
+#      passed this guard and was then committed by the orchestrator) through
+#      `while IFS= read -r`, collecting offenders and failing outside the pipeline:
+#      the old
+#      unquoted `$(git ls-files)` word-split `my config.json` into an offender
+#      named `my`, and C-quoted a legal `docs/café.md` into a FALSE failure on
+#      `"docs`. Nothing above looks at root as a set — the AD-4 path guard filters
+#      by extension, so a stray root .md, .yaml or .json passes it. The message
+#      names the offender in full, states that tracked and untracked-but-not-
+#      ignored both count and why, and says which of the two fixes applies: move it
+#      under its subject, or amend AD-3 naming the tool that fixes its location
+#      (the test the four non-obvious entries — AGENTS.md, README.md,
+#      skills-lock.json, .mastra-project.json — pass).
+#   3. tsconfig.json `include` is exactly ["src/**/*"]. This is the premise both
+#      `npm run check` and the AD-4 path guard rest on, and neither can see it:
+#      widening `include` makes `tsc` cover more, so the typecheck still passes,
+#      and the path guard keeps filtering the same extensions. AD-4 calls
+#      widening it a spine change; `tsc` cannot report its own blind spot, so the
+#      one entry is asserted literally here. Fails naming the value found,
+#      including when the key is dropped altogether (which silently makes tsc
+#      include everything). `tsc` accepts JSONC, so `//` line comments are
+#      stripped before parsing and the read+parse is wrapped: a legal `// src
+#      only` line made a bare JSON.parse die with an uncaught SyntaxError and a
+#      stack trace instead of a guard message, and a missing file threw ENOENT the
+#      same way. Anything still unparseable is reported as "tsconfig.json
+#      unreadable or not valid JSON: <message>", so this guard always fails as
+#      itself. Only full-line comments are stripped, never a `//` inside a string.
+#      Known and deliberate limit: three other JSONC forms `tsc` accepts — a `/* */`
+#      block comment, a `//` after a value, a trailing comma — are reported as
+#      unparseable rather than accepted. That is a false gate failure on a legal
+#      file, traded against regex-stripping JSONC properly; it fails loudly with
+#      the message above, and the honest fix (`tsc --showConfig`) would resolve
+#      `extends` and so stop asserting what AD-4 asks for, which is that
+#      tsconfig.json ITSELF reads include: ["src/**/*"]. Delete the comment, or
+#      widen the stripping, the day someone needs one.
+#   4. .agents/skills/ AND skills-lock.json are unchanged in the INDEX, asserted
+#      as one sha256 over their combined `git ls-files -s` line set (mode, blob
+#      sha and path per file). Both, because they are the two halves of the same
+#      AD-13 rule and this guard's own message tells the maintainer to move them
+#      together — with the tree alone pinned, a committed edit to the lockfile's
+#      `computedHash` passed all 22 commands. The
+#      `git status --porcelain` guard above compares the working tree and the
+#      index against HEAD, so it catches an edit that is merely unstaged or
+#      staged but goes blind the moment the edit is COMMITTED — verified: after
+#      `git commit` of an edit under that tree it exits 0 while this guard exits
+#      1. AD-13 calls this tree vendored and never hand-edited, and
+#      skills-lock.json's own `computedHash` is not reproducible from the files
+#      (tried: sha256 of SKILL.md, of its content without the trailing newline,
+#      and of both files concatenated), so a guard cannot re-derive it — git's
+#      content addressing is the substitute. Hashing the index rows catches an
+#      edit, an addition and a deletion alike, needs no knowledge of the CLI's
+#      internals, and changes only when the tracked content changes. The digest is
+#      a pinned literal on purpose: a legitimate update through the Mastra CLI
+#      moves skills-lock.json and this constant in one commit, which is the review
+#      moment AD-13 wants — a coupling AD-13 itself now states, so it is not
+#      knowledge trapped in this comment. Prints both digests so the new value is
+#      copy-pastable. `git`'s exit status is checked on its own, before hashing,
+#      and the row set is checked for emptiness: an earlier draft tested only the
+#      digest for emptiness, which never fires, because `shasum` of empty input is
+#      the perfectly non-empty e3b0c442… — so a failing git reported "digest
+#      changed: found e3b0c442…" and told the maintainer to regenerate a vendored
+#      tree that was fine. Infrastructure failure now says so.
+#   5. The same twelve seeded artifacts as guard 1, asserted in the WORKING TREE
+#      (`test -L`, `test -f`, `test -s`). See TWO SURFACES above: `git add -A` in
+#      the orchestrator's finalize step is what commits the story, so an unstaged
+#      `rm apps/github/README.md` or `: > apps/slack/manifest.yaml` passed the
+#      index-only guard 1 and was then committed — verified before the fix, and the
+#      matrix row this story was written against names exactly that mutation. The
+#      symlink arm is first because `test -f`/`test -s` follow links and would
+#      accept one.
+#   6. skills-lock.json is unmodified in the working tree or index, mirroring the
+#      pre-existing `git status --porcelain -- .agents/skills` guard, whose
+#      pathspec stops at that tree and so never saw its sibling. Guard 4 pins both
+#      files in the INDEX, which is what catches a COMMITTED edit; this catches the
+#      unstaged one, which all 22 earlier commands passed green — the same
+#      two-surface split as guards 1 and 5. Appended rather than widening the
+#      existing pathspec, because `[verify].commands` is append-only.
+# All six verified both ways in this worktree: they pass as written, and fail
+# naming the offender when a seeded conf is removed from the index, when
+# apps/slack/manifest.yaml is truncated, when it is staged as a 0-byte blob with
+# the full file on disk, when a seeded path is staged as a symlink, when a
+# vitest.config.ts is tracked at root, when a root file with a space in its name
+# is tracked (named in full), when an AD-3 allowlist entry is untracked, when a
+# tests/ directory is added, when the AD-3 table or closed-set bullet cannot be
+# extracted, when `include` is widened to ["src/**/*", "ops/**/*"] or removed,
+# when tsconfig.json is malformed or absent, and when an edit, an addition or a
+# deletion under .agents/skills/ — or an edit to skills-lock.json — is staged or
+# committed, the committed case being the one the `git status` guard above stops
+# catching. And at the working-tree surface: when a seeded artifact is truncated,
+# deleted or replaced by a symlink WITHOUT staging it, when a stray root file or
+# root directory is merely untracked, when skills-lock.json is edited without
+# staging it, and when either spine extraction range would run past its closing
+# anchor. Verified NOT to fail on the legitimate cases that broke the earlier
+# drafts: a non-ASCII path like docs/café.md, a JSONC full-line comment in
+# tsconfig.json, an AD-3 table de-indented by a markdown formatter, a second
+# gitignored AD-3 allowlist row, and a full `npm ci && npm run check && npm test`
+# run, which leaves no untracked non-ignored file for guard 2 to trip on. A root
+# name added to the AD-3 table is admitted only once the
+# spine says so, which was checked by adding one and removing it again.
+#
+# The last six guards are AD-6: environment-key truth is split by nature, and
+# neither half was checked. `.env.schema` is the only list of keys; the owning
+# subject README is the only record of what a value must contain and how to
+# obtain it. Entries 2 and 3 above open the schema — they resolve it and read
+# one sensitivity marking — and nothing at all opened the READMEs, so the split
+# existed as prose in six opening paragraphs and as an audit somebody ran once.
+# These six make it a gate. All are `git`-mediated or read fixed paths, so the
+# operator's `.env` is out of view by construction (it is gitignored, and guard
+# 5 asserts that it stayed that way).
+#   1. THE OWNERSHIP PARTITION. Each of the six READMEs — the five operator-plane
+#      subjects plus README.md, which AD-6 now names the residual owner for keys
+#      with no subject directory — carries a `## Keys this subject owns` section
+#      (`## Keys this file owns` in README.md). The six owner PATHS are a literal
+#      list here, unlike guard 19, which derives root from AD-3: AD-3's root
+#      closed set contains directories that are not owned-keys subjects (src/,
+#      docs/, .agents/ …), so it is not the right source, and there is no other
+#      machine-readable enumeration of the owners. What is derived is everything
+#      that matters — the key sets themselves, read out of the six tables.
+#      Each file must carry EXACTLY ONE such heading, counted before anything
+#      else: with two, sed would end the first section's range at the second and
+#      every row below it would go unclaimed, which is the same silent widening
+#      as the EOF case and was verified to pass before the count was added. The
+#      slice then runs to the NEXT `## ` heading and must actually terminate on
+#      one, so a section written last in its file cannot run to EOF and claim
+#      every backticked key in the rest of the document. Each extraction is
+#      checked for emptiness, so a renamed column or a row written without
+#      backticks fails loudly rather than passing vacuously. The row regex is
+#      whitespace-tolerant around the backticked first cell: a markdown formatter
+#      that pads cells to align columns would otherwise make every row vanish and
+#      a doubly-claimed key pass — the same coupling Story 5.1 had to patch.
+#      Three assertions on the sets: no key is claimed twice (the message names
+#      the key AND both files), every claimed key is declared in .env.schema, and
+#      every declared key is claimed by exactly one README. The last is what
+#      makes the partition TOTAL — without it a key could be dropped from every
+#      README and the gate stay green.
+#      A fourth assertion pins WHICH subject, for the four families whose owner
+#      is mechanical: GITHUB_APP_* to apps/github/, LINEAR_* to apps/linear/,
+#      SLACK_APP_* to apps/slack/, FACTORY_SANDBOX_* to sandbox/. Disjointness
+#      and totality alone do not say that — moving the SLACK_APP_BOT_TOKEN row
+#      into README.md's residual table left the partition total and the gate
+#      green, with a Slack key's record claiming to live at root. This is a
+#      prefix rule, not the per-key enumeration AD-6 declined to write down: it
+#      does not go stale when a key is added, only when a family is.
+#      Each section must also reference `docs/self-hosting-research.md` §11, the
+#      trap table, BY PATH rather than copying it. The guard asserts that file
+#      EXISTS as well, so the coupling bites in both directions: renaming it
+#      without touching the READMEs left six dangling references and all six
+#      guards green. That path was a deliberate forward dependency, and Story 5.3
+#      spent it: the document was renamed off its space-carrying name, and the
+#      three literals in this guard moved with all six READMEs in that one
+#      change. The rest of 5.3's own criterion — that a repo-wide search for the
+#      old path comes back empty — is guard 31 below, which is also why this
+#      guard's three literals are the only ones here that were ever allowed to
+#      change: `[verify].commands` is otherwise append-only.
+#   2. Every literal `process.env` read under src/ is declared in .env.schema,
+#      in both the `process.env.KEY` and the bracketed `process.env["KEY"]` /
+#      `process.env['KEY']` spellings. AC2's own wording is "every key the
+#      deployment sets", but the deployment's .env is untracked and invisible
+#      here; a key first-party code READS is the same set one step earlier and is
+#      greppable. Six keys were read and declared nowhere when this was written
+#      (NODE_ENV, REDIS_URL, E2B_API_KEY, MASTRACODE_AUTH_DISABLED,
+#      MASTRACODE_GITHUB_AUTHORIZED_BOTS, MASTRACODE_DISPATCH_MAX_IN_FLIGHT).
+#      Paths come from `git -c core.quotePath=false ls-files` over every
+#      first-party extension AD-4 admits, so a non-ASCII filename is not silently
+#      skipped as a C-quoted string.
+#      TWO CLASSES STAY INVISIBLE to it, and only one of them is harmless.
+#      `process.env[key]` over LOCAL_SANDBOX_ENV_KEYS forwards HOST variables
+#      into sandboxes — inherited, never configured here, so its invisibility is
+#      correct. But `src/mastra/config/sandbox.ts:287-289` also reads
+#      MASTRA_PLATFORM_ACCESS_TOKEN, MASTRA_PLATFORM_SECRET_KEY,
+#      MASTRA_ENVIRONMENT_ID and MASTRA_PROJECT_ID through `process.env[key]`
+#      over ARRAY LITERALS, and those four are configuration. All four are
+#      declared today and README.md claims them, so the gate is not lying now —
+#      but a fifth key added to such a literal would not be caught. Reading the
+#      array elements would need a parser, not a grep; the honest statement is
+#      that this guard covers literal reads and that array-literal reads are a
+#      known gap.
+#   3. .env.schema and .env.example carry the same keys in the same ORDER.
+#      .env.example is the file an operator copies to .env, and nothing else
+#      compares the two — `varlock load` never opens the example. A key declared
+#      on one side only, or moved on one side only, is how the copy an operator
+#      actually edits stops being the list. Both extractions require the
+#      assignment to run to end of line with no space after the `=`, so a prose
+#      line like `# NODE_ENV=development wins over that default` is not read as a
+#      phantom key — which it was, and which reported as a bogus ORDER failure.
+#      Duplicate names are checked on each side BEFORE the order comparison, for
+#      the same reason: a repeated key otherwise surfaced as "different ORDER"
+#      and misdirected the fix.
+#   4. Every key the deployment SETS is declared: both plists'
+#      `EnvironmentVariables`, every `export KEY=` in ops/*.sh (the wrapper is a
+#      deployment-set site exactly as the plists are — it exports PATH and
+#      DOCKER_HOST), and every `${KEY}` docker-compose.yml interpolates. Each
+#      plist is checked individually: a `plutil` error fails as itself, and a
+#      plist contributing no key fails naming that plist, because the whole-set
+#      sentinel alone let one plist lose its dict while the other kept the set
+#      non-empty. The carve-out list is DERIVED, not hardcoded — it is the
+#      `Not .env keys:` line of ops/README.md, where PATH is recorded as a
+#      process-environment setting the plists and the wrapper make rather than
+#      configuration. So exempting a key means writing down why, in the file that
+#      owns the deployment, instead of editing a pattern here. Only BACKTICKED
+#      names on that line are read: extracting every ALL-CAPS word let a name
+#      written in the prose after the list silently exempt a real plist key,
+#      which is why ops/README.md states the backticked form as the rule. An
+#      empty or missing carve-out line fails as itself rather than failing on
+#      PATH. ops/README.md says beside that line that the gate reads it.
+#   5. SECRETS NEVER ENTER THE REPO, at two surfaces. No member of the gitignored
+#      `.env.*` family is in the index — not just `.env`: .gitignore negates only
+#      .env.example and .env.schema, and README.md records that `npm run dev`
+#      also loads .env.local and .env.development, so `git add -f .env.local` was
+#      unchecked. The assertion is a listing filter rather than a fixed name
+#      list, so a family member nobody thought of is caught too. The filter is
+#      anchored at any path segment, not only at root: `git add -f apps/.env`
+#      with a password in it was unchecked while `.env` at root was not, and
+#      .gitignore ignores the family at every depth. Every other guard here that
+#      reads the tree through `git` depends on this staying true.
+#      And no tracked non-vendored file matches a live credential shape:
+#      xox[baprs]-, xapp-, gh[pours]_, github_pat_, sk-, lin_api_, AKIA, and a PEM
+#      private-key header followed by up to four non-base64 characters and then
+#      16 base64 ones. That tolerance is what catches the `\n`-escaped single-line
+#      form apps/github/README.md tells the operator to produce, which a
+#      base64-immediately-after-header pattern missed; the 16-character run is
+#      what keeps the `...`-truncated placeholders in .env.schema and
+#      apps/github/README.md from matching. grep is line-based, so the header
+#      shape cannot reach the body of a CONVENTIONAL multi-line PEM — the format
+#      a downloaded GitHub App key actually has, and which passed. A whole-line
+#      base64 run of 60+ characters covers that body, and there is no such line
+#      in the tree today. The two secrets README.md tells the operator to GENERATE
+#      (BETTER_AUTH_SECRET, FACTORY_CREDENTIAL_ENCRYPTION_KEY) have no prefix to
+#      match on at all, so they are matched by name against a long base64 value —
+#      the realistic case being a .env line pasted into a document.
+#      node_modules/, .agents/ and skills-lock.json are excluded as vendored.
+#   6. THE RESTATEMENT LINE, which was the one acceptance criterion with no gate
+#      and regressed silently in all three directions. No owned-keys README names
+#      @required, @public, @sensitive or @type=, nor restates a declared pattern
+#      in words instead of sigils — "fails the pattern" and "varlock load" are on
+#      the list because the sandbox/README.md sentence this story REMOVED used
+#      exactly that wording and carried no sigil, so it could be pasted straight
+#      back green. AD-6's line is "a README may say what goes wrong and what the
+#      operator sees"; `apps/github/README.md`'s "passes validation" stays on the
+#      allowed side and is deliberately not on the list.
+#      Neither .env.schema NOR .env.example carries a credential-generation
+#      command (openssl, ssh-keygen, /dev/urandom, /dev/random, uuidgen, pwgen,
+#      gpg --gen) or provider-console navigation. The example is read because it
+#      is the copy an operator edits and it carries the same comments: the
+#      openssl how-to and the Slack console paths were removed from BOTH files by
+#      this story, and only one side was checked. Navigation is told from the
+#      legitimate state-signer chain by what sits beside the arrow: `A → B`
+#      between ALL-CAPS key names passes, an arrow with a lower-cased console
+#      section on either side ("Basic Information → App Credentials") fails. A
+#      plain `>` between two words is navigation too — "Basic Information > App
+#      Credentials" passed the arrow scan, and so did the comma-separated prose
+#      rewrite of the GitHub path this story deleted; there is no such `>` in
+#      either file today. This guard extracts nothing, so its sentinel is that
+#      all eight files it opens are non-empty rather than merely present. All
+#      checks report file, line and the offending text, and all are reported in
+#      one run rather than stopping at the first.
+# All six verified both ways in this worktree: they pass on the settled tree, and
+# fail naming the offender when a `PORT` row is added to sandbox/README.md (named
+# with both owning files, and still caught when a formatter has padded the cells
+# of the ops row), when the `DOCKER_HOST` row is deleted from ops/README.md, when
+# a `NEW_KEY` row is added to apps/slack/README.md, when the heading is renamed
+# in sandbox/README.md, when the §11 reference is dropped from ops/README.md,
+# when a second owned-keys section is added mid-file or appended at EOF, when
+# `process.env.FOO` or `process.env["ZZ"]` is added to src/mastra/index.ts (named
+# with file and line), when a key is added to .env.schema alone, when a key line
+# is duplicated in .env.example, when `BAR` is added to the factory plist or
+# `export MASTRACODE_ZZUNDECLARED=1` to ops/factory-start.sh (named with the file
+# and the recorded carve-outs), when the colima plist loses its
+# EnvironmentVariables dict, when `.env` or `.env.local` is `git add -f`-ed, when
+# a fake `xoxb-`, `xapp-`, `\n`-escaped PEM, conventional multi-line PEM or
+# generated `BETTER_AUTH_SECRET=` value is written into a tracked file, when
+# `apps/.env` is `git add -f`-ed, when `docs/self-hosting-research.md` is renamed
+# under the READMEs, when a `SLACK_APP_*` row is moved into README.md's residual
+# table, when a plist key is exempted by an ALL-CAPS word written as prose after
+# the carve-out list, and when `openssl rand -base64 32` (in either env file), a
+# Slack console path written with `→` or with `>` (in either env file), an
+# `@required` sentence, or a "fails the pattern … varlock load" sentence is
+# re-added to the file it was moved out of. Verified NOT to fail on
+# the legitimate cases: the ALL-CAPS state-signer chain in .env.schema, the
+# `...`-truncated PEM and token placeholders in .env.schema and apps/*/README.md,
+# and a prose `# NODE_ENV=development …` comment line in .env.example.
+# The last three guards are AD-5 and FR32 at the one place they were still only
+# prose: the docs/ directory itself. AD-5 says every operational artifact is
+# exactly one real file and that docs/ references it BY PATH instead of
+# reproducing it; FR32 says any code block left in docs/ is marked
+# non-normative; NFR9 says the research document's section numbers are stable
+# citation anchors. Until Story 5.3 that document reproduced five committed
+# artifacts as fenced blocks, three of which had already drifted from the real
+# file: ops/factory-start.sh was 19 lines against the wrapper's 130, the
+# factory plist block ran a ~/bin path nothing installs, and the rotation conf
+# block carried three rows against the conf's four — which ops/README.md had to
+# apologise for in supervision checkpoint 4. Nothing here opened that document.
+# Commands 1-7 are npm, varlock, tsc, vitest and the two original AD-4/AD-13
+# guards; 8-18 read ops/; 19 and 23 the seeded artifacts, in the index and in
+# the working tree; 20 the AD-3 root closed set; 21 tsconfig; 22 and 24 the
+# vendored skills lock; 25-30 the schema, its operator copy and the six
+# owned-keys READMEs. Only guard 25 touched the research document, and only to
+# assert that it EXISTS. So AD-5's docs/ half, FR32 and NFR9 were enforced by
+# nobody.
+#   1. THE RENAME LANDED, AND THE OLD FILENAME IS GONE.
+#      docs/self-hosting-research.md is tracked as a real, non-empty file AND
+#      present non-empty in the working tree — both halves, because the index
+#      and the tree fail apart: a rename that has not been staged leaves the
+#      index green while every citation resolves to nothing, and a staged
+#      0-byte blob is green in the tree while the gate's own worktree, built
+#      from tracked files only, gets an empty document. And
+#      no tracked file in scope still names the space-carrying original. The
+#      needle is the old FILENAME, matched case-insensitively — anchored on the
+#      filename rather than on the English phrase, which is what keeps a
+#      sentence like "see the self-hosting research notes" from failing the
+#      gate, and which the hyphenated new name cannot match. The space was a
+#      shell-quoting footgun on a path carried by 14 citations across seven
+#      first-party files and by three literals inside guard 25, and the failure
+#      mode of a stale citation is silence: it reads as correct and resolves to
+#      nothing.
+#      THREE SPELLINGS, not one, because a space in a path is exactly what
+#      citations work around: the literal space, the %20 of a markdown link,
+#      and the backslash-escaped form a shell line carries. With only the
+#      literal spelling, `[notes](docs/Self-hosting%20research.md)` and
+#      `docs/Self-hosting\ research.md` both passed. The old PATH is checked
+#      separately against the tracked file list, since a file re-created there
+#      reintroduces the footgun without any file having to cite it.
+#      THE CITATIONS ARE ASSERTED POSITIVELY TOO. Sweeping for the old name
+#      only pins the previous spelling: repointing both AGENTS.md citations at
+#      a path that does not exist, or dropping the companions: entry from
+#      SPEC.md, left all 33 commands green. Guard 25 covers the six owned-keys
+#      READMEs; this half covers AGENTS.md and the contract documents, each of
+#      which must still carry the new path by name.
+#      TWO SETS, SWEPT DIFFERENTLY, because _bmad-output/ holds two kinds of
+#      file. The frozen run records — everything under
+#      implementation-artifacts/, the research/ tree, the .memlog.md and
+#      reviews/ files — are what sixteen finished runs actually cited, and
+#      rewriting them would falsify the record, so the whole tree is excluded
+#      by path. The LIVE contract documents in it are then named back in
+#      individually: SPEC.md, brownfield.md and extension-seams.md under
+#      specs/, epics.md, and the globbed architecture/*/ARCHITECTURE-SPINE.md.
+#      Without that, restoring the old path in SPEC.md's companions: list left
+#      all 33 commands green, and the acceptance criterion covering those
+#      documents was asserted once and then unpinned. Each is required to
+#      resolve BY NAME rather than counted, so a renamed or moved one fails
+#      here instead of being masked by a second match elsewhere in the glob.
+#      extension-seams.md is swept but not required to cite the document: it is
+#      a SPEC.md companion that does not name it today, and a sweep list and a
+#      citation list are not the same list. .bmad-loop/ is excluded for a
+#      mechanical reason as well as an AD-13 one: this guard carries the old
+#      filename as its own search string.
+#   2. THE FIVE ARTIFACTS ARE REFERENCED, NOT REPRODUCED. For each of
+#      sandbox/factory-sandbox.Dockerfile, both ops/launchagents/*.plist,
+#      ops/factory-start.sh and ops/newsyslog/ai.mastra.factory.conf: the
+#      document names its repo-relative path IN PROSE, and carries none of
+#      several signature lines read out of the artifact itself at run time.
+#      Read rather than hard-coded on purpose — pinning FROM
+#      node:22-bookworm-slim into this file would tie the guard to a Dockerfile
+#      line that is free to change, while extracting it keeps the guard asking
+#      the real question, is this artifact's content reproduced in the
+#      narrative, as the artifact evolves.
+#      SEVERAL lines, not one, and per-artifact rather than generic. A single
+#      signature is defeated by pasting the body back with that one line
+#      omitted, which was true of the Dockerfile's FROM, the wrapper's shebang
+#      and either plist's ProgramArguments key. And the two plists must not
+#      share a signature: <key>ProgramArguments</key> is in both, so one plist
+#      pasted back was reported against the other as well, and a factory plist
+#      block written without that key was missed entirely. Each plist is
+#      matched on lines only it has — the colima binary, --foreground and
+#      --mount-type on one side; caffeinate, ProcessType and the wrapper path
+#      on the other. A per-artifact sentinel requires at least two signature
+#      lines, so a broken extraction fails as itself instead of passing
+#      vacuously. Both sides are compared with whitespace squeezed, because the
+#      three-row conf block in the old §7.4 was column-aligned differently from
+#      the conf and an exact-bytes comparison would have missed exactly the
+#      copy this guard exists to catch.
+#      BODY, NOT FRAME, for the two artifacts whose distinctive lines were
+#      structural keywords. Matching the Dockerfile on FROM/WORKDIR/CMD covered
+#      3 of its 19 lines, and the wrapper on shebang/readonly/export/exec 10 of
+#      its 130: both bodies — every RUN layer, the whole bounded wait loop —
+#      were pasted back whole minus those lines with the gate green. Both are
+#      now matched on length instead, every line long enough to be distinctive,
+#      which needs no list of keywords to stay current. The plists and the conf
+#      keep their keyword patterns, because there the point is telling the two
+#      plists apart. The conf is anchored on the log-path column rather than on
+#      koval:staff, so changing the rotation owner does not collapse the
+#      extraction to one line and fail as a broken extraction.
+#      A case arm with no pattern is a failure, not an empty pattern: grep -E
+#      "" matches every line, so a sixth artifact added without its own arm
+#      would silently treat the whole file as signature.
+#      The reference half reads PROSE ONLY, through the same fence walk as
+#      guard 33: sandbox/factory-sandbox.Dockerfile also appeared inside §8's
+#      build-order block, so an unscoped grep let §2.1's real reference
+#      sentence be deleted with the gate staying green. Non-normative marker
+#      lines are dropped from that prose for the same reason — a marker names
+#      the artifact it points at, so §2's marker alone satisfied the check for
+#      the colima plist while §7.1 could lose every real reference to it. The
+#      two halves catch opposite mistakes — dropping the reference leaves the
+#      document unable to point at the file, re-pasting the block puts the
+#      second copy back.
+#   3. EVERY FENCE IN docs/ IS MARKED, AND THE SECTION NUMBERS HOLD. AD-5's "a
+#      code block in docs/ is illustrative only and must be marked
+#      non-normative" has no checkable form unless the marker is mechanical, so
+#      the marker is the literal word Non-normative on the line DIRECTLY above
+#      the opening fence — the one position a guard can find without parsing
+#      markdown, and the position a reader meets before the block rather than
+#      after it. The marker half runs over EVERY tracked docs/*.md, because
+#      FR32 and AD-5 bind the directory and not one file: docs/bmad-loop.md
+#      carried ten unmarked blocks while the rule was enforced nowhere. The
+#      message names the file as well as the line.
+#      The fence walk strips leading whitespace before testing and accepts ~~~
+#      as well as three backticks. A column-0, backtick-only test missed an
+#      indented block inside a list item and a tilde-delimited block outright
+#      and — worse — read an indented opening fence paired with a column-0
+#      closing one as open/close inverted for every block after it. A block is
+#      closed only by its own delimiter, and the preceding line is compared
+#      stripped too. The walk is awk, which reads a final line carrying no
+#      trailing newline; a shell read loop dropped it and reported a false
+#      unclosed fence. Eight blocks survive in the research document, including
+#      the §1 architecture diagram, which is not code: a guard that has to
+#      decide what counts as code is a guard that cannot run.
+#      The heading half stays scoped to docs/self-hosting-research.md, whose
+#      numbers are the citation anchors. It asserts that the 24 recorded
+#      anchors — 0 1 2 2.1 2.2 2.3 3 3.1 3.2 3.3 4 4.1 5 6 7 7.1 7.2 7.3 7.4
+#      7.5 8 9 10 11 — still appear IN THAT ORDER as a subsequence of the
+#      document's heading numbers, not that the sequence equals them. NFR9
+#      forbids renumbering an existing anchor, not adding a section, and exact
+#      equality failed a legitimate new ### 2.4 or ## 12. Renumbering ### 7.5
+#      to ### 7.6 still fails, because 7.5 is then missing from the sequence,
+#      and the message prints the expected list and the actual sequence side by
+#      side. The headings are read out of the FENCE-STRIPPED prose, through the
+#      same walk the marker half uses: reading raw lines let a "### 7.5" written
+#      inside an illustrative block stand in for the real anchor, so the
+#      renumbering above passed with the decoy in place.
+# All three verified both ways in this worktree. They pass on the settled tree,
+# and they fail naming the offender: when the old filename is written back into
+# README.md as a literal space, as %20 or backslash-escaped, or restored in
+# SPEC.md's companions: list (guard 31, file:line:text); when a tracked file is
+# created at the old space-carrying path, and when AGENTS.md or a contract
+# document stops naming the new one (guard 31, naming the file); when the
+# Dockerfile, the wrapper or either plist body is pasted back — including with
+# its single most distinctive line omitted, and including the Dockerfile's RUN
+# layers or the wrapper's wait loop with every structural keyword line stripped
+# — and when the rotation rows are pasted back under a different column
+# alignment (guard 32, naming the one artifact and the signature lines it
+# matched); when every ops/factory-start.sh reference is dropped from §7.2,
+# when §2.1's reference sentence is deleted while the path still sits inside a
+# fenced block, and when a section loses its reference while a Non-normative
+# marker elsewhere still names the artifact (guard 32, naming the artifact
+# whose path the prose no longer carries); when a Non-normative marker is
+# deleted from either docs/*.md, and when an unmarked block — at column 0,
+# indented inside a list item, or ~~~-delimited — is added (guard 33, naming
+# file and line); and when ### 7.5 is renumbered to ### 7.6, with or without a
+# fenced "### 7.5" planted in its place (guard 33, printing both sequences).
+# Verified NOT to fail on the legitimate cases that broke the earlier drafts:
+# the prose sentence "see the self-hosting research notes", a new ### 2.4 and a
+# new ## 12. heading, and a document whose last line is a fence with no
+# trailing newline.
+# One case is owned by guard 31 alone and is reported by all three: renaming
+# the document again. Guard 31 names the missing path and who cites it; guards
+# 32 and 33 open that path and say so rather than skipping, because a guard
+# that passes when its subject is absent is the vacuous pass every sentinel in
+# this file exists to prevent. Guard 25 fails in that run too, by design — its
+# three literals are the one edit append-only admits, and Story 5.3 made it.
+# The last three guards are AD-8, AD-7 and AD-2 at the place Story 5.4 moved
+# them to. `src/mastra/index.ts` was 636 lines of construction forked from
+# `npm create factory`, and nothing in the repository recorded what it was forked
+# from — so reconciling with a future Mastra template update was archaeology
+# rather than a three-way diff (FR35). Three upstream infrastructure concerns,
+# storage, vector and pubsub, sat inline in that entry, and three of the four
+# keys they read were read TWICE each: `DATABASE_URL` and `APP_DATABASE_URL` in
+# the resolution and again in the deprecation check, `NODE_ENV` in both halves of
+# the development-mode test. Guard 26 is the only command above that looks at a
+# `process.env` read at all, and it asks whether the key is DECLARED — never how
+# many times it is read, nor which file reads it. Nothing asked where a concern
+# is constructed, and nothing but prose asked the entry to keep its own
+# `new Mastra(...)`. So AD-7's one-read-site rule, AD-8's extraction rule and
+# AD-2's indivisible entry were enforced by nobody.
+#   1. THE PROVENANCE RECORD EXISTS AND IS CURRENT.
+#      `src/mastra/config/README.md` is tracked as a regular, non-empty file —
+#      mode asserted in the INDEX, because this gate runs in a worktree built
+#      from tracked files only, so a record that was never staged is not present
+#      at all where the guard looks, and a symlink is not a record. It names
+#      `create-factory`, the scaffold that produced the entry; it names exactly
+#      ONE 40-hex commit, which must resolve here AND have a
+#      `src/mastra/index.ts` blob, because `git show <sha>:src/mastra/index.ts`
+#      is the only retrievable base for a three-way diff — no upstream template
+#      repository URL, git ref or `create-factory` version is recorded anywhere
+#      in this repository, so that blob IS the base. Exactly one id, not at
+#      least one: two candidate forks is no fork point. The id is read off the
+#      `Fork commit` LINE rather than swept out of the whole file, so the record
+#      can grow the reconciliation history its own must-update sentence asks for
+#      — each past reconciliation naming the commit it landed on — without a
+#      second 40-hex id reading as a second candidate fork point.
+#      TWO VERSIONS, AND ONE OF THEM IS PINNED TO `package.json`. The record
+#      carries the `@mastra/factory` version at the fork and the version
+#      installed today, and the second must EQUAL what `package.json` pins. That
+#      is the half that keeps the record from rotting: a dependency bump is a
+#      reconciliation with the upstream template, and a bump that does not touch
+#      the record leaves it naming a base the next diff was never taken against.
+#      The versions are read out of the README and out of `package.json` at run
+#      time rather than hard-coded here, so the guard keeps asking the real
+#      question as the pin moves. Both extractions must come back with exactly
+#      one value, so a reworded record fails as a broken extraction instead of
+#      passing vacuously. Both sides accept a `-prerelease`/`+build` suffix,
+#      because an `-rc.1` is a real thing to be pinned to and a guard that
+#      rejects it blocks the bump it exists to police. And `package.json` must
+#      pin an EXACT version, not a range: under `^0.15.0` the installed version
+#      is anything in the range, so a record saying `0.15.0` can be true of
+#      nothing on disk while this comparison stays green. The message names the
+#      key and the range. And the must-update sentence is required literally,
+#      because a rule a future reader cannot find is a rule that is not there.
+#   2. EXTRACTION IS TOTAL, AND EACH MOVED KEY IS READ EXACTLY ONCE.
+#      Two halves that fail apart. The entry must carry no mention of
+#      `PgFactoryStorage`, `LibSQLFactoryStorage`, `PgVector` or
+#      `RedisStreamsPubSub` — the mention, not just a `new`, because the import
+#      is what comes back first — and each of the four modules must exist,
+#      non-empty, under `src/mastra/config/`. Then each concern module is
+#      required to actually construct its own thing, including BOTH arms of the
+#      storage branch: a `storage.ts` that carries only the Postgres arm is the
+#      half-extracted state AD-8 forbids, and without that check an entry
+#      emptied of all four names passes while the concerns are gone rather than
+#      moved.
+#      THE CENSUS IS PER KEY, OVER ALL OF src/, AND COUNTS READS ONLY.
+#      `DATABASE_URL`, `APP_DATABASE_URL`, `NODE_ENV` and `REDIS_URL` must each
+#      have exactly ONE literal `process.env` read across every first-party
+#      source file, and that one read must sit under `src/mastra/config/`. Both
+#      halves are needed: a single read in the wrong file still satisfies the
+#      count, and a duplicate inside `config/` still breaks AD-7. An ASSIGNMENT
+#      is not a read and is deliberately not counted — `index.test.ts` sets
+#      `process.env.NODE_ENV` in its preamble, which is the test arranging the
+#      boot, not a second source of truth. The two are told apart by what
+#      follows the key: a single `=` is a write, `==`/`===` and anything else is
+#      a read, which is why the pattern captures the following characters rather
+#      than stopping at the key name — and why it also refuses to match a longer
+#      key that merely starts with one of the four. No read in the tree today
+#      needs the `==` half: `config/database-url.ts` reads `NODE_ENV` once into a
+#      local and compares the local. It is carried for the spelling a future edit
+#      reaches for first — comparing `process.env.X` in place — which must not be
+#      mistaken for a write.
+#      SEVERAL SPELLINGS, not one. Anchored on `process.env.KEY` alone, four
+#      forms were invisible, and each was demonstrated as a live second read site
+#      with this guard green: `process.env["REDIS_URL"]`,
+#      `const { NODE_ENV } = process.env`, the backtick-quoted bracket form
+#      ``process.env[`REDIS_URL`]``, and optional chaining
+#      (`process.env?.REDIS_URL`). So the census matches bracket access in all
+#      three quote styles, tolerates an optional `?.` in front of either the dot
+#      or the bracket, and matches a destructuring binding off `process.env` that
+#      names the key.
+#      COMMENT-ONLY LINES ARE NOT SCANNED, because the census matches text and a
+#      comment is not a read. A line whose first non-space characters are `//`,
+#      `*` or `/*` is blanked before the patterns run. That was not cosmetic: a
+#      module carrying the comments that explain it — which is exactly what
+#      `config/README.md` requires of an extracted concern — turned this guard
+#      red on a CORRECT tree, demonstrated with a one-line comment naming
+#      `process.env.DATABASE_URL` in prose. The stripping is deliberately narrow:
+#      a trailing comment after code on the same line is still scanned, so that
+#      no `//` inside a string literal can truncate a line and hide a real read.
+#      WHAT STAYS INVISIBLE, stated here as guard 26 states its own blind spot: a
+#      computed key (`process.env[someVariable]` — which is how
+#      LOCAL_SANDBOX_ENV_KEYS forwards host variables, and is correctly ignored),
+#      a key reached through an alias (`const env = process.env;` then
+#      `env.REDIS_URL`), a destructuring binding split across lines, since every
+#      pattern here is line-based, and a read written in a key-naming comment
+#      that trails code on the same line. The census also sweeps `src/` only —
+#      complete today because guard 5 forbids first-party `.ts`/`.js` anywhere
+#      else, so the message's "first-party code" and this sweep are the same set
+#      until that stops being true. Those are AD-7 violations this guard cannot
+#      see. The rule is still the rule; Story 5.6's re-audit is where the
+#      spellings widen if one of them turns up.
+#      AND THE VALUES REACH THE FACTORY. Per concern, the entry must import the
+#      named binding from `./config/<module>` AND pass it into the
+#      `new MastraFactory({ … })` call. Before this story, construction and
+#      binding were one statement, so "side effects run, value discarded" was
+#      unreachable; the module boundary is what made it reachable. Demonstrated:
+#      turning two of the three imports into bare side-effect imports and
+#      deleting the `vector,` and `pubsub,` shorthand left `tsc`, every test and
+#      every other guard green while the deployment silently ran on the default
+#      vector mount and the in-process event bus — the modules still logged,
+#      warned and threw exactly as before, so nothing looked wrong anywhere.
+#      This is a SOURCE-SHAPE assertion: the call block is read out of the entry
+#      between `new MastraFactory({` and the column-0 `});`, and each binding has
+#      to appear as a TOP-LEVEL SHORTHAND property of it. A boot-level test would
+#      be the stronger check and is not available here — observing the slots means
+#      reaching `factory.prepare()`/`finalize()` with a pubsub instance in place,
+#      and the only pubsub this repository has dials Redis, which is how the gate
+#      hangs rather than fails (`index.test.ts` sweeps `REDIS_URL` for that
+#      reason).
+#      TOP-LEVEL AND SHORTHAND, both learned from mutations of a green tree. An
+#      earlier draft asked only that a line inside the block start with the
+#      binding name followed by `,` or `:`, and that is three separate defects.
+#      It PASSED a broken tree twice: `vector: undefined,` mentions the binding
+#      while discarding it, and a `storage,` moved inside the nested
+#      `platform: { … }` object satisfies a per-line match at any indentation —
+#      both leave the deployment on the factory default, which is the one failure
+#      this assertion exists to catch. And it FAILED a correct tree: with
+#      `storage, vector, pubsub,` on one line — the shape a formatter produces,
+#      and this repository pins no formatter — it reported that `pubsub` never
+#      reaches the factory, naming the wrong cause on code that is right. So the
+#      call's top-level properties are extracted first (the lines indented by
+#      exactly two spaces, comment lines dropped, then split on commas and
+#      trimmed) and each binding must appear among them as a bare token. Line
+#      breaks no longer matter, nesting and rebinding no longer pass, and the
+#      failure message prints the top-level properties it did read.
+#      FOUR KEYS, NOT EVERY KEY, and the message says so. A repo-wide uniqueness
+#      check fails on today's tree: `MASTRACODE_PUBLIC_URL` is read three times
+#      and `SLACK_APP_SIGNING_SECRET` and `GITHUB_APP_WEBHOOK_SECRET` twice each,
+#      all inside the auth/integration concerns Story 5.5 moves. The epic gives
+#      the full re-audit to Story 5.6; this guard covers exactly the keys Story
+#      5.4 is responsible for, and widening it is that story's job.
+#   3. THE ENTRY STAYS INDIVISIBLE. `src/mastra/index.ts` contains a literal
+#      `new Mastra(`, exports `mastra`, and does BOTH IN ONE STATEMENT —
+#      `export const mastra = new Mastra(` — and no other file under `src/`
+#      constructs or re-exports that instance. The combined form is required
+#      because the two halves pass separately on a tree that fails to deploy:
+#      the module docstring itself says `new Mastra(...)`, so an entry whose real
+#      constructor has been moved out still satisfies a bare search for it, and
+#      `export const mastra = built;` satisfies a bare search for the export.
+#      `checkConfigExport` matches the construction AT the export site, which is
+#      what the third assertion asks for. Both `export const mastra` patterns
+#      tolerate an optional `: Type` annotation, and the third joins the matched
+#      line with the one after it so a line break following the `=` is fine:
+#      `export const mastra: Mastra = new Mastra({` is legal, typechecks and is
+#      accepted by the plugin, and an earlier draft failed that correct tree while
+#      naming the wrong cause. This is the one rule in this
+#      repository whose violation is invisible to every other check: `tsc`,
+#      `vitest` and the entry boot are all perfectly happy with an instance
+#      built in a helper and re-exported, because it is the same instance — the
+#      deployer's `checkConfigExport` Babel plugin, which reads the entry's
+#      SOURCE, is the only thing that objects, and it objects at
+#      `mastra build`/`mastra deploy`, after the gate is green and the commit is
+#      made. Extraction into `config/` is exactly the direction of travel that
+#      makes this mistake attractive, which is why the assertion lands in the
+#      same story as the extraction. The negative half covers `new Mastra(`, a
+#      named `export const|let|var|function mastra`, `export { … mastra … }`,
+#      `export default mastra`, and any `export * from`. The default form was
+#      missing and was demonstrated: a second file holding
+#      `import { mastra } from "./index"; export default mastra;` passed. The star
+#      arm is unconditional rather than requiring the path to contain `index`,
+#      because a star re-export carries whatever its target exports and the
+#      target's name is not the question. Over-broad on purpose: a second
+#      `new Mastra(` anywhere under `src/` is either dead code the deployer
+#      ignores or the live instance it cannot see, and nothing under `src/` needs
+#      a star re-export. The `export { … mastra … }` arm is ALSO run over the
+#      file with its newlines squeezed to spaces, because every other pattern
+#      here is line-based and a named re-export is routinely written across
+#      three lines: a second file holding `export {` / `  mastra,` / `};` passed
+#      the per-line arm, which was demonstrated before this arm was added.
+# All three verified both ways in this worktree. They pass on the settled tree,
+# and they fail naming the offender: when `@mastra/factory` is bumped in
+# `package.json` without editing the record (guard 34, printing both versions and
+# the README), when the fork commit is altered to a 40-hex id that does not
+# resolve, and when the must-update sentence is deleted; when `new PgVector(` is
+# pasted back into the entry (guard 35, printing the entry lines), when
+# `config/vector.ts` is deleted (guard 35, naming the module), and when a second
+# read of `REDIS_URL` is added anywhere under `src/` in any of the five
+# spellings — `process.env.REDIS_URL`, `process.env["REDIS_URL"]`, the
+# backtick-quoted bracket form, `process.env?.REDIS_URL`, or
+# `const { REDIS_URL } = process.env` (guard 35, naming the key and every read
+# site) — and when an import is turned into a bare side-effect import, when a
+# `storage,`/`vector,`/`pubsub,` property is deleted from the factory call, when
+# one is rebound as `vector: undefined,`, and when one is moved inside the nested
+# `platform: { … }` object (guard 35, naming the concern, the default the factory
+# falls back to, and the top-level properties it did read); and
+# when the entry's `new Mastra(...)` is replaced by a re-export from a config
+# module (guard 36, naming AD-2 and `checkConfigExport`), when the constructor is
+# moved into a local `const` and the export merely assigns it (guard 36, naming
+# the one statement it looks for), and when a second `new Mastra(`, an
+# `export { mastra }` on one line or spread across three, or an
+# `export default mastra` is added in any other file under `src/` (guard 36,
+# printing the offending file and line).
+# Verified NOT to fail on the legitimate cases: the `process.env.NODE_ENV = `
+# assignment in `index.test.ts`, which is a write and not a fifth read site;
+# `export const mastra: Mastra = new Mastra({`, which is legal and which an
+# earlier draft of guard 36 rejected while naming the wrong cause; an `-rc.1`
+# prerelease pinned in `package.json` and recorded in the README; a
+# `## Reconciliation history` line naming a second 40-hex commit, which is the
+# history the must-update sentence asks for and which step 7 of the README's
+# reconciliation procedure now tells the reconciler to write; a factory call
+# whose properties are reformatted onto one line, which an earlier draft of
+# guard 35 rejected while naming the wrong cause; a line that is wholly a comment
+# naming one of the four keys in prose, which an earlier draft counted as a
+# second read site; and the integration keys still read twice inside the entry,
+# which are Story 5.5 and 5.6 work and outside guard 35's four.
+# The last three guards are AD-8, AD-7, NFR13 and Story 2.2 at the place Story
+# 5.5 moved them to. Story 5.4 left `src/mastra/index.ts` at 587 lines holding
+# exactly the three concerns this project MODIFIED rather than inherited: the
+# Better Auth provider (with `signUpEnabled: false` closing registration in
+# committed code), the GitHub/Linear/Slack integrations with the secret that
+# signs their OAuth `state`, and the `DockerSandbox` branch with its
+# concurrent-session cap. Four keys inside them were still read twice, which
+# guard 35 deliberately left alone as this story's work. Nothing asked whether
+# those concerns had moved, nothing counted their reads, nothing kept sign-up
+# closed, and nothing kept the docker branch ahead of the cloud arms — the last
+# two are guarantees that fail SILENTLY, as a deployment that quietly accepts
+# new accounts and as agent work quietly running on a third party's VM.
+#   1. THE THREE LOCAL CONCERNS ARE OUT OF THE ENTRY, AND THEIR VALUES REACH
+#      THE FACTORY. The entry must carry no mention of `MastraAuthBetterAuth`,
+#      `createFactorySecretEncryption`, `GithubIntegration`, `LinearIntegration`,
+#      `SlackIntegration`, `DockerSandbox`, `PlatformSandbox`, `E2BSandbox` or
+#      `LocalSandbox` — the mention, not just a `new`, because the import is what
+#      comes back first — and `auth.ts`, `integrations.ts` and `sandbox.ts` must
+#      each exist, non-empty, under `src/mastra/config/`. Then each module is
+#      required to construct what it owns, every arm of it: both halves of the
+#      auth concern (the provider and the secret encryption its `null` gate
+#      drops), all three integrations, and all four sandbox providers. Without
+#      that, an entry emptied of the nine names passes while the concerns are
+#      gone rather than moved, and a `sandbox.ts` carrying only the docker arm is
+#      the half-extracted state AD-8 forbids.
+#      Then, exactly as guard 35 does for the upstream three: the entry must
+#      import each binding BY NAME from `./config/<module>` and pass it as a bare
+#      TOP-LEVEL SHORTHAND property of the `new MastraFactory({ … })` call, so a
+#      module loaded for its side effects with its value dropped is caught. The
+#      bindings are `auth` and `secretEncryption` from `./config/auth`,
+#      `integrations` and `stateSecret` from `./config/integrations`, and
+#      `sandbox` from `./config/sandbox`. `githubAppSlug` is the one exception
+#      and is checked at a different address rather than merely excused: it must
+#      be imported by name, it must appear as a bare token inside the NESTED
+#      `platform: { … }` object, and it must NOT appear among the call's
+#      top-level properties. All three are needed, and an earlier draft that
+#      asserted only the last two passed a tree with the whole `platform: { … }`
+#      block deleted — `tsc` has no `noUnusedLocals`, so the import alone kept
+#      everything else green while the deployment compared its own App login
+#      against `undefined[bot]` on every pull request it had opened, which is
+#      the failure that put the property there in the first place. The nested
+#      object is read out of the call block and its properties are split the same
+#      way the top-level ones are, so the one-line form
+#      `platform: { githubAppSlug },` — which a formatter produces and this
+#      repository pins no formatter — passes, and a rebinding to
+#      `githubAppSlug: undefined` does not.
+#   2. EVERY KEY THE THREE CONCERNS READ IS READ EXACTLY ONCE, UNDER
+#      `src/mastra/config/`. Thirty-three keys, censused per key over all of
+#      `src/`, counting reads only — the same shape as guard 35, with the same
+#      five spellings (dot, bracket in three quote styles, optional chaining
+#      before either, and a destructuring binding off `process.env`), the same
+#      blanking of whole-comment lines, and the same refusal to count an
+#      assignment. `FACTORY_CREDENTIAL_ENCRYPTION_KEY` and
+#      `FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID` are distinguished by the character
+#      after the key name, which is why the patterns capture it.
+#      A SIXTH SPELLING is added here that guard 35 did not need: a quoted key
+#      name on a line that then indexes `process.env` through a COMPUTED key.
+#      That is how the four Platform keys are read — `['MASTRA_PROJECT_ID', …]
+#      .every(key => Boolean(process.env[key]?.trim()))` — and guard 35's own
+#      comment block names array-literal reads as the class it cannot see. It
+#      stays narrow on purpose: it matches only when `process.env[` follows the
+#      quoted name on the SAME line, so the `LOCAL_SANDBOX_ENV_KEYS` sweep, whose
+#      quoted names sit lines away from its `process.env[key]`, is still
+#      correctly invisible, and so is every `vi.stubEnv('KEY', …)` in a test.
+#      `MASTRACODE_PUBLIC_URL` IS DELIBERATELY NOT IN THIS CENSUS, and the
+#      failure message says so. When this guard was written the key still had
+#      two reads — `config/integrations.ts` and the factory call's `publicUrl:`,
+#      which could not move without moving the call — so reserving it was the
+#      way to keep the thirty-three exact. Story 5.6 moved the call into
+#      `config/factory.ts` and the read into `config/public-url.ts`, and guard 41
+#      below now censuses the key along with every other one `.env.schema`
+#      declares. The reservation stays here rather than being converted into a
+#      thirty-fourth entry: guard 41 covers it, and this list is the record of
+#      what Story 5.5 moved.
+#   3. THE TWO GUARANTEES THIS MOVE MUST NOT REVERSE. First, NFR13:
+#      `signUpEnabled` appears exactly ONCE in first-party source under `src/`,
+#      that once is in `config/auth.ts`, it reads `signUpEnabled: false` as a
+#      literal, and there is no `process.env` on that line. All four halves are
+#      needed and each fails differently: a second mention is another constructor
+#      or an override, omitting the field reopens sign-up through the package
+#      default (`options.signUpEnabled ?? true`), and computing the value from
+#      anything at all turns "no key can reopen registration" into "some key
+#      can". Whole-comment lines are not scanned, so the comment that explains
+#      the field is not a second mention, and `isSignUpEnabled` — the getter the
+#      tests read — is a different spelling and does not collide.
+#      Second, Story 2.2's ordering: in `config/sandbox.ts` the `=== 'docker'`
+#      comparison sits at a LOWER line number than every `new PlatformSandbox(`
+#      and every `new E2BSandbox(`, and the `FACTORY_SANDBOX_PROVIDER` read sits
+#      at or above that comparison so the ordering is about the right key. Both
+#      cloud arms must still be present: extraction is a move, not a cleanup, and
+#      with one deleted there is nothing left for the docker branch to be ahead
+#      OF. Comment lines are blanked here too, so a comment naming
+#      `new PlatformSandbox(` above the branch does not fail a correct file.
+# All three verified both ways in this worktree. They pass on the settled tree,
+# and they fail naming the offender: when `new SlackIntegration(` is pasted back
+# into the entry (guard 37, printing the entry lines), when `config/
+# integrations.ts` is deleted (guard 37, naming the module), when
+# `githubAppSlug` is hoisted to a top-level property of the factory call, when
+# the whole `platform: { … }` block is deleted, and when the property inside it
+# is rebound to `githubAppSlug: undefined` (guard 37, naming the nested object
+# and printing the properties it did read); when a second read of a
+# censused key is added anywhere under `src/` in any of the spellings —
+# `process.env.BETTER_AUTH_SECRET`, `process.env["E2B_API_KEY"]`, the
+# backtick-quoted bracket form, `process.env?.E2B_API_KEY`, and
+# `const { E2B_API_KEY } = process.env` (guard 38, naming the key, the count and
+# every read site); and when `signUpEnabled: false` is replaced by an
+# environment expression (guard 39, naming NFR13 and the line), and when a
+# `new PlatformSandbox(` arm is moved above the `=== 'docker'` comparison
+# (guard 39, naming both line numbers and Story 2.2's guarantee).
+# Verified NOT to fail on the legitimate cases: a line that is wholly a comment
+# naming one of the thirty-three keys in prose; `isSignUpEnabled()` in
+# `config/auth.test.ts` and the comment in `config/auth.ts` that explains the
+# package default; a `platform: { githubAppSlug },` written on one line; the
+# `vi.stubEnv` calls and key-name arrays throughout the
+# `config/*.test.ts` suites, which name censused keys as quoted strings without
+# reading them; and `MASTRACODE_PUBLIC_URL` at the sites this census reserves,
+# which guard 41 below now owns.
+# The last three guards are FR34, AD-7 and FR36 at the end of the extraction.
+# Story 5.5
+# left `src/mastra/index.ts` at 107 lines still holding the one concern that had
+# not moved: the assembly itself — the `configVersion` literal, the whole
+# `MastraFactory` construction, and the three keys only that construction reads.
+# That is environment reading and instance construction in the one file FR34/AD-8
+# reduce to imports, `prepare()`, the literal `Mastra` construction and
+# `finalize()`; `MASTRACODE_PUBLIC_URL` was consequently read twice, the single
+# key AD-7 still lost on. The call now lives in `config/factory.ts` and that key
+# in `config/public-url.ts`, beside `database-url.ts` and `positive-int.ts`,
+# which answer the same question for the same reason. Guards 35 and 37 were
+# re-pointed rather than superseded: both begin by extracting the call with
+# `sed -n "/new MastraFactory({/,/^});$/p"` and treat an empty result as a hard
+# failure, so the moment it moved they failed for the right reason at the wrong
+# file. Every assertion they carry — each concern's constructors live in its
+# module, the entry names none of them, each binding is imported BY NAME and
+# passed as a bare top-level token, `githubAppSlug` nested — is still exactly
+# what must hold; only the file holding the call changed, so each grew a second
+# variable for that file, kept its `$e`-is-free-of-these-constructors half on the
+# entry, and now expects the per-binding imports at `./<module>` rather than
+# `./config/<module>`. Guard 38's census is untouched; only the clause naming
+# where the third `MASTRACODE_PUBLIC_URL` read lives was rewritten. Nothing was
+# removed or weakened, and appending replacements instead would have left two
+# guards failing on a correct tree.
+#   1. THE ENTRY IS FOUR THINGS. With whole-comment lines blanked, every line of
+#      `src/mastra/index.ts` that starts at column 0 is an `import`, a
+#      `const … = await factory.prepare();`, an `export const mastra … =`, the
+#      `});` closing it, or an `await factory.finalize();` — anything else fails
+#      PRINTING THE LINE, because "the entry grew a statement" is not a thing a
+#      reviewer notices in a diff that also moves eighty lines. Indented lines
+#      are the body of the statement above them, which is what lets the
+#      `new Mastra({ … })` literal stay a literal and what keeps a reformatted
+#      import from failing. Each of the three statements must appear EXACTLY
+#      once: the boot has two halves with one construction between them, and a
+#      second `prepare()` is a second factory while a missing `finalize()` is a
+#      deployment that imports cleanly and never starts its workers.
+#      Then the same rule in its positive form, which the line filter alone
+#      cannot give: NO `process.env` anywhere in the file, and no `new X(` other
+#      than `new Mastra(`. Both scan the whole file rather than only column 0,
+#      because the interesting place to hide either is inside the
+#      `new Mastra({ … })` block, where every line is indented and the filter
+#      above says nothing. Finally the entry must import `factory` BY NAME from
+#      `./config/factory`: a bare side-effect import builds the factory and runs
+#      every concern module exactly as before, so the failure would surface as
+#      `prepare()` on an undefined binding at boot rather than as the missing
+#      import it is, and a star or default import hides the binding this guard
+#      names. What `export const mastra` is ASSIGNED is deliberately not
+#      re-checked here — guard 36 owns that, including the legal
+#      line-break-after-`=` form — and repeating it would mean two guards to keep
+#      in step and one of them eventually wrong.
+#   2. THE WHOLE-PLANE CENSUS. For every key declared in `.env.schema`, AT MOST
+#      one literal `process.env` read site across `src/`; and for the three keys
+#      this story moved — `MASTRACODE_PUBLIC_URL`,
+#      `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` —
+#      EXACTLY one, under `src/mastra/config/`. The key set is DERIVED from
+#      `.env.schema` rather than written out here, which is the whole difference
+#      between this guard and the hand-written lists of four and thirty-three in
+#      guards 35 and 38. Those lists name what a particular story moved and are
+#      right to be fixed; the epic's criterion for THIS story is a statement
+#      about the whole plane, and a fourth hand-written list would go stale the
+#      next time a key is added. `.env.schema` is already the only list of
+#      environment keys (AD-6) and guard 26 already ties every first-party read
+#      back to it, so deriving from it closes the loop.
+#      It asserts at-most-one rather than exactly-one because most declared keys
+#      are read by packages or tooling and never by first-party code at all —
+#      twenty-nine of the seventy today — and because `MASTRA_DB_PATH`'s only
+#      site is `index.test.ts`, which is a read but not a config site. The
+#      exactly-one half is pinned per key by guards 35 and 38 and by this guard's
+#      own three-key arm. The five spellings, the blanking of whole-comment lines
+#      and the refusal to count an assignment are guard 35's, unchanged. Guard
+#      38's SIXTH spelling — a quoted key name on a line that indexes
+#      `process.env` through a computed key — is deliberately NOT used here: over
+#      a key set this wide it would read declared names out of the `vi.stubEnv`
+#      calls and key-name arrays throughout the `config/*.test.ts` suites and
+#      fail a correct tree. The four Platform keys that spelling exists for keep
+#      their exactly-one cover in guard 38.
+#      A guard that derives its subject from a file passes vacuously when the
+#      derivation breaks, so the extracted key count is floored at forty and the
+#      three named keys are required to be present in `.env.schema` before the
+#      census runs.
+#   3. THE BUILD ITSELF. FR36/AC2 make `npm run build` succeeding an acceptance
+#      criterion, and it was the ONE criterion in this epic with no recurring
+#      check: every story so far confirmed it by hand and wrote the result in its
+#      verification notes, which makes it an observation rather than a gate. It
+#      is the only command here that bundles the entry and the whole `config/`
+#      graph behind it through `@mastra/deployer` — resolving every relative
+#      import, running the deployer's own passes over the entry source
+#      (`checkConfigExport` among them) and installing the output's dependencies.
+#      `tsc` and `vitest` both read the tree through their own resolvers and
+#      neither produces the artifact that gets deployed, so a change that leaves
+#      both green and the bundle unbuildable is exactly the failure this story's
+#      shape invites: the entry now reaches every concern through ONE relative
+#      import, and the deployer resolves that import itself.
+#      It is appended as a plain command, like `npm test`, and it leaves the tree
+#      clean: `git status --porcelain` is byte-identical before and after a
+#      successful build, because `.mastra/`, where the bundle and its own
+#      `npm install` land, and `src/mastra/public/` are both gitignored —
+#      measured, not assumed. (That is a fact about the whole tree, not about the
+#      two `git status --porcelain` entries above: those are path-scoped to
+#      `.agents/skills` and `skills-lock.json` and both run BEFORE this one, so
+#      they could neither see nor be reached by anything the build writes.)
+#      What it costs, so nobody has to rediscover it: the build runs a SECOND
+#      dependency install, its own, inside `.mastra/output` — roughly 900 packages
+#      and about a gigabyte on disk per worktree, which `[scm] isolation =
+#      "worktree"` makes one per story — and it is the only entry after `npm ci`
+#      that needs the registry. `[verify]` has no per-command timeout; the
+#      `session_timeout_min` at the top of this file is the only ceiling.
+# All three verified both ways in this worktree. They pass on the settled tree,
+# and they fail naming the offender: when `const x = 1;` is added at the entry's
+# top level, when `process.env.MASTRACODE_PUBLIC_URL` is added inside the
+# `new Mastra({ … })` block, when the same read is written as
+# `process["env"].MASTRACODE_PUBLIC_URL` there, when a `new PinoLogger()` or a
+# `new PinoLogger<string>()` is added there, when a second statement is appended
+# to the entry's import line, when
+# `new MastraFactory(` is pasted back into the entry, when the `factory` import
+# is turned into a bare side-effect or star import, and when
+# `await factory.finalize();` is deleted (guard 40, printing the line, the match
+# or the count in each case); and when a second
+# `process.env.MASTRACODE_ALLOWED_ORIGINS` is added under `src/`, when a second
+# read of `LINEAR_CLIENT_SECRET` — a key no guard named before this one — is
+# added, when either of those is spelled `process["env"].KEY` instead, when the
+# one `MASTRACODE_PUBLIC_URL` read is moved out of
+# `src/mastra/config/`, and when it is moved to another module INSIDE that
+# directory, which satisfies the count and still takes the key away from
+# `config/public-url.ts` (guard 41, naming the key, the count, the module it
+# expects and every read site); and, for guard 42, when the deployer cannot
+# resolve the entry's one relative import — though pick the example carefully:
+# `tsc` (entry 2) reports a MISSPELLED import first, as
+# `TS2307: Cannot find module './config/factorry'`, so the gate never reaches 42
+# on that tree. What only 42 sees is a graph `tsc` accepts and the bundler does
+# not — an unexternalizable dependency, a `node:` builtin the bundle rejects, a
+# deployer pass that reads the entry's SOURCE rather than its types.
+# Guard 42 is NOT a stricter `checkConfigExport` than guard 36: a tree with
+# `export { built as mastra }` instead of a construction at the export site was
+# tried, and the build accepted it while guard 36 failed. The two are
+# complementary, and guard 36 is the one that pins the export SHAPE.
+# Guards 35 and 37 were re-verified after the re-point: both fail naming
+# `config/factory.ts` when the `new MastraFactory({` there is renamed, both still
+# fail on a CONCERN constructor pasted back into the entry (`new
+# RedisStreamsPubSub(` there fails 35), and guard 37 still fails when
+# `githubAppSlug` is hoisted out of `platform: { … }`. What they no longer see,
+# now that they read the call out of `config/factory.ts`, is a whole
+# `new MastraFactory({ … })` pasted back into the entry: measured, both exit 0 on
+# that tree and guard 40 is the only one that fails it. That is the right split —
+# a second factory in the entry is a statement FR34 does not admit, which is
+# guard 40's subject, while 35 and 37 exist to prove each concern reaches a slot
+# of the ONE call, wherever it lives — but it means a split call is caught once,
+# not twice.
+# Verified NOT to fail on the legitimate cases: the entry's own docstring, which
+# names `MastraFactory` and `prepare()` in prose on lines that are wholly
+# comments; the indented body of the `new Mastra({ … })` literal, which is
+# continuation rather than top-level statements; the legal
+# `export const mastra: Mastra =` with the constructor on the next line; a legal
+# trailing line comment on any of the three statements, such as
+# `await factory.finalize(); // boot`, which an earlier draft of guard 40
+# rejected while claiming the entry had grown a statement;
+# `MASTRA_DB_PATH` read once in `index.test.ts` rather than under `config/`; the
+# twenty-nine declared keys no first-party file reads at all; and every
+# `vi.stubEnv` call and key-name array in the `config/*.test.ts` suites,
+# including the new `config/factory.test.ts`, which name declared keys as quoted
+# strings without reading them.
 commands = [
   "npm ci --no-audit --no-fund",
   "npm run check",
@@ -215,6 +1243,30 @@ commands = [
   '''sh -c 'd=ops/README.md; test -f "$d" || { echo "missing $d"; exit 1; }; pl=$(for p in ops/launchagents/*.plist; do plutil -extract Label raw "$p" || exit 1; done | sort -u); rd=$(grep -oE "gui/[$]\(id -u\)/[A-Za-z0-9_.-]+" "$d" | sed "s|.*/||; s|[.-]*$||" | sort -u); fn=$(grep -oE "LaunchAgents/[A-Za-z0-9_.-]+[.]plist" "$d" | sed "s|.*/||; s|[.]plist$||" | sort -u); test -n "$rd" || { echo "$d addresses no gui/\$(id -u)/<job> name, so it asserts nothing about the plist Labels"; exit 1; }; test "$pl" = "$rd" || { echo "$d and ops/launchagents/*.plist disagree on the launchd job names: plists declare [$(echo $pl)], $d addresses [$(echo $rd)]"; exit 1; }; test -n "$fn" || { echo "$d names no ~/Library/LaunchAgents/<name>.plist, so it asserts nothing about the plist filenames"; exit 1; }; test "$pl" = "$fn" || { echo "$d and ops/launchagents/*.plist disagree on the plist filenames: plists are [$(echo $pl)].plist, $d bootstraps [$(echo $fn)].plist"; exit 1; }' ''',
   '''sh -c 'd=ops/README.md; s=ops/factory-start.sh; for f in "$d" "$s"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; q=$(printf "\47"); l=$(grep -oE "grep -F $q\[factory\][^$q]*" "$d" | sed "s/^.*-F $q//" | sort -u); test -n "$l" || { echo "$d greps for no [factory] line, so it asserts nothing about $s"; exit 1; }; m=$(echo "$l" | while IFS= read -r x; do grep -Fq -e "$x" "$s" || echo "$x"; done); test -z "$m" || { echo "$d greps out.log for [factory] text $s does not print: $m"; exit 1; }' ''',
   '''sh -c 'd=ops/README.md; c=ops/newsyslog/ai.mastra.factory.conf; for f in "$d" "$c"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; a=$(grep -oE "newsyslog -F[^|;]*" "$d" | awk "{print \$NF}" | sort -u); test -n "$a" || { echo "$d forces no newsyslog -F run, so it asserts nothing about $c"; exit 1; }; cf=$(grep -vE "^[[:space:]]*(#.*)?$" "$c" | awk "{print \$1}" | sort -u); m=$(echo "$a" | while IFS= read -r x; do echo "$cf" | grep -qxF -e "$x" || echo "$x"; done); test -z "$m" || { echo "$d forces newsyslog -F on a path that is no row of $c: $m"; exit 1; }' ''',
+  '''sh -c 'for p in sandbox/factory-sandbox.Dockerfile sandbox/README.md ops/README.md ops/launchagents/ai.mastra.colima.plist ops/launchagents/ai.mastra.factory.plist ops/factory-start.sh ops/newsyslog/ai.mastra.factory.conf ops/install.sh apps/github/README.md apps/linear/README.md apps/slack/README.md apps/slack/manifest.yaml; do m=$(git ls-files -s -- "$p" | cut -d" " -f1); case "$m" in 100644|100755) ;; "") echo "seeded operational artifact missing or empty: $p — not tracked; the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5)"; exit 1;; *) echo "seeded operational artifact missing or empty: $p — index mode $m is not a regular file (a symlink or gitlink, which a fresh worktree checks out as a link, not the artifact); the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5)"; exit 1;; esac; s=$(git cat-file -s ":$p" 2>/dev/null); test -n "$s" && test "$s" -gt 0 || { echo "seeded operational artifact missing or empty: $p — its staged blob is 0 bytes; the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5)"; exit 1; }; done' ''',
+  '''sh -c 'b=$(printf "\140"); sp=$(ls _bmad-output/planning-artifacts/architecture/*/ARCHITECTURE-SPINE.md 2>/dev/null); c=$(printf "%s" "$sp" | grep -c "ARCHITECTURE-SPINE.md"); test "$c" = "1" || { echo "expected exactly one _bmad-output/planning-artifacts/architecture/*/ARCHITECTURE-SPINE.md to derive the AD-3 root sets from, found $c — the root closed set is normative in the spine, not here"; exit 1; }; s3=$(sed -n "/^### AD-3/,/^### AD-4/p" "$sp"); printf "%s\n" "$s3" | tail -1 | grep -q "^### AD-4" || { echo "the AD-3 section of $sp does not end at a ### AD-4 heading, so the extraction range of this guard ran past it and would read rows from later sections — fix the spine headings"; exit 1; }; db=$(sed -n "/[*][*]Root directories — closed set/,/[*][*]Root allowlist — closed set/p" "$sp"); printf "%s\n" "$db" | tail -1 | grep -q "[*][*]Root allowlist — closed set" || { echo "the AD-3 root directory closed-set bullet of $sp is not followed by its root allowlist bullet, so the extraction range of this guard ran to end of file and would silently WIDEN the closed set with every backticked path elsewhere in the spine — fix the spine bullets"; exit 1; }; af=$(printf "%s\n" "$s3" | grep -oE "^[[:space:]]*[|] $b[^$b]+$b [|]" | sed "s/^[[:space:]]*[|] $b//; s/$b [|]\$//"); ad=$(printf "%s\n" "$db" | grep -oE "$b[A-Za-z_.][A-Za-z0-9_.-]*/$b" | tr -d "$b" | sed "s|/\$||" | sort -u); printf "%s\n" "$af" | grep -qxF "package.json" || { echo "could not extract the AD-3 root allowlist table from $sp (no package.json row) — this guard derives root from the spine, so fix the AD-3 table"; exit 1; }; printf "%s\n" "$ad" | grep -qxF "src" || { echo "could not extract the AD-3 root directory closed set from $sp (no src/ entry) — this guard derives root from the spine, so fix the AD-3 closed-set bullet"; exit 1; }; tf=$(git -c core.quotePath=false ls-files | grep -v "/"); wt=$(git -c core.quotePath=false ls-files; git -c core.quotePath=false ls-files -o --exclude-standard); rf=$(printf "%s\n" "$wt" | grep -v "/" | sort -u); rd=$(printf "%s\n" "$wt" | grep "/" | cut -d/ -f1 | sort -u); o=$(printf "%s\n" "$rf" | while IFS= read -r x; do test -n "$x" || continue; printf "%s\n" "$af" | grep -qxF -e "$x" || echo "$x"; done); test -z "$o" || { echo "root file not in the AD-3 root allowlist: $o — move it under its subject directory, or amend AD-3 naming the tool that fixes its location. Tracked and untracked-but-not-ignored files both count, because the orchestrator stages the working tree (git add -A) when it commits the story"; exit 1; }; o=$(printf "%s\n" "$rd" | while IFS= read -r x; do test -n "$x" || continue; printf "%s\n" "$ad" | grep -qxF -e "$x" || echo "$x"; done); test -z "$o" || { echo "root directory not in the AD-3 closed set: $o — adding a root directory is a spine change, not a local call. Tracked and untracked-but-not-ignored directories both count, because the orchestrator stages the working tree (git add -A) when it commits the story"; exit 1; }; o=$(printf "%s\n" "$af" | while IFS= read -r x; do test -n "$x" || continue; git check-ignore -q -- "$x" && continue; printf "%s\n" "$tf" | grep -qxF -e "$x" || echo "$x"; done); test -z "$o" || { echo "AD-3 root allowlist entry is not tracked at root: $o — AD-3 and the Structural Seed say root is exactly that closed set, so removing a root file is a spine change, not a local call"; exit 1; }' ''',
+  '''sh -c 'node -e "const fs=require(\"fs\");let i;try{i=JSON.stringify(JSON.parse(fs.readFileSync(\"tsconfig.json\",\"utf8\").replace(/^[ \t]*\/\/.*\$/gm,\"\")).include)}catch(e){console.error(\"tsconfig.json unreadable or not valid JSON: \"+e.message);process.exit(1)}const w=JSON.stringify([\"src/**/*\"]);if(i!==w){console.error(\"tsconfig.json include must be exactly \"+w+\" (AD-4) — widening it is a spine change, and tsc cannot report its own blind spot; found \"+i);process.exit(1)}"' ''',
+  '''sh -c 'e=1ba191439fb2f355443273b6eb18ab0ce71227a8067dd434617c759aa125dff8; l=$(git ls-files -s .agents/skills skills-lock.json) || { echo "could not read the .agents/skills + skills-lock.json index rows (git failed) — AD-13 is unverified, not satisfied"; exit 1; }; test -n "$l" || { echo "git lists no index rows for .agents/skills or skills-lock.json — both are vendored and tracked (AD-13), so an empty listing is a broken checkout, not a satisfied rule"; exit 1; }; a=$(printf "%s\n" "$l" | shasum -a 256 | cut -d" " -f1); test -n "$a" || { echo "could not compute the .agents/skills + skills-lock.json index digest (shasum failed) — AD-13 is unverified, not satisfied"; exit 1; }; test "$a" = "$e" || { echo ".agents/skills and skills-lock.json are vendored and hash-locked together (AD-13), but their combined git index digest changed: found $a, expected $e — neither is ever hand-edited; regenerate through the Mastra CLI and update skills-lock.json and this expected digest in the same change"; exit 1; }' ''',
+  '''sh -c 'for p in sandbox/factory-sandbox.Dockerfile sandbox/README.md ops/README.md ops/launchagents/ai.mastra.colima.plist ops/launchagents/ai.mastra.factory.plist ops/factory-start.sh ops/newsyslog/ai.mastra.factory.conf ops/install.sh apps/github/README.md apps/linear/README.md apps/slack/README.md apps/slack/manifest.yaml; do if test -L "$p"; then echo "seeded operational artifact is a symlink in the WORKING TREE: $p — the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5); replace the link with the file"; exit 1; fi; test -f "$p" || { echo "seeded operational artifact missing from the WORKING TREE: $p — the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5); restore it with git checkout -- $p"; exit 1; }; test -s "$p" || { echo "seeded operational artifact is empty in the WORKING TREE: $p — the structural seed in ARCHITECTURE-SPINE.md names one real file at this path (AD-5); restore its content with git checkout -- $p"; exit 1; }; done' ''',
+  '''sh -c 'git status --porcelain -- skills-lock.json | grep . && { echo "skills-lock.json is modified in the working tree or the index — it is vendored and never hand-edited (AD-13); revert it with git checkout -- skills-lock.json, or regenerate it through the Mastra CLI and move the pinned digest in the guard above in the same change"; exit 1; } || exit 0' ''',
+  '''sh -c 'b=$(printf "\140"); s=.env.schema; r="README.md ops/README.md sandbox/README.md apps/github/README.md apps/linear/README.md apps/slack/README.md"; test -f "$s" || { echo "missing $s — it is the only list of environment keys (AD-6), so this guard has nothing to compare the READMEs against"; exit 1; }; tt="docs/self-hosting-research.md"; test -f "$tt" || { echo "missing $tt — every owned-keys section references it by path as the home for trap behaviour (AD-6), so all six references are now dangling. Story 5.3 renames this file: it has to update this guard and all six READMEs in the same change"; exit 1; }; sk=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "$s" | tr -d "=" | sort -u); test -n "$sk" || { echo "no key declarations extracted from $s, so this guard would pass vacuously — a declaration is a KEY= at column 0"; exit 1; }; skp=" $(printf "%s" "$sk" | tr "\n" " ") "; all=" "; dup=""; for f in $r; do test -f "$f" || { echo "missing $f — AD-6 gives every declared key exactly one owning README, and all six carry an owned-keys table"; exit 1; }; n=$(grep -cE "^## Keys this .* owns" "$f"); test "$n" = "1" || { echo "$f carries $n headings matching ^## Keys this ... owns, but AD-6 gives each README exactly ONE owned-keys section — with two, the slice of the first ends at the second and every row below it goes unclaimed; with none, this guard asserts nothing about $f"; exit 1; }; sec=$(sed -n "/^## Keys this .* owns/,/^## /p" "$f"); printf "%s\n" "$sec" | tail -1 | grep -q "^## " || { echo "$f: the owned-keys section does not end at a following ## heading, so the extraction range of this guard ran to end of file and would claim every backticked key in the rest of $f — move the section above another ## heading"; exit 1; }; printf "%s\n" "$sec" | grep -q "docs/self-hosting-research.md. §11" || { echo "$f: the owned-keys section does not reference docs/self-hosting-research.md §11 — AC4 requires each section to point at the trap table by path rather than copy it, and Story 5.3, which renames that file, must update this guard and all six READMEs in the same change"; exit 1; }; ks=$(printf "%s\n" "$sec" | grep -oE "^[[:space:]]*[|][[:space:]]*$b[^$b]+$b[[:space:]]*[|]" | sed "s/^[[:space:]]*[|][[:space:]]*$b//; s/$b[[:space:]]*[|]$//"); test -n "$ks" || { echo "$f: the owned-keys section has no table row whose first cell is one backticked key name, so the extraction came back empty and this guard would pass vacuously"; exit 1; }; for k in $ks; do case "$k" in GITHUB_APP_*) want=apps/github/README.md;; LINEAR_*) want=apps/linear/README.md;; SLACK_APP_*) want=apps/slack/README.md;; FACTORY_SANDBOX_*) want=sandbox/README.md;; *) want="$f";; esac; test "$want" = "$f" || { echo "$f claims $k, but AD-6 gives that prefix family to $want — a subject key record belongs in its own subject README. Move the row there, or, if the key genuinely is not part of that family, rename it"; exit 1; }; done; o=""; for k in $ks; do case "$skp" in *" $k "*) ;; *) o="$o $k";; esac; case "$all" in *" $k "*) dup="$dup $k";; esac; all="$all$k "; done; test -z "$o" || { echo "$f claims a key $s does not declare:$o — $s is the only list of keys (AD-6/NFR7); declare it there and mirror it into .env.example, or drop the row"; exit 1; }; done; test -z "$dup" || { echo "a key is claimed by more than one README, but AD-6 gives every key exactly one owning subject:$dup"; for k in $dup; do echo "  $k is claimed by: $(grep -lE "^[[:space:]]*[|][[:space:]]*$b$k$b[[:space:]]*[|]" $r | tr "\n" " ")"; done; exit 1; }; m=""; for k in $sk; do case "$all" in *" $k "*) ;; *) m="$m $k";; esac; done; test -z "$m" || { echo "$s declares a key no README claims:$m — add a row to the owned-keys table of the subject that owns it, or to README.md, which AD-6 names the residual owner for keys with no operator-plane subject directory"; exit 1; }; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); s=.env.schema; test -f "$s" || { echo "missing $s — it is the only list of environment keys (AD-6), so this guard cannot check first-party reads against it"; exit 1; }; sk=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "$s" | tr -d "=" | sort -u); test -n "$sk" || { echo "no key declarations extracted from $s, so this guard would pass vacuously — a declaration is a KEY= at column 0"; exit 1; }; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this guard asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; e="process[.]env[.][A-Za-z_][A-Za-z0-9_]*|process[.]env[[][\"$q][A-Za-z_][A-Za-z0-9_]*"; h=$(printf "%s\n" "$f" | while IFS= read -r p; do grep -onE "$e" -- "$p" | sed "s|^|$p:|"; done); test -n "$h" || { echo "no literal process.env read found anywhere under src/, so this guard would pass vacuously — src/mastra/index.ts has dozens; the extraction is broken, not the tree"; exit 1; }; o=$(printf "%s\n" "$h" | while IFS= read -r x; do k=${x##*[!A-Za-z0-9_]}; printf "%s\n" "$sk" | grep -qxF -e "$k" || echo "$x"; done); test -z "$o" || { echo "first-party code reads an environment key $s does not declare, and $s is the only list of keys (AD-6/NFR7) — declare each one there, mirror it into .env.example, and claim it in the owned-keys table of the README that owns it. Read sites (file:line:read):"; printf "%s\n" "$o"; exit 1; }; exit 0' ''',
+  '''sh -c 's=.env.schema; x=.env.example; for f in "$s" "$x"; do test -f "$f" || { echo "missing $f — $s is the only list of keys (AD-6) and $x is the operator copy of it; the two must carry the same keys in the same order"; exit 1; }; done; a=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=[^ ]*$" "$s" | sed "s/=.*$//"); b=$(grep -oE "^(# )?[A-Za-z_][A-Za-z0-9_]*=[^ ]*$" "$x" | sed "s/^# //; s/=.*$//"); test -n "$a" || { echo "no key declarations extracted from $s, so this guard would pass vacuously — a declaration is a KEY= at column 0 whose value, if any, runs to end of line with no space after the ="; exit 1; }; test -n "$b" || { echo "no key lines extracted from $x, so this guard would pass vacuously — each key there is a KEY= or a commented # KEY= at column 0, its value running to end of line"; exit 1; }; da=$(printf "%s\n" "$a" | sort | uniq -d); test -z "$da" || { echo "$s declares the same key more than once:$(printf "%s" "$da" | tr "\n" " ")— one declaration per key, or the later one silently wins"; exit 1; }; db=$(printf "%s\n" "$b" | sort | uniq -d); test -z "$db" || { echo "$x lists the same key more than once:$(printf "%s" "$db" | tr "\n" " ")— one line per key, or an operator copying it to .env gets whichever comes last"; exit 1; }; test "$a" = "$b" && exit 0; ap=" $(printf "%s" "$a" | tr "\n" " ") "; bp=" $(printf "%s" "$b" | tr "\n" " ") "; m=""; for k in $a; do case "$bp" in *" $k "*) ;; *) m="$m $k";; esac; done; n=""; for k in $b; do case "$ap" in *" $k "*) ;; *) n="$n $k";; esac; done; test -z "$m" || echo "declared in $s but missing from $x:$m — mirror every declaration into $x at the same position, commented out, so an operator copying $x to .env sees the whole list"; test -z "$n" || echo "present in $x but not declared in $s:$n — $s is the only list of keys (AD-6/NFR7), so declare it there or drop the line"; test -n "$m$n" || echo "$s and $x carry the same keys in a different ORDER — $x is the operator copy of $s and is read alongside it, so the positions have to match"; exit 1' ''',
+  '''sh -c 'b=$(printf "\140"); s=.env.schema; d=ops/README.md; c=docker-compose.yml; for f in "$s" "$d" "$c"; do test -f "$f" || { echo "missing $f — this guard reconciles every key the deployment SETS against $s, which AD-6 makes the only list of keys"; exit 1; }; done; sk=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "$s" | tr -d "=" | sort -u); test -n "$sk" || { echo "no key declarations extracted from $s, so this guard would pass vacuously — a declaration is a KEY= at column 0"; exit 1; }; cv=$(sed -n "s/^Not [.]env keys://p" "$d" | grep -oE "$b[A-Z_][A-Z0-9_]*$b" | tr -d "$b" | sort -u); test -n "$cv" || { echo "$d carries no column-0 line of the form Not .env keys: <backticked names>, so this guard has no carve-out list and would fail on PATH — that is a process-environment setting the plists and the wrapper make rather than configuration, and $d is where that is recorded"; exit 1; }; set=""; for p in ops/launchagents/*.plist; do one=$(plutil -extract EnvironmentVariables raw -- "$p" 2>&1) || { echo "plutil could not read an EnvironmentVariables dict from $p ($one) — every launchd agent here sets at least PATH, so the keys this one sets are unverified rather than absent"; exit 1; }; one=$(printf "%s\n" "$one" | grep -oE "^[A-Za-z_][A-Za-z0-9_]*" | sed "s|^|$p |" | tr "\n" ";"); test -n "$one" || { echo "no EnvironmentVariables key extracted from $p, so this guard would pass vacuously for that plist while the other one keeps the set non-empty"; exit 1; }; set="$set$one"; done; w=""; for p in ops/*.sh; do w="$w$(grep -oE "^[[:space:]]*export [A-Za-z_][A-Za-z0-9_]*=" "$p" | sed "s/^[[:space:]]*export //; s/=$//; s|^|$p |" | tr "\n" ";")"; done; test -n "$w" || { echo "no export KEY= line extracted from any ops/*.sh, so this guard would pass vacuously — ops/factory-start.sh exports both PATH and DOCKER_HOST, and the wrapper is a deployment-set site exactly as the plists are"; exit 1; }; cm=$(grep -oE "[$][{][A-Za-z_][A-Za-z0-9_]*" "$c" | sed "s/^[$][{]//" | sort -u | sed "s|^|$c |" | tr "\n" ";"); test -n "$cm" || { echo "no key interpolation extracted from $c, so this guard would pass vacuously — it parameterizes the app-db service out of .env"; exit 1; }; o=$(printf "%s%s%s" "$set" "$w" "$cm" | tr ";" "\n" | grep . | while IFS= read -r x; do k=${x##* }; printf "%s\n" "$sk" | grep -qxF -e "$k" && continue; printf "%s\n" "$cv" | grep -qxF -e "$k" && continue; echo "$x"; done); test -z "$o" || { echo "the deployment sets an environment key $s does not declare, and $s is the only list of keys (AD-6/NFR7) — declare it there, mirror it into .env.example and claim it in an owned-keys table, or add it to the Not .env keys: line of $d if it is a process-environment setting rather than configuration. Offenders (file, key):"; printf "%s\n" "$o"; echo "carve-outs recorded in $d: $(printf "%s" "$cv" | tr "\n" " ")"; exit 1; }; exit 0' ''',
+  '''sh -c 't=$(git -c core.quotePath=false ls-files | grep -E "(^|/)[.]env([.].*)?$" | grep -vE "^[.]env[.](example|schema)$"); test -z "$t" || { echo "an env file is tracked in the git index, and secrets never enter this repository — the whole .env.* family is gitignored (only .env.example and .env.schema are negated), so these can only have arrived through git add -f. Remove each with git rm --cached and rotate anything that was in it:"; printf "%s\n" "$t"; exit 1; }; f=$(git -c core.quotePath=false ls-files | grep -vE "^(node_modules/|[.]agents/|skills-lock[.]json$)"); test -n "$f" || { echo "git lists no tracked non-vendored file, so this guard would pass vacuously — the checkout is broken, not clean"; exit 1; }; e="xox[baprs]-[A-Za-z0-9-]{10}|xapp-[A-Za-z0-9-]{10}|gh[pours]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|sk-[A-Za-z0-9_-]{20}|lin_api_[A-Za-z0-9]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----[^A-Za-z0-9+/]{0,4}[A-Za-z0-9+/]{16}|^[A-Za-z0-9+/]{60,}={0,2}$|(BETTER_AUTH_SECRET|FACTORY_CREDENTIAL_ENCRYPTION_KEY)=[A-Za-z0-9+/]{40,}"; o=$(printf "%s\n" "$f" | while IFS= read -r p; do grep -nEH -m 3 -e "$e" -- "$p" 2>/dev/null | cut -c1-200; done); test -z "$o" || { echo "a tracked non-vendored file matches a live credential shape — secrets never enter this repository, and every placeholder here uses ... or <angle brackets> instead, which is what keeps the documented example tokens from matching. Rotate the credential at the provider first, then remove it from the file and from history:"; printf "%s\n" "$o"; exit 1; }; exit 0' ''',
+  '''sh -c 's=.env.schema; x=.env.example; r="README.md ops/README.md sandbox/README.md apps/github/README.md apps/linear/README.md apps/slack/README.md"; bad=0; for f in $r "$s" "$x"; do test -s "$f" || { echo "missing or empty $f — AC4 draws the restatement line between $s, its operator copy $x, and the six owning READMEs; an empty side would let this guard pass vacuously"; exit 1; }; done; for f in $r; do h=$(grep -nE "@required|@public|@sensitive|@type=|fails the pattern|varlock load" "$f" | cut -c1-200); test -z "$h" || { echo "$f names the schema mechanism, which AD-6 puts on the other side of the line: a README may say what goes wrong and what the operator sees, never @required, @public, @sensitive, a declared type, or the pattern and loader wording that restates one. Move the mechanism to $s and keep the consequence here:"; printf "%s\n" "$h"; bad=1; }; done; for e in "$s" "$x"; do g=$(grep -nE "openssl |ssh-keygen|/dev/urandom|/dev/random|uuidgen|pwgen|gpg --gen" "$e" | cut -c1-200); test -z "$g" || { echo "$e carries a credential-generation command, which AD-6 puts on the README side: the schema declares and validates, the owning README says what a value must contain and how to obtain one. Move it and leave a pointer:"; printf "%s\n" "$g"; bad=1; }; n1=$(grep -nE "[^[:space:]]+[[:space:]]*→([[:space:]]*[^[:space:]]+)?" "$e" | grep -E "[^[:space:]]*[a-z][^[:space:]]*[[:space:]]*→|→[[:space:]]*[^[:space:]]*[a-z]" | cut -c1-200); n2=$(grep -nE "[A-Za-z][[:space:]]*>[[:space:]]*[A-Za-z]" "$e" | cut -c1-200); n=$(printf "%s\n%s\n" "$n1" "$n2" | grep .); test -z "$n" || { echo "$e carries provider-console navigation, which AD-6 puts on the README side. An arrow between two ALL-CAPS key names is the state-signer chain and is fine; an arrow or a > with a console section beside it is not:"; printf "%s\n" "$n"; bad=1; }; done; test "$bad" = "0" || exit 1; exit 0' ''',
+  '''sh -c 'd=docs/self-hosting-research.md; m=$(git ls-files -s -- "$d" | cut -d" " -f1); test "$m" = "100644" || { echo "the self-hosting research document is not tracked as a regular file at $d (git index mode: $m) — AD-5 makes docs/ the narrative half of the layout, and six READMEs, AGENTS.md and guard 25 all cite this exact path"; exit 1; }; sz=$(git cat-file -s ":$d" 2>/dev/null); test -n "$sz" && test "$sz" -gt 0 || { echo "$d is staged as a 0-byte blob — it is the document six READMEs, AGENTS.md and guard 25 cite by path"; exit 1; }; test -s "$d" || { echo "$d is staged but missing or empty in the WORKING TREE — it is the document six READMEs, AGENTS.md and guard 25 cite by path, and a rename or deletion that has not reached the index yet still leaves every one of those citations resolving to nothing. Restore it with git checkout -- $d, or, if the rename is intended, carry it through the index and through every citation in the same change"; exit 1; }; cs=""; for cp in AGENTS.md _bmad-output/specs/spec-self-hosted-factory/SPEC.md _bmad-output/specs/spec-self-hosted-factory/brownfield.md _bmad-output/planning-artifacts/epics.md "_bmad-output/planning-artifacts/architecture/*/ARCHITECTURE-SPINE.md"; do h=$(git -c core.quotePath=false ls-files -- "$cp" | grep .); test -n "$h" || { echo "a live contract document this guard sweeps by name is not tracked at $cp — everything else under _bmad-output/ is excluded as a frozen run record, so each of these is named individually and a renamed or deleted one would drop out of the sweep silently"; exit 1; }; cs=$(printf "%s\n%s\n" "$cs" "$h" | grep .); done; es=_bmad-output/specs/spec-self-hosted-factory/extension-seams.md; git -c core.quotePath=false ls-files -- "$es" | grep -q . || { echo "missing $es — it is a companion of SPEC.md and is swept for the old path even though it does not cite the document today"; exit 1; }; cd=$(printf "%s\n%s\n" "$cs" "$es" | grep .); ft=$(git -c core.quotePath=false ls-files -- . ":(exclude)_bmad-output" ":(exclude).bmad-loop" ":(exclude)_bmad" ":(exclude).claude" ":(exclude).agents"); bs=$(printf "\134"); op=$(git -c core.quotePath=false ls-files | grep -F -e "Self-hosting research.md"); test -z "$op" || { echo "a tracked file is back at the old space-carrying PATH — Story 5.3 moved the document to $d precisely so that no path in this repo carries a space. Remove or rename it:"; printf "%s\n" "$op"; exit 1; }; o=$(printf "%s\n%s\n" "$ft" "$cd" | grep . | while IFS= read -r p; do grep -n -i -I -H -F -e "Self-hosting research.md" -e "Self-hosting%20research.md" -e "Self-hosting${bs} research.md" -- "$p" 2>/dev/null | cut -c1-200; done); test -z "$o" || { echo "the old space-carrying filename of $d survives in a tracked file, in some spelling — Story 5.3 renamed the document, and a citation naming the old file resolves to nothing while looking correct. Rewrite each one to $d (file:line:text):"; printf "%s\n" "$o"; exit 1; }; printf "%s\n" "$cs" | grep . | while IFS= read -r cp; do grep -qF -e "$d" -- "$cp" || { echo "$cp no longer names $d — the rename and every citation of it have to land in one change, and a citation rewritten to another path or dropped outright leaves the document unreachable from the contract that depends on it, with the old-path sweep above still clean"; exit 1; }; done || exit 1; exit 0' ''',
+  '''sh -c 'd=docs/self-hosting-research.md; test -s "$d" || { echo "missing or empty $d — it is the narrative half of AD-5, and this guard reconciles it against the five artifacts it used to reproduce"; exit 1; }; b=$(printf "\140"); f="$b$b$b"; z="s/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g"; ds=$(sed "$z" "$d"); pr=$(awk -v F="$f" "{ s=\$0; sub(/^[ \t]+/,\"\",s); t=substr(s,1,3); if (t==F || t==\"~~~\") { if (i==0) { i=1; k=t; next } else if (t==k) { i=0; next } } if (i==0) print \$0 }" "$d") pr=$(printf "%s\n" "$pr" | grep -v "Non-normative"); test -n "$pr" || { echo "the fence walk over $d returned no prose at all, so the by-path reference check below would fail on every artifact for the wrong reason — the walk is broken, not the document"; exit 1; }; bad=0; for a in sandbox/factory-sandbox.Dockerfile ops/launchagents/ai.mastra.colima.plist ops/launchagents/ai.mastra.factory.plist ops/factory-start.sh ops/newsyslog/ai.mastra.factory.conf; do test -s "$a" || { echo "missing or empty $a — this guard reads its signature lines OUT OF the artifact rather than hard-coding them, so with the artifact gone it would assert nothing about $d"; bad=1; continue; }; case "$a" in *.Dockerfile) e="^.{25,}$";; *colima.plist) e="colima|--foreground|--mount-type";; *factory.plist) e="caffeinate|ProcessType|factory-start[.]sh|ai[.]mastra[.]factory[<]";; *.sh) e="^.{40,}$";; *.conf) e="^# logfilename|^/Users/";; *) echo "no signature pattern is recorded in this guard for $a, so every line of it would be treated as distinctive — add a case arm before adding the artifact"; bad=1; continue;; esac; sg=$(grep -E "$e" "$a" | sed "$z" | sort -u | grep .); c=$(printf "%s\n" "$sg" | grep -c .); test "$c" -ge 2 || { echo "only $c signature line(s) could be read out of $a with $e — this guard needs SEVERAL distinctive lines per artifact, because a body pasted back with one line omitted would slip past a single-line signature. Fix the extraction, not the document"; bad=1; continue; }; printf "%s\n" "$pr" | grep -qF -e "$a" || { echo "$d does not name $a in its PROSE — AD-5 keeps one real file per operational artifact and has docs/ reference it BY PATH, and a mention inside an illustrative fenced block is not that reference"; bad=1; }; h=$(printf "%s\n" "$sg" | while IFS= read -r s; do test -n "$s" || continue; printf "%s\n" "$ds" | grep -nF -e "$s" | while IFS= read -r x; do echo "$d:$x"; done; done | cut -c1-200); test -z "$h" || { echo "$d reproduces content of $a — AD-5 forbids the second copy, and three of the five copies this replaced had already drifted from the real file. Signature lines read out of $a and matched in the document (whitespace squeezed on both sides):"; printf "%s\n" "$h"; bad=1; }; done; test "$bad" = "0" || exit 1; exit 0' ''',
+  '''sh -c 'dd=docs/self-hosting-research.md; b=$(printf "\140"); f="$b$b$b"; bad=0; ms=$(git -c core.quotePath=false ls-files "docs/*.md"); test -n "$ms" || { echo "git lists no tracked docs/*.md, so this guard asserts nothing — AD-5 and FR32 put the non-normative marker rule on docs/ as a directory"; exit 1; }; r=$(printf "%s\n" "$ms" | while IFS= read -r m; do test -n "$m" || continue; awk -v F="$f" "{ s=\$0; sub(/^[ \t]+/,\"\",s); t=substr(s,1,3); if (t==F || t==\"~~~\") { if (i==0) { print \"O \" FILENAME \":\" FNR; if (p !~ /Non-normative/) print \"U \" FILENAME \":\" FNR; i=1; k=t } else if (t==k) { i=0 } } p=s } END{ if (i==1) print \"X \" FILENAME }" "$m"; done); op=$(printf "%s\n" "$r" | grep -c "^O "); test "$op" -gt 0 || { echo "the fence walk found no opening fence in any tracked docs/*.md — every one of them carries blocks, so the walk is broken and this guard would pass vacuously"; exit 1; }; x=$(printf "%s\n" "$r" | grep "^X " | sed "s/^X //"); test -z "$x" || { echo "a tracked docs/*.md ends inside an unclosed fenced block, so every fence this guard counted after the unbalanced one was read with the open/close roles reversed — the marker verdicts are unreliable until the fences balance. File(s):"; printf "%s\n" "$x"; bad=1; }; u=$(printf "%s\n" "$r" | grep "^U " | sed "s/^U //"); test -z "$u" || { echo "a fenced block in docs/ carries no Non-normative marker on the line DIRECTLY above its opening fence — AD-5 and FR32 make a code block in docs/ illustrative only and require it to be marked, and the line directly above the fence is the one position a guard can find without parsing markdown. Name the file that is the record on that line. Unmarked opening fences (file:line):"; printf "%s\n" "$u"; bad=1; }; w="0 1 2 2.1 2.2 2.3 3 3.1 3.2 3.3 4 4.1 5 6 7 7.1 7.2 7.3 7.4 7.5 8 9 10 11"; dp=$(awk -v F="$f" "{ s=\$0; sub(/^[ \t]+/,\"\",s); t=substr(s,1,3); if (t==F || t==\"~~~\") { if (i==0) { i=1; k=t; next } else if (t==k) { i=0; next } } if (i==0) print \$0 }" "$dd"); test -n "$dp" || { echo "the fence walk over $dd returned no prose, so the citation-anchor check below would read nothing — the walk is broken, not the document"; exit 1; }; g=$(printf "%s\n" "$dp" | grep -oE "^#{2,3} [0-9]+([.][0-9]+)?" | sed "s/^#* //"); test -n "$g" || { echo "no numbered heading extracted from $dd, so the citation-anchor check would pass vacuously — its sections are numbered ## 0. through ## 11"; bad=1; }; rest="$g"; miss=""; for k in $w; do ix=$(printf "%s\n" "$rest" | grep -nxF -e "$k" | head -1 | cut -d: -f1); test -n "$ix" || { miss="$k"; break; }; rest=$(printf "%s\n" "$rest" | tail -n +$((ix+1))); done; test -z "$miss" || { echo "a recorded section anchor of $dd is gone or out of order — those numbers are stable citation anchors (NFR9, AGENTS.md) cited from the spine, SPEC.md, epics.md and every story spec, so renumbering one breaks every citation at once and silently. Adding a new section is fine; renumbering an existing one is not. First anchor not found in order: $miss"; echo "  expected, in this order: $w"; echo "  actual: $(printf "%s" "$g" | tr "\n" " ")"; bad=1; }; test "$bad" = "0" || exit 1; exit 0' ''',
+  '''sh -c 'r=src/mastra/config/README.md; p=package.json; for f in "$r" "$p"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; m=$(git ls-files -s -- "$r" | cut -d" " -f1); test "$m" = "100644" || { echo "$r is not tracked as a regular file (index mode: ${m:-absent}) — AD-8/FR35 make the provenance record a committed artifact, and this gate runs in a worktree built from tracked files only, so an untracked or symlinked record is simply not there"; exit 1; }; test -s "$r" || { echo "empty $r — the record of what src/mastra/index.ts was forked from is the thing that makes full extraction payable (FR35); without it a reconciliation has no base to diff against"; exit 1; }; grep -q "create-factory" "$r" || { echo "$r does not name create-factory — FR35 wants the template ORIGIN written down, and npm create factory, npm package create-factory, is it"; exit 1; }; fl=$(grep -n "Fork commit" "$r"); fc=$(printf "%s\n" "$fl" | grep -c .); test "$fc" = "1" || { echo "$r must carry exactly ONE line naming the Fork commit, and carries $fc. The fork point is a single commit and it is the base of every future three-way diff (AD-8/FR35). The id is read off that line rather than swept out of the whole file precisely so the record can also carry a reconciliation history naming other commits. Matching lines:"; printf "%s\n" "$fl"; exit 1; }; sha=$(printf "%s\n" "$fl" | grep -oE "[0-9a-f]{40}" | sort -u); sc=$(printf "%s\n" "$sha" | grep -c .); test "$sc" = "1" || { echo "the Fork commit line of $r names $sc distinct 40-hex commit ids rather than one, so the fork point is ambiguous and no diff has a base (AD-8/FR35). Found:"; printf "%s\n" "$sha"; exit 1; }; git cat-file -e "$sha^{commit}" 2>/dev/null || { echo "$r names fork commit $sha, which does not resolve in this repository — a base nobody can check out is not a base"; exit 1; }; git cat-file -e "$sha:src/mastra/index.ts" 2>/dev/null || { echo "$r names fork commit $sha, but src/mastra/index.ts does not exist in it, so git show $sha:src/mastra/index.ts cannot produce the three-way-diff base FR35 requires"; exit 1; }; grep -q "MUST be updated on every reconciliation" "$r" || { echo "$r does not state that the record MUST be updated on every reconciliation — without that sentence the two version lines below go stale silently and the record names a base the next diff was never taken against"; exit 1; }; v="[0-9]+[.][0-9]+[.][0-9]+([-+][0-9A-Za-z.-]+)*"; rv=$(grep -oE "installed today:[^0-9]*$v" "$r" | sed "s/^installed today:[^0-9]*//" | sort -u); rn=$(printf "%s\n" "$rv" | grep -c .); test "$rn" = "1" || { echo "$r must record exactly ONE currently-installed @mastra/factory version, on a line reading like: @mastra/factory installed today: 0.0.0 (a -rc/+build suffix is accepted) — the extraction found $rn, so this guard cannot compare the record with $p and would pass vacuously"; exit 1; }; fv=$(grep -oE "at fork:[^0-9]*$v" "$r" | sed "s/^at fork:[^0-9]*//" | sort -u); fn=$(printf "%s\n" "$fv" | grep -c .); test "$fn" = "1" || { echo "$r must record exactly ONE @mastra/factory version AT THE FORK, on a line reading like: @mastra/factory at fork: 0.0.0 — the extraction found $fn. The pair of versions is what tells a reconciliation how far this tree has travelled from its base"; exit 1; }; pv=$(sed -n "s/.*\"@mastra\/factory\": \"\([^\"]*\)\".*/\1/p" "$p" | sort -u); pn=$(printf "%s\n" "$pv" | grep -c .); test "$pn" = "1" || { echo "$p does not pin exactly one @mastra/factory version (found $pn), so this guard has nothing to compare $r against"; exit 1; }; printf "%s\n" "$pv" | grep -qxE "$v" || { echo "$p declares @mastra/factory as the RANGE $pv rather than an exact version. $r records what is INSTALLED today, and a range lets the installed version be anything inside it while the record and this comparison both stay green — so the pin has to be exact (AD-8/FR35). Pin @mastra/factory to a single version in $p"; exit 1; }; test "$rv" = "$pv" || { echo "$p pins @mastra/factory $pv but $r records $rv as installed today. A dependency bump IS a reconciliation with the upstream template, so the provenance record moves in the same commit: update both version lines in $r, and the module layout too if a concern moved (AD-8/FR35)"; exit 1; }; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); e=src/mastra/index.ts; c=src/mastra/config; y=$c/factory.ts; test -f "$e" || { echo "missing $e — it is the deployment entry (AD-2) and the file this guard asserts is now free of the three extracted concerns"; exit 1; }; test -s "$y" || { echo "missing or empty $y — Story 5.6 moved the new MastraFactory({ … }) call out of $e into that module, and this guard reads the call out of the file that holds it"; exit 1; }; for m in database-url storage vector pubsub; do test -s "$c/$m.ts" || { echo "missing or empty $c/$m.ts — AD-8 gives each extracted concern its own module under $c, and extraction is total per concern: a concern is either entirely there or entirely still in the entry, never split"; exit 1; }; done; grep -q "new RedisStreamsPubSub(" "$c/pubsub.ts" || { echo "$c/pubsub.ts constructs no RedisStreamsPubSub, so the pubsub concern does not actually live there and the entry half of this guard would pass vacuously"; exit 1; }; grep -q "new PgFactoryStorage(" "$c/storage.ts" || { echo "$c/storage.ts constructs no PgFactoryStorage, so the Postgres arm of the storage concern does not live there and the entry half of this guard would pass vacuously"; exit 1; }; grep -q "new LibSQLFactoryStorage(" "$c/storage.ts" || { echo "$c/storage.ts constructs no LibSQLFactoryStorage, so the bare-local-dev arm of the storage concern does not live there — extraction is total per concern, and half a branch is exactly the partial state AD-8 forbids"; exit 1; }; grep -q "new PgVector(" "$c/vector.ts" || { echo "$c/vector.ts constructs no PgVector, so the vector concern does not live there and the entry half of this guard would pass vacuously"; exit 1; }; o=$(grep -nE "PgFactoryStorage|LibSQLFactoryStorage|PgVector|RedisStreamsPubSub" -- "$e"); test -z "$o" || { echo "$e names one of the storage/vector/pubsub constructors, but AD-8 moved all three concerns into $c and extraction is total: the entry imports the finished values and constructs none of them. Offending lines:"; printf "%s\n" "$o"; exit 1; }; b=$(sed -n "/new MastraFactory({/,/^});$/p" "$y"); test -n "$b" || { echo "no new MastraFactory({ … }); call found in $y, so this guard cannot see which bindings reach the factory and would pass vacuously"; exit 1; }; printf "%s\n" "$b" | tail -1 | grep -q "^});" || { echo "the new MastraFactory({ … }) extraction from $y did not end at a column-0 }); so it ran to end of file and would claim every later line — keep the factory call closed on its own line"; exit 1; }; t=$(printf "%s\n" "$b" | tail -n +2 | grep -E "^  [^[:space:]]" | sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*$//" | grep .); test -n "$t" || { echo "no top-level property could be read out of the new MastraFactory({ … }) call in $y — the call block was found but every line in it was filtered away, so the binding check below would pass vacuously. Its properties are the lines indented by exactly two spaces"; exit 1; }; for m in pubsub storage vector; do grep -qE "^import[[:space:]]*[{][[:space:]]*$m[[:space:]]*[}][[:space:]]*from[[:space:]]*[\"$q][.]/$m[\"$q]" -- "$y" || { echo "$y does not import the $m binding from ./$m by name. Extraction put construction behind a module boundary, which is what makes side effects run and the VALUE be discarded reachable: a bare side-effect import of ./$m still logs, warns and throws exactly as before while the factory silently falls back to its own default, with tsc, every test and every other guard green (AD-8)"; exit 1; }; printf "%s\n" "$t" | grep -qx "$m" || { echo "$y imports $m but does not pass it into new MastraFactory({ … }) as a TOP-LEVEL SHORTHAND property, so the module is loaded for its side effects and its value is dropped: the deployment then runs on the factory default — the in-process event bus, the default storage resolution, no vector mount — while $c/$m.ts constructs an instance nothing uses (AD-8). The property has to be bare $m, at the call top level: nesting it inside another property object, or rebinding it as $m: something-else, both drop the imported value while leaving it mentioned. Top-level properties read from the call:"; printf "%s\n" "$t" | sed "s|^|  |"; exit 1; }; done; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so the one-read-site census below asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; for k in DATABASE_URL APP_DATABASE_URL NODE_ENV REDIS_URL; do pd="process[.]env[?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; pb="process[.]env([?][.])?[[][[:space:]]*[\"$q$bt]$k[\"$q$bt][[:space:]]*[]]([[:space:]]*==?)?"; ps="[{]([^}]*[^A-Za-z0-9_])?$k([^A-Za-z0-9_][^}]*)?[}][[:space:]]*=[[:space:]]*process[.]env"; h=$(printf "%s\n" "$f" | while IFS= read -r p; do sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$p" | grep -onE -e "$pd" -e "$pb" -e "$ps" | sed "s|^|$p:|"; done); rd=$(printf "%s\n" "$h" | grep -vE "[^=]=$" | grep .); n=$(printf "%s\n" "$rd" | grep -c .); test "$n" = "1" || { echo "AD-7/NFR8 put $k at exactly ONE literal process.env read site in first-party code and every consumer takes the parsed value by module export; this tree has $n. These spellings count as a read — process.env.$k, process.env[quoted $k] in any of the three quote styles, either of those reached through optional chaining (process.env?.$k), and a { $k } destructuring off process.env — and an assignment (process.env.X = v, as the test preamble makes) does not. A line that is WHOLLY a comment is not scanned, so prose naming a key does not read as a second site. Read sites (file:line:match):"; printf "%s\n" "$rd"; echo "Guard 41 re-audits this rule across the whole finished code plane, over every key declared in .env.schema; this guard covers the four keys Story 5.4 moved into $c."; exit 1; }; printf "%s\n" "$rd" | grep -q "^src/mastra/config/" || { echo "the one read of $k is not under $c/, but AD-8 moved the concerns that read it there and AD-7 keeps the read with the module that owns the parsed value. Read site (file:line:match):"; printf "%s\n" "$rd"; exit 1; }; done; exit 0' ''',
+  '''sh -c 'e=src/mastra/index.ts; test -f "$e" || { echo "missing $e — AD-2/NFR1 make this exact path the deployment entry"; exit 1; }; grep -qE "new Mastra[[:space:]]*[(]" -- "$e" || { echo "$e contains no literal new Mastra( — mastra build validates the entry with the deployer checkConfigExport Babel plugin, which inspects THIS file source, so an instance that arrives by re-export or out of a helper typechecks, passes every test, and fails at deploy (AD-2/NFR1)"; exit 1; }; grep -qE "^export const mastra[[:space:]]*(:[^=]*)?=" -- "$e" || { echo "$e does not export const mastra — checkConfigExport looks for a Mastra instance exported under exactly that name from the entry (AD-2/NFR1). An optional : Type annotation is fine here"; exit 1; }; grep -A1 -E "^export const mastra[[:space:]]*(:[^=]*)?=" -- "$e" | tr "\n" " " | grep -qE "^export const mastra[[:space:]]*(:[^=]*)?=[[:space:]]*new Mastra[[:space:]]*[(]" || { echo "$e exports mastra and mentions new Mastra( somewhere, but no statement in it reads export const mastra = new Mastra( . checkConfigExport matches the literal construction AT the export site, so an instance assembled in a helper or in another module and merely assigned here is invisible to it: the build reports no Mastra export and the deploy fails after this gate has already gone green (AD-2/NFR1). A : Type annotation and a line break after the = are both accepted"; exit 1; }; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this guard asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; o=$(printf "%s\n" "$f" | while IFS= read -r p; do test "$p" = "$e" && continue; grep -nE "new Mastra[[:space:]]*[(]|export[[:space:]]+(const|let|var|function)[[:space:]]+mastra([^A-Za-z0-9_]|\$)|export[[:space:]]+default[[:space:]]+mastra([^A-Za-z0-9_]|\$)|export[[:space:]]*[{][^}]*[^A-Za-z0-9_]?mastra([^A-Za-z0-9_]|\$)|export[[:space:]]*[*][^;]*from" -- "$p" | sed "s|^|$p:|"; tr "\n" " " < "$p" | grep -qE "export[[:space:]]*[{][^}]*[^A-Za-z0-9_]mastra([^A-Za-z0-9_][^}]*)?[}]" && echo "$p: a named re-export of mastra inside an export { … } written across several lines"; done); test -z "$o" || { echo "a file under src/ other than $e constructs or re-exports the Mastra instance. AD-2 keeps the entry indivisible: the deployer reads the entry source, so a second construction site is either dead code the deployer ignores or the live one it cannot see, and a re-export — named, default or star — moves the instance out of the file the plugin inspects. Offending lines:"; printf "%s\n" "$o"; exit 1; }; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); e=src/mastra/index.ts; c=src/mastra/config; y=$c/factory.ts; test -f "$e" || { echo "missing $e — it is the deployment entry (AD-2) and the file this guard asserts is now free of the auth, integration and sandbox concerns"; exit 1; }; test -s "$y" || { echo "missing or empty $y — Story 5.6 moved the new MastraFactory({ … }) call out of $e into that module, and this guard reads the call out of the file that holds it"; exit 1; }; for m in auth integrations sandbox; do test -s "$c/$m.ts" || { echo "missing or empty $c/$m.ts — AD-8 gives each extracted concern its own module under $c, and extraction is total per concern: a concern is either entirely there or entirely still in the entry, never split"; exit 1; }; done; for pair in "auth new MastraAuthBetterAuth(" "auth createFactorySecretEncryption(" "integrations new GithubIntegration(" "integrations new LinearIntegration(" "integrations new SlackIntegration(" "sandbox new DockerSandbox(" "sandbox new PlatformSandbox(" "sandbox new E2BSandbox(" "sandbox new LocalSandbox("; do m=${pair%% *}; w=${pair#* }; grep -qF -e "$w" "$c/$m.ts" || { echo "$c/$m.ts does not carry $w so that part of the concern does not actually live there, and the entry half of this guard would pass vacuously. Extraction is total per concern (AD-8): half a branch is the partial state it forbids"; exit 1; }; done; o=$(grep -nE "MastraAuthBetterAuth|createFactorySecretEncryption|GithubIntegration|LinearIntegration|SlackIntegration|DockerSandbox|PlatformSandbox|E2BSandbox|LocalSandbox" -- "$e"); test -z "$o" || { echo "$e names one of the auth, integration or sandbox constructors, but AD-8 moved all three concerns into $c and extraction is total: the entry imports the finished values and constructs none of them. Offending lines:"; printf "%s\n" "$o"; exit 1; }; b=$(sed -n "/new MastraFactory({/,/^});$/p" "$y"); test -n "$b" || { echo "no new MastraFactory({ … }); call found in $y, so this guard cannot see which bindings reach the factory and would pass vacuously"; exit 1; }; printf "%s\n" "$b" | tail -1 | grep -q "^});" || { echo "the new MastraFactory({ … }) extraction from $y did not end at a column-0 }); so it ran to end of file and would claim every later line — keep the factory call closed on its own line"; exit 1; }; t=$(printf "%s\n" "$b" | tail -n +2 | grep -E "^  [^[:space:]]" | sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*$//" | grep .); test -n "$t" || { echo "no top-level property could be read out of the new MastraFactory({ … }) call in $y — the call block was found but every line in it was filtered away. Its properties are the lines indented by exactly two spaces"; exit 1; }; for x in auth:auth auth:secretEncryption integrations:integrations integrations:stateSecret integrations:githubAppSlug sandbox:sandbox; do m=${x%%:*}; n=${x##*:}; il=$(grep -E "^import[[:space:]]*[{][^}]*[}][[:space:]]*from[[:space:]]*[\"$q][.]/$m[\"$q]" -- "$y"); test -n "$il" || { echo "$y has no named import from ./$m. Extraction put construction behind a module boundary, which is what makes side effects run and the VALUE be discarded reachable: a bare side-effect import still warns and throws exactly as before while the factory silently falls back to its own default, with tsc, every test and every other guard green (AD-8)"; exit 1; }; ns=$(printf "%s\n" "$il" | sed "s/^import[^{]*[{]//; s/[}].*$//" | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*$//" | grep .); printf "%s\n" "$ns" | grep -qx "$n" || { echo "$y does not import the $n binding by name from ./$m — the concern moved, so the entry has to take the finished value from the module that owns it. Bindings read from that import line:"; printf "%s\n" "$ns" | sed "s|^|  |"; exit 1; }; case "$n" in githubAppSlug) pl=$(printf "%s\n" "$b" | grep -n "^  platform:" | head -1 | cut -d: -f1); test -n "$pl" || { echo "$y imports githubAppSlug from ./integrations but the new MastraFactory({ … }) call has no platform: property to put it in. Without it the deployment stops recognising its own App comments on every pull request it opened, and nothing else notices: tsc has no noUnusedLocals, the import still satisfies every other half of this guard, and the entry simply passes the slug nowhere"; exit 1; }; one=$(printf "%s\n" "$b" | sed -n "${pl}p"); case "$one" in *"}"*) pb="$one";; *) pb=$(printf "%s\n" "$b" | sed -n "${pl},/^  },/p"); printf "%s\n" "$pb" | tail -1 | grep -q "^  }," || { echo "the platform: { … } object of the new MastraFactory({ … }) call in $y does not close at a two-space-indented }, so the extraction of its properties ran past it — keep the nested object closed on its own line"; exit 1; };; esac; pt=$(printf "%s\n" "$pb" | sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," | tr "{}" "\n\n" | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*$//" | grep . | grep -v "^platform:$"); printf "%s\n" "$pt" | grep -qx "$n" || { echo "$y imports $n but does not pass it as a bare token inside the nested platform: { … } object of the new MastraFactory({ … }) call. That object is the only place the factory reads it from, and a diff that drops the property leaves tsc, every test and every other half of this guard green while the deployment compares its own App login against undefined[bot]. Properties read from platform: { … }:"; printf "%s\n" "$pt" | sed "s|^|  |"; exit 1; }; continue;; esac; printf "%s\n" "$t" | grep -qx "$n" || { echo "$y imports $n but does not pass it into new MastraFactory({ … }) as a TOP-LEVEL SHORTHAND property, so the module is loaded for its side effects and its value is dropped: the deployment then runs on the factory default — platform-hosted identity, no integrations, the packaged sandbox chain — while $c/$m.ts constructs something nothing uses (AD-8). The property has to be bare $n, at the call top level: nesting it inside another property object, or rebinding it as $n: something-else, both drop the imported value while leaving it mentioned. Top-level properties read from the call:"; printf "%s\n" "$t" | sed "s|^|  |"; exit 1; }; done; printf "%s\n" "$t" | grep -qx "githubAppSlug" && { echo "$y passes githubAppSlug as a TOP-LEVEL property of new MastraFactory({ … }), but it belongs inside the nested platform: { … } object — at the top level the factory ignores it and the deployment stops recognising its own App comments"; exit 1; }; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); c=src/mastra/config; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this census asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; ks="FACTORY_CREDENTIAL_ENCRYPTION_KEY FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS MASTRACODE_AUTH_DISABLED BETTER_AUTH_SECRET MASTRA_SHARED_API_URL GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY GITHUB_APP_CLIENT_ID GITHUB_APP_CLIENT_SECRET GITHUB_APP_SLUG GITHUB_APP_WEBHOOK_SECRET MASTRACODE_GITHUB_AUTHORIZED_BOTS LINEAR_CLIENT_ID LINEAR_CLIENT_SECRET WORKOS_COOKIE_PASSWORD SLACK_APP_SIGNING_SECRET SLACK_APP_BOT_TOKEN SLACK_APP_CLIENT_ID SLACK_APP_CLIENT_SECRET MASTRACODE_CHANNELS_PUBLIC_URL FACTORY_SANDBOX_IMAGE FACTORY_SANDBOX_MEMORY_GIB FACTORY_SANDBOX_CPUS FACTORY_SANDBOX_PROVIDER MASTRACODE_SANDBOX_WORKDIR MASTRACODE_MAX_SANDBOXES MASTRACODE_LOCAL_SANDBOX_ROOT E2B_API_KEY MASTRA_PLATFORM_ACCESS_TOKEN MASTRA_PLATFORM_SECRET_KEY MASTRA_ENVIRONMENT_ID MASTRA_PROJECT_ID"; for k in $ks; do pd="process[.]env[?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; pb="process[.]env([?][.])?[[][[:space:]]*[\"$q$bt]$k[\"$q$bt][[:space:]]*[]]([[:space:]]*==?)?"; ps="[{]([^}]*[^A-Za-z0-9_])?$k([^A-Za-z0-9_][^}]*)?[}][[:space:]]*=[[:space:]]*process[.]env"; pa="[\"$q$bt]$k[\"$q$bt].*process[.]env([?][.])?[[]"; h=$(printf "%s\n" "$f" | while IFS= read -r p; do sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$p" | grep -onE -e "$pd" -e "$pb" -e "$ps" -e "$pa" | sed "s|^|$p:|"; done); rd=$(printf "%s\n" "$h" | grep -vE "[^=]=$" | grep .); n=$(printf "%s\n" "$rd" | grep -c .); test "$n" = "1" || { echo "AD-7/NFR8 put $k at exactly ONE literal process.env read site in first-party code and every consumer takes the parsed value by argument or module export; this tree has $n. These spellings count as a read — process.env.$k, process.env[quoted $k] in any of the three quote styles, either of those reached through optional chaining, a { $k } destructuring off process.env, and a quoted $k on a line that indexes process.env through a computed key, which is how the Platform group is read — and an assignment does not. A line that is WHOLLY a comment is not scanned, so prose naming a key does not read as a second site. Read sites (file:line:match):"; printf "%s\n" "$rd"; echo "MASTRACODE_PUBLIC_URL is deliberately NOT in this census: Story 5.6 moved the factory call into $c/factory.ts and that key into $c/public-url.ts, and guard 41 now censuses it along with every other key declared in .env.schema; guard 35 covers the four keys Story 5.4 moved."; exit 1; }; printf "%s\n" "$rd" | grep -q "^$c/" || { echo "the one read of $k is not under $c/, but AD-8 moved the concern that reads it there and AD-7 keeps the read with the module that owns the parsed value. Read site (file:line:match):"; printf "%s\n" "$rd"; exit 1; }; done; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); c=src/mastra/config; a=$c/auth.ts; s=$c/sandbox.ts; for p in "$a" "$s"; do test -s "$p" || { echo "missing or empty $p — this guard asserts the two guarantees Stories 2.6 and 2.2 left in code, and both now live in that file"; exit 1; }; done; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this guard asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; h=$(printf "%s\n" "$f" | while IFS= read -r p; do sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$p" | grep -onE "signUpEnabled" | sed "s|^|$p:|"; done | grep .); n=$(printf "%s\n" "$h" | grep -c .); test "$n" = "1" || { echo "NFR13 makes signUpEnabled a single literal in committed code, and first-party source under src/ mentions it $n times rather than once. A second mention is either a second constructor or an override, and both reopen registration with a diff that need never say so. A line that is WHOLLY a comment is not scanned, and isSignUpEnabled — the getter the tests read — is a different spelling. Mentions (file:line:match):"; printf "%s\n" "$h"; exit 1; }; printf "%s\n" "$h" | grep -q "^$a:" || { echo "the one signUpEnabled in src/ is not in $a, which is the module AD-8 gives the auth concern and README.md sends an operator to when they open the registration window. Mention (file:line:match):"; printf "%s\n" "$h"; exit 1; }; l=$(printf "%s\n" "$h" | cut -d: -f2); t=$(sed -n "${l}p" "$a"); printf "%s\n" "$t" | grep -qE "signUpEnabled:[[:space:]]*false[[:space:]]*,?[[:space:]]*\$" || { echo "$a:$l does not read signUpEnabled: false as a literal. NFR13 says registration is closed in committed code: omitting the field reopens sign-up through the package default (options.signUpEnabled ?? true), and computing it from anything makes the guarantee conditional. Line: $t"; exit 1; }; printf "%s\n" "$t" | grep -q "process[.]env" && { echo "$a:$l reads the environment on the signUpEnabled line. NFR13 is that NO .env value, stray export or bad deploy config can reopen registration, so there is deliberately no key behind this field — reopening it is an edit to this file, reviewed and restarted, twice. Line: $t"; exit 1; }; b=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$s"); d=$(printf "%s\n" "$b" | grep -nE "===[[:space:]]*[\"$q]docker[\"$q]" | head -1 | cut -d: -f1); test -n "$d" || { echo "$s carries no === docker comparison outside its comments, so the branch Story 2.2 put ahead of every cloud provider is gone and this ordering check would pass vacuously"; exit 1; }; pv=$(printf "%s\n" "$b" | grep -nE "process[.]env[?]?[.]FACTORY_SANDBOX_PROVIDER" | head -1 | cut -d: -f1); test -n "$pv" || { echo "$s does not read FACTORY_SANDBOX_PROVIDER, so the === docker comparison at line $d is not a comparison on the provider key and this guard cannot tell what it orders"; exit 1; }; test "$pv" -le "$d" || { echo "$s reads FACTORY_SANDBOX_PROVIDER at line $pv, below the === docker comparison at line $d — the comparison this guard orders has to be the one on that key"; exit 1; }; for w in "new PlatformSandbox(" "new E2BSandbox("; do ln=$(printf "%s\n" "$b" | grep -nF -e "$w" | cut -d: -f1); test -n "$ln" || { echo "$s constructs no $w — extraction is a move, not a cleanup: the off-host arms stay, and with one deleted there is nothing left for the docker branch to be ahead OF"; exit 1; }; for one in $ln; do test "$one" -gt "$d" || { echo "$s evaluates $w at line $one, at or above the === docker comparison at line $d. Story 2.2s guarantee is that agent work stays on this host STRUCTURALLY rather than contingently: with the docker branch below either cloud arm, a stray MASTRA_PROJECT_ID or E2B_API_KEY left in .env relocates a session to a third partys VM, and tsc, every test and every other guard stay green"; exit 1; }; done; done; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); e=src/mastra/index.ts; c=src/mastra/config; test -f "$e" || { echo "missing $e — AD-2/NFR1 make this exact path the deployment entry, and FR34 says what it may contain"; exit 1; }; st=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -nE "^[^[:space:]]"); test -n "$st" || { echo "$e has no top-level statement outside its comments, so it is not the entry AD-2 requires and this guard would pass vacuously"; exit 1; }; o=$(printf "%s\n" "$st" | grep -vE "^[0-9]+:(import[[:space:]][^;]*(;[[:space:]]*(//.*)?)?\$|[}][[:space:]]*from[[:space:]][^;]*(;[[:space:]]*(//.*)?)?\$|const[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*await[[:space:]]+factory[.]prepare[(][)];[[:space:]]*(//.*)?\$|export[[:space:]]+const[[:space:]]+mastra[[:space:]]*(:[^=]*)?=[^;]*(;[[:space:]]*(//.*)?)?\$|[}][)];[[:space:]]*(//.*)?\$|await[[:space:]]+factory[.]finalize[(][)];[[:space:]]*(//.*)?\$)"); test -z "$o" || { echo "FR34/AD-8 make $e exactly four things — its imports, one const = await factory.prepare();, one export const mastra = new Mastra({ … }); and one await factory.finalize(); — and these top-level lines are none of them. A new MastraFactory({ … }) is environment reading plus instance construction and belongs in $c/factory.ts beside the concerns it assembles; anything else that creeps back here is a read or a constructor the deployer bundles and nothing else looks at. Whole-comment lines and blank lines are not scanned, and a line indented by at least one space is the body of the statement above it. Every pattern above ends at the end of its line, so a second statement appended to one of them is an offending line rather than part of it. Offending lines (line:text):"; printf "%s\n" "$o"; exit 1; }; for pair in "prepare const[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*await[[:space:]]+factory[.]prepare[(][)];" "mastra export[[:space:]]+const[[:space:]]+mastra[[:space:]]*(:[^=]*)?=" "finalize await[[:space:]]+factory[.]finalize[(][)];"; do w=${pair%% *}; x=${pair#* }; n=$(printf "%s\n" "$st" | grep -cE "^[0-9]+:$x"); test "$n" = "1" || { echo "$e carries $n top-level $w statements rather than exactly one. The boot has two halves and one construction between them, each happening ONCE at module load: a second prepare() is a second factory, and a missing finalize() is a deployment that imports cleanly and never starts its workers"; exit 1; }; done; ev=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -nE "process[.]env|process([?][.])?[[][[:space:]]*[\"$q$bt]env[\"$q$bt]"); test -z "$ev" || { echo "$e reads the environment. AD-8 keeps every env read under $c/, beside the module that owns the parsed value, and AD-7 keeps each key at one site — a read here is a second site no census names and a slot no test can reach. Both process.env.X and process indexed by a quoted env count, because this guard only has to prove that THIS file reads nothing. Lines (line:text):"; printf "%s\n" "$ev"; exit 1; }; nw=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -onE "new[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*([[:space:]]*<[^;(]*>)?[[:space:]]*[(]" | grep -vE "^[0-9]+:new[[:space:]]+Mastra[[:space:]]*[(]\$"); test -z "$nw" || { echo "$e constructs something other than its own Mastra. FR34 admits exactly one constructor here — the literal new Mastra( the deployer checkConfigExport plugin reads, which guard 36 owns — and every other instance is construction AD-8 moved into $c/. Type arguments count, so new Foo<T>( is a constructor here too. Constructors found (line:match):"; printf "%s\n" "$nw"; exit 1; }; il=$(grep -E "^import[[:space:]]*[{][^}]*[}][[:space:]]*from[[:space:]]*[\"$q][.]/config/factory[\"$q]" -- "$e"); test -n "$il" || { echo "$e has no named import from ./config/factory. The entry takes the assembled factory as a finished value: a bare side-effect import would still build it and still run every concern module, so the failure would surface as prepare() on an undefined binding rather than as the missing import it is"; exit 1; }; ns=$(printf "%s\n" "$il" | sed "s/^import[^{]*[{]//; s/[}].*\$//" | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*\$//" | grep .); printf "%s\n" "$ns" | grep -qx "factory" || { echo "$e does not import the factory binding BY NAME from ./config/factory — that value is the whole of what the entry takes from $c/. Bindings read from that import line:"; printf "%s\n" "$ns" | sed "s|^|  |"; exit 1; }; exit 0' ''',
+  '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); c=src/mastra/config; s=.env.schema; test -s "$s" || { echo "missing or empty $s — AD-6 makes it the only list of environment keys, and this census derives its key set from it rather than carrying a fourth hand-written list"; exit 1; }; ks=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "$s" | sed "s/=\$//" | sort -u); kn=$(printf "%s\n" "$ks" | grep -c .); test "$kn" -ge 40 || { echo "only $kn keys could be read out of $s, fewer than this deployment declares — the extraction (a line beginning NAME=) has stopped matching, and a census over a truncated key set passes vacuously"; exit 1; }; for k in MASTRACODE_PUBLIC_URL MASTRACODE_DISPATCH_MAX_IN_FLIGHT MASTRACODE_ALLOWED_ORIGINS; do printf "%s\n" "$ks" | grep -qx "$k" || { echo "$k is not declared in $s, so the exactly-one arm of this census would never run for it. AD-6 keeps every key first-party code reads declared there, and these three are the ones Story 5.6 moved out of the entry"; exit 1; }; done; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this census asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; for k in $ks; do pd="process[.]env[?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; pb="process[.]env([?][.])?[[][[:space:]]*[\"$q$bt]$k[\"$q$bt][[:space:]]*[]]([[:space:]]*==?)?"; pe="process([?][.])?[[][[:space:]]*[\"$q$bt]env[\"$q$bt][[:space:]]*[]][?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; ps="[{]([^}]*[^A-Za-z0-9_])?$k([^A-Za-z0-9_][^}]*)?[}][[:space:]]*=[[:space:]]*process[.]env"; h=$(printf "%s\n" "$f" | while IFS= read -r p; do sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$p" | grep -onE -e "$pd" -e "$pb" -e "$pe" -e "$ps" | sed "s|^|$p:|"; done); rd=$(printf "%s\n" "$h" | grep -vE "[^=]=\$" | grep .); n=$(printf "%s\n" "$rd" | grep -c .); case " MASTRACODE_PUBLIC_URL MASTRACODE_DISPATCH_MAX_IN_FLIGHT MASTRACODE_ALLOWED_ORIGINS " in *" $k "*) test "$n" = "1" || { echo "AD-7/NFR8 put $k at EXACTLY one literal process.env read site in first-party code; this tree has $n. These are the three keys Story 5.6 moved out of the entry with the factory call, and each has a named home: MASTRACODE_PUBLIC_URL in $c/public-url.ts, because its two consumers sit in different concerns, and the other two in $c/factory.ts, the only thing that takes them. Read sites (file:line:match):"; printf "%s\n" "$rd"; exit 1; }; case "$k" in MASTRACODE_PUBLIC_URL) hm=$c/public-url.ts; hw="its two consumers sit in different concerns, so the value belongs to neither of them";; *) hm=$c/factory.ts; hw="the factory call is the only thing that takes it";; esac; printf "%s\n" "$rd" | grep -q "^$hm:" || { echo "the one read of $k is not in $hm, which is the module AD-8 gives it: $hw. Counting the read anywhere under $c/ would leave the key owned by whichever module happened to take it, and a guard that names a home in its message without checking it asserts less than it claims. Read site (file:line:match):"; printf "%s\n" "$rd"; exit 1; };; *) test "$n" -le 1 || { echo "AD-7/NFR8 put every key declared in $s at AT MOST one literal process.env read site across src/, and $k has $n. Every consumer takes the parsed value by argument or module export; a second read is a second spelling of the same decision, and the two drift with nothing reporting it. The key set here is DERIVED from $s rather than written out in this guard, so a key added tomorrow is censused without anyone remembering this exists. These spellings count as a read — process.env.$k, process.env[quoted $k] in any of the three quote styles, process indexed by a quoted env and then $k, any of those reached through optional chaining, and a { $k } destructuring off process.env — and an assignment does not. An alias (const e = process.env) is not a literal read and is outside what AD-7 says here. A line that is WHOLLY a comment is not scanned. Read sites (file:line:match):"; printf "%s\n" "$rd"; exit 1; };; esac; done; exit 0' ''',
+  "npm run build",
 ]
 stream_capture_kb = 256      # per-stream cap (KiB) on the verifier stdout/stderr retained under the run's verify/ directory; the TAIL is kept and the journal records the full byte count plus a truncation flag. 0 = capture nothing (records still land, with null pointers)
 

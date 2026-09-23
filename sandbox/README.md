@@ -1,17 +1,40 @@
 # Sandbox image
 
 The operator-plane subject for the container image every agent session runs inside. This file is
-normative for what `FACTORY_SANDBOX_PROVIDER`, `FACTORY_SANDBOX_IMAGE`, `FACTORY_SANDBOX_MEMORY_GIB`,
-`FACTORY_SANDBOX_CPUS`, `MASTRACODE_MAX_SANDBOXES` and `MASTRACODE_SANDBOX_WORKDIR` must contain and
-how to obtain or choose each one, and for the commands that build, smoke-test and retag the image.
+normative for what each key under "Keys this subject owns" below must contain and how to obtain or
+choose it, and for the commands that build, smoke-test and retag the image.
 
 `.env.schema` is the list of keys. `ops/README.md` states what `DOCKER_HOST` must contain and how to
 obtain it — export it before running any command below, because the build has to reach the Colima
 engine. Neither is restated here.
 
 `factory-sandbox.Dockerfile` in this directory is the image, and it is the canonical artifact — the one
-file to edit and build. The fenced block in `docs/Self-hosting research.md` §2.1 is a superseded
-narrative copy; if the two ever disagree, this directory wins.
+file to edit and build. `docs/self-hosting-research.md` §2.1 says why the image carries `git` and `gh`
+and references this directory by path rather than reproducing the Dockerfile.
+
+## Keys this subject owns
+
+The table below is the closed list of the keys this file owns, and this file is the only record
+for what each must contain and how to choose it. The
+three subject READMEs under `apps/`, `ops/README.md`, and `README.md` as the residual owner, claim
+the rest; between the six tables every key `.env.schema` declares is claimed exactly once.
+
+| Key | What the value must contain | Full record |
+|---|---|---|
+| `FACTORY_SANDBOX_PROVIDER` | which sandbox runs session commands | the `FACTORY_SANDBOX_PROVIDER` section below |
+| `FACTORY_SANDBOX_IMAGE` | a date-stamped image tag that exists on this engine | the `FACTORY_SANDBOX_IMAGE` section below |
+| `FACTORY_SANDBOX_MEMORY_GIB` | the per-session memory ceiling, in whole gibibytes | the `FACTORY_SANDBOX_MEMORY_GIB` section below |
+| `FACTORY_SANDBOX_CPUS` | the per-session CPU ceiling, in whole cores | the `FACTORY_SANDBOX_CPUS` section below |
+| `MASTRACODE_MAX_SANDBOXES` | how many session containers this process runs at once | the `MASTRACODE_MAX_SANDBOXES` section below |
+| `MASTRACODE_SANDBOX_WORKDIR` | the checkout base inside a docker-provider container | the `MASTRACODE_SANDBOX_WORKDIR` section below |
+| `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
+| `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
+
+`.env.schema` declares and validates every key in that table and is the only list of key names;
+this file never
+restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
+by path and never copied.
 
 ## Before you start
 
@@ -49,8 +72,8 @@ containers this image serves, or `local` to run them as the server process on th
 that gives up isolation. `docker` is checked ahead of every cloud provider, so it keeps work on this
 host structurally: a stray `MASTRA_PROJECT_ID`, `MASTRA_ENVIRONMENT_ID` or `E2B_API_KEY` left in `.env`
 cannot relocate a session off this machine while it is set. Anything else — unset, `DOCKER`, `podman` —
-is not a selection: the entry falls through to automatic selection, meaning Mastra Platform first, then
-direct E2B, then local, which is the off-host relocation the Docker sandbox exists to replace. The
+is not a selection: `src/mastra/config/sandbox.ts` falls through to automatic selection, meaning Mastra
+Platform first, then direct E2B, then local — the off-host relocation the Docker sandbox replaces. The
 value is matched after trimming, so surrounding spaces are harmless, but the case must be exact.
 
 ## `FACTORY_SANDBOX_IMAGE`
@@ -99,12 +122,11 @@ binds — which is why the concurrency count is chosen against memory and not ag
 
 **What the value must contain.** A whole number of concurrent docker-provider session containers — the
 most this server process will run at once. Anything that is not a run of digits — `-1`, `2.5`, `1e3`,
-`abc` — fails the pattern `.env.schema` declares, which means `varlock load` exits non-zero and
-`npm start` refuses to boot rather than falling back. Blank and `0` are the two values that pass
-validation and reach the code, and both fall back to the default, `3`: there is no value meaning
-"unlimited" and no way to turn the cap off. The key only applies to `FACTORY_SANDBOX_PROVIDER=docker`;
-`local` and the cloud providers are uncapped, because the number is sized against this host's memory,
-which they do not consume.
+`abc` — stops `npm start` before the server boots, naming this key, rather than being quietly ignored
+or rounded into something plausible. Blank and `0` are the two values that reach the code, and both
+fall back to the default, `3`. There is no value meaning "unlimited" and no way to turn the cap off.
+The key only applies to `FACTORY_SANDBOX_PROVIDER=docker`; `local` and the cloud providers are
+uncapped, because the number is sized against this host's memory, which they do not consume.
 
 **How to choose it.** `3` on this host, from the same arithmetic as `FACTORY_SANDBOX_MEMORY_GIB` above:
 32 GiB in the VM, roughly 2 for Postgres, 10 per session container. Change it only together with that
@@ -142,6 +164,32 @@ same name under different owners would collide here. `/workspace`.
 **How to choose it.** Keep it equal to the `WORKDIR` in `factory-sandbox.Dockerfile`. They are two
 statements of the same directory and there is no reason to move either; if one ever changes, change
 both in the same commit. This path never refers to anything on this host.
+
+## `MASTRACODE_LOCAL_SANDBOX_ROOT`
+
+**What the value must contain.** An absolute path **on this host** under which the local provider
+checks repositories out, one directory per repository. Unset it defaults to
+`~/.mastracode/web/sandboxes`. This is the one key on this page that names a directory on this
+machine rather than inside a container.
+
+**How to choose it.** Leave it unset. It is read only when `FACTORY_SANDBOX_PROVIDER=local`, which
+this host does not run outside a diagnostic — and setting it does not make the local provider safer:
+the checkout still runs as the server process on the shared host filesystem, with no isolation
+between sessions, wherever this points. If a diagnostic does need the local provider, point this
+somewhere outside this repository, because the checkout and its `node_modules` would otherwise land
+inside the tree the Factory Server is running from.
+
+## `E2B_API_KEY`
+
+**What the value must contain.** Nothing — it must stay **unset** on this deployment.
+
+**How to choose it.** It is a credential for E2B's cloud VMs, and a set value is not a selection you
+make here: it is reached only when `FACTORY_SANDBOX_PROVIDER` is neither `docker` nor `local` and the
+Mastra Platform variables are incomplete, and then it silently runs sessions on someone else's
+machine. That is the off-host relocation this whole subject exists to replace. With
+`FACTORY_SANDBOX_PROVIDER=docker` the docker branch is evaluated first, so a stray value here cannot
+move work off this host — a structural guarantee rather than a matter of keeping `.env` tidy, and the
+reason the key is listed at all rather than left out and forgotten.
 
 ## Ceilings with no key
 

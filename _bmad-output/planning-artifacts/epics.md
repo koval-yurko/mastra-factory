@@ -5,7 +5,7 @@ inputDocuments:
   - '_bmad-output/specs/spec-self-hosted-factory/brownfield.md'
   - '_bmad-output/specs/spec-self-hosted-factory/extension-seams.md'
   - '_bmad-output/planning-artifacts/architecture/architecture-mastra-factory-2026-09-22/ARCHITECTURE-SPINE.md'
-  - 'docs/Self-hosting research.md'
+  - 'docs/self-hosting-research.md'
   - '.bmad-loop/policy.toml'
 ---
 
@@ -18,7 +18,7 @@ from the SPEC (standing in for a PRD — none was authored) and the Architecture
 stories.
 
 **Source note.** There is no PRD and no UX design contract. `SPEC.md` is the canonical requirements contract
-and names its companions explicitly; `docs/Self-hosting research.md` is one of those companions, so its §2–§11
+and names its companions explicitly; `docs/self-hosting-research.md` is one of those companions, so its §2–§11
 are normative detail, not background. `.bmad-loop/policy.toml` is not a requirements document — it is included
 because it defines the verify gate stories must pass and the `[operator]` parking mechanism that roughly 60% of
 this work depends on.
@@ -88,7 +88,7 @@ FR29: The deployment survives `launchctl kickstart -k gui/$(id -u)/ai.mastra.fac
 
 FR30: Every operational artifact exists as exactly one real file at its seeded path under the two-plane layout — no operational artifact exists only as a fenced block.
 FR31: Every operator-plane subject directory carries a `README.md` stating what the operator must do and which env keys that subject owns.
-FR32: `docs/Self-hosting research.md` references artifacts by repo-relative path; any remaining code block in `docs/` is marked non-normative, and existing section numbers are not renumbered.
+FR32: `docs/self-hosting-research.md` references artifacts by repo-relative path; any remaining code block in `docs/` is marked non-normative, and existing section numbers are not renumbered.
 FR33: No first-party `.ts`, `.js`, `.mjs` or `.cjs` exists outside `src/`, with the `ops/*.sh` carve-out the only exception.
 
 **CAP-9 — Fully extracted entry with recorded provenance**
@@ -112,7 +112,7 @@ NFR5: **Skill override path (AD-9, AD-13).** Repo-local factory-skill overrides 
 NFR6: **Single machine, single process (AD-12).** No Redis, no replicas, no shared external queues, no cross-process leases. A design assuming any of those is a conflict to surface, not a local choice.
 NFR7: **Env-key truth split (AD-6).** `.env.schema` is normative for validation, generated types and `@public`/sensitive marking and is the only list of keys; the owning subject's README is normative for what the value must contain and how to obtain it. Neither side restates the other's half.
 NFR8: **One read site per env key (AD-7).** `process.env.X` appears at exactly one location in first-party code; consumers receive parsed values by argument or export. *(Adopted by Yurii, 2026-09-22.)*
-NFR9: **Files canonical (AD-5).** One real file per operational artifact; prose links out. Section numbers in `docs/Self-hosting research.md` are stable citation anchors.
+NFR9: **Files canonical (AD-5).** One real file per operational artifact; prose links out. Section numbers in `docs/self-hosting-research.md` are stable citation anchors.
 NFR10: **External contract (AD-11).** `npm run start` stays the production entry point and must work with the repo root as cwd. Renaming the script or moving the repo requires updating the plist, `ops/factory-start.sh` and the newsyslog conf in the same change.
 NFR11: **Network posture.** `MASTRA_HOST` must be the literal `127.0.0.1` — unset binds all interfaces including the LAN. TLS terminates at Cloudflare; `MASTRA_HTTPS_KEY`/`_CERT` stay unset.
 NFR12: **Zero-dependency mandate.** These must stay unset or self-hosting silently breaks: `MASTRA_SHARED_API_URL`, `MASTRA_PLATFORM_ACCESS_TOKEN`/`_SECRET_KEY`/`MASTRA_PROJECT_ID`/`MASTRA_ENVIRONMENT_ID`, `E2B_API_KEY`, `SANDBOX_PROVIDER`, `WORKOS_*`, `MASTRACODE_AUTH_DISABLED`.
@@ -140,9 +140,9 @@ NFR23: **Graceful degradation.** An unconfigured integration degrades silently a
 - **Operator-mode mechanics.** `.bmad-loop/policy.toml` has `[operator] enabled = true`: a dev session may park a story at `awaiting-operator` once its agent-doable work is committed, recording what is owed in the spec's `operator_actions:` frontmatter. Completion is `bmad-loop confirm <story-key>`. Roughly 60% of this work is human-only and must use this mechanism rather than being filed as ordinary agent stories.
 - **Verify-gate extension.** The testing story must extend `.bmad-loop/policy.toml` `[verify].commands` in the same change, or the tests never gate anything. *(Confirmed with Yurii, 2026-09-22.)*
 - **Branch strategy.** Per-story branches cut by bmad-loop (`scm.branch_per = "story"`), each merged into `main` after its verify gate passes, then deleted. `[scm] target_branch` is pinned to `main` explicitly rather than left at `""`, so a run started from another branch cannot merge somewhere unintended. *(Revised 2026-09-22: the original plan used a long-lived `bmad/self-hosting` integration branch.)*
-- **Build order is a hard sequence.** `docs/Self-hosting research.md` §8 defines eleven checkpointed steps, loopback first and public last; LaunchAgents only after everything works by hand. Epic ordering must not violate it.
+- **Build order is a hard sequence.** `docs/self-hosting-research.md` §8 defines eleven checkpointed steps, loopback first and public last; LaunchAgents only after everything works by hand. Epic ordering must not violate it.
 - **Open questions carried into planning:** none remain. Whether `pnpm-workspace.yaml` is deleted was resolved 2026-09-22 — it is, in Story 1.1.
-- **Resolved 2026-09-22, now normative in `SPEC.md`:** AD-7's one-read-site rule is adopted; the ruled-out packages (`@mastra/auth-workos`, `@mastra/e2b`, `@mastra/libsql`, `@mastra/redis-streams`, `@mastra/platform-workspace`) stay installed; `docs/Self-hosting research.md` is renamed to a space-free path in Story 5.3.
+- **Resolved 2026-09-22, now normative in `SPEC.md`:** AD-7's one-read-site rule is adopted; the ruled-out packages (`@mastra/auth-workos`, `@mastra/e2b`, `@mastra/libsql`, `@mastra/redis-streams`, `@mastra/platform-workspace`) stay installed; the research document is renamed to the space-free `docs/self-hosting-research.md` in Story 5.3.
 
 ### UX Design Requirements
 
@@ -646,7 +646,7 @@ infrastructure and belongs in `ops/README.md` (NFR4)
 
 **Given** `docs/` links out rather than duplicating (AD-5 / NFR9)
 **When** this story lands
-**Then** `docs/Self-hosting research.md` §4.1 references the subject READMEs by repo-relative path
+**Then** `docs/self-hosting-research.md` §4.1 references the subject READMEs by repo-relative path
 **And** its existing section numbers are not renumbered, because they are stable citation anchors
 
 ### Story 3.2: [operator] A public origin with no inbound ports
@@ -954,8 +954,8 @@ verified end to end.
 **Decisions resolved before this epic was written** (Yurii, 2026-09-22): AD-7 is **adopted** — one read site
 per environment key. The ruled-out packages (`@mastra/auth-workos`, `@mastra/e2b`, `@mastra/libsql`,
 `@mastra/redis-streams`, `@mastra/platform-workspace`) **stay installed**; the zero-dependency guarantee rests
-on unset variables plus Story 2.2's branch ordering. `docs/Self-hosting research.md` **is renamed** to a
-space-free path in Story 5.3.
+on unset variables plus Story 2.2's branch ordering. The research document **is renamed** to the
+space-free `docs/self-hosting-research.md` in Story 5.3.
 
 ### Story 5.1: Every operational artifact at its seeded path, and no code outside src/
 

@@ -3,9 +3,9 @@
 The operator-plane subject for the Linear OAuth application this deployment registers and owns — the
 app that lets an organization connect its Linear workspace and pull issues into Factory's intake
 board. This file is normative for the redirect URL Linear's console asks for, the scopes the app
-requests, and what `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET` must contain and how to obtain them.
+requests, and what each key under "Keys this subject owns" below must contain and how to obtain it.
 
-`.env.schema` is the list of keys. `docs/Self-hosting research.md` §4.1 keeps the same URL as a
+`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URL as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
 
@@ -13,6 +13,29 @@ Everything below that describes what the installed software does was read out of
 `node_modules/@mastra/factory` at version `0.15.0` and is cited by `file:line` against that package,
 with paths relative to `node_modules/@mastra/factory/dist/integrations/linear/` unless the citation
 names another directory. Re-read the citation before trusting a claim after a dependency bump.
+
+## Keys this subject owns
+
+The table below is the closed list of the keys this file owns, and this file is the only record
+for what each must contain and how to obtain it. The
+other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
+owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
+once.
+
+| Key | What the value must contain | Full record |
+|---|---|---|
+| `LINEAR_CLIENT_ID` | the client ID of this deployment's Linear OAuth application | the `LINEAR_CLIENT_ID` section below |
+| `LINEAR_CLIENT_SECRET` | the client secret of that same application | the `LINEAR_CLIENT_SECRET` section below |
+| `MASTRACODE_LINEAR_ISSUE_RECONCILE_ENABLED` | left unset, so the sweep runs | the "Reconcile sweep" section below |
+| `MASTRACODE_LINEAR_RECONCILE_ENABLED` | left unset; the legacy fallback for the key above | the "Reconcile sweep" section below |
+| `MASTRACODE_LINEAR_ISSUE_RECONCILE_INTERVAL_MS` | left unset, so the cycle is five minutes | the "Reconcile sweep" section below |
+| `MASTRACODE_LINEAR_RECONCILE_INTERVAL_MS` | left unset; the legacy fallback for the key above | the "Reconcile sweep" section below |
+
+`.env.schema` declares and validates every key in that table and is the only list of key names;
+this file never
+restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
+by path and never copied.
 
 ## Console URLs
 
@@ -39,9 +62,9 @@ tick — what the application asks for at consent time is decided in code.
 parameters on `https://linear.app/oauth/authorize` — `client_id`, `redirect_uri`, `response_type`,
 `scope`, `state` and `prompt=consent` — and `scope` is the string literal `"read,comments:create"`
 (`integration.js:326-332`, the literal at `:330`). No environment variable, no field on
-`LinearIntegration`'s config and no console setting changes it: `src/mastra/index.ts:244-247` hands the
-integration a client id and a client secret and nothing else. The consent screen Linear shows will name
-those two values and only those two.
+`LinearIntegration`'s config and no console setting changes it:
+`src/mastra/config/integrations.ts:70-73` hands the integration a client id and a client secret and
+nothing else. The consent screen Linear shows will name those two values and only those two.
 
 `write` and `issues:create` are **not** requested. Factory reads the workspace and comments on issues —
 a connection counts as able to comment when its recorded scope contains `comments:create`, `write` or
@@ -65,12 +88,12 @@ up, inside Factory: the intake selection under "Choose what comes in" below deci
 actually pulled in. Granting `read` is therefore a statement about what Factory *could* read, not about
 what it does.
 
-**A five-scope list is not wrong — it is about a different client.** `docs/Self-hosting research.md`
-§6 and the epic both record `read`, `write`, `issues:create`, `comments:create` and
-`app:mentionable`, read off Mastra's *hosted* consent screen on 2026-09-21. That is an accurate
-record of the hosted platform integration. This deployment does not use it: `src/mastra/index.ts:36`
-imports `LinearIntegration`, the self-hosted direct-OAuth integration, and never constructs the
-platform one. If you have seen that screen, this is why it and this section disagree.
+**A five-scope list is not wrong — it is about a different client.** `docs/self-hosting-research.md`
+§6 and the epic both record `read`, `write`, `issues:create`, `comments:create` and `app:mentionable`,
+read off Mastra's *hosted* consent screen on 2026-09-21. That is an accurate record of the hosted
+platform integration. This deployment does not use it: `src/mastra/config/integrations.ts:27` imports
+`LinearIntegration`, the self-hosted direct-OAuth integration, and never constructs the platform one.
+If you have seen that screen, this is why it and this section disagree.
 
 ## Mentions are not available at `@mastra/factory@0.15.0`
 
@@ -119,10 +142,11 @@ an error at all.
   the server through varlock, so this stops it before it boots. `npm run dev` does not go through
   varlock and starts anyway, which is why the same `.env` can look fine in one command and broken in the
   other.
-- **Id set, secret unset.** Nothing fails and nothing is logged. `src/mastra/index.ts:242-243` builds the
-  integration from a ternary over both trimmed values, so an incomplete pair yields `undefined` and the
-  integration is simply never registered. From the outside this is indistinguishable from leaving both
-  blank: `/web/linear/status` answers with `"reason":"missing_config"` in both cases
+- **Id set, secret unset.** Nothing fails and nothing is logged.
+  `src/mastra/config/integrations.ts:68-69` builds the integration from a ternary over both trimmed
+  values, so an incomplete pair yields `undefined` and the integration is simply never registered.
+  From the outside this is indistinguishable from leaving both blank: `/web/linear/status` answers
+  with `"reason":"missing_config"` in both cases
   (`node_modules/@mastra/factory/dist/routes/surface.js:222-236`). Checkpoint 1 is the only warning
   available.
 
@@ -133,11 +157,11 @@ factory throws while starting if a registered integration requires a stable sign
 configured (`node_modules/@mastra/factory/dist/factory.js:369`), with the message `MastraFactory:
 integration 'linear' signs OAuth state and requires a replica-stable state secret, but none is
 configured. Set 'stateSecret' on the factory config.` — quoted here in full so a log search on the
-last sentence matches. The secret is resolved at `src/mastra/index.ts:548-552` as
+last sentence matches. The secret is resolved at `src/mastra/config/integrations.ts:86-87` as
 `GITHUB_APP_WEBHOOK_SECRET` → `WORKOS_COOKIE_PASSWORD` → `SLACK_APP_SIGNING_SECRET` and reaches the
-factory as `stateSecret` (`src/mastra/index.ts:616`). So **both Linear keys set with none of those
-three set is a boot refusal**, not a degraded mode — and it is the failure that actually stops this
-deployment, rather than the partial-pair story above. Check which of the three your `.env` actually
+factory as `stateSecret` (`src/mastra/config/factory.ts:85`). So **both Linear keys set with none of
+those three set is a boot refusal**, not a degraded mode — and it is the failure that actually stops
+this deployment, rather than the partial-pair story above. Check which of the three your `.env` actually
 sets before registering anything: any one of them satisfies the requirement, and
 `WORKOS_COOKIE_PASSWORD` stays declared precisely so that a deployment which already set it keeps a
 signer that survives a restart.
@@ -235,8 +259,9 @@ all land here — start again from `/auth/linear/connect` in a fresh tab.
 **And one failure never reaches this deployment at all: a `redirect_uri` Linear does not
 recognise.** The callback URL is not configurable here — it is built as
 `${baseUrl}/auth/linear/callback` (`routes.js:121`) from the factory's public origin, which is
-`MASTRACODE_PUBLIC_URL` (`src/mastra/index.ts:607`) and falls back to `http://localhost:4111` when
-that is unset (`node_modules/@mastra/factory/dist/factory.js:180`). With the variable unset or
+`MASTRACODE_PUBLIC_URL` (read in `src/mastra/config/public-url.ts:19`, passed at
+`src/mastra/config/factory.ts:76`) and falls back to `http://localhost:4111` when that is unset
+(`node_modules/@mastra/factory/dist/factory.js:180`). With the variable unset or
 holding the wrong origin, the authorize URL carries a `redirect_uri` that is not on the
 application's list, and **Linear refuses on its own consent page** before any callback runs: no
 redirect back, no `/?linear=error`, and no line in the server log, because nothing here was ever
@@ -339,10 +364,10 @@ Linear without anyone opening the intake board.
 `DEFAULT_ISSUE_RECONCILE_INTERVAL_MS = 5 * 6e4` (`:5`) is that same five minutes. Nothing in this
 deployment overrides it.
 
-Four environment names control it, and **none of them is declared in `.env.schema`** — the package
-reads them straight from `process.env`, so they are read-but-undeclared here and all four are unset.
-They are listed so that a Linear sweep behaving unexpectedly can be traced, not because this
-deployment sets them (`reconciliation-config.js:12-17`):
+Four environment names control it, and this deployment leaves all four unset — the five-minute
+default above is what actually runs. They are listed here because this file owns them and because a
+Linear sweep behaving unexpectedly is traced through them, not because anything sets them
+(`reconciliation-config.js:12-17`):
 
 | Name | Effect |
 |---|---|
@@ -363,8 +388,10 @@ The intervals fall through the same way. A non-positive or non-numeric child int
 the **legacy** interval applies if that one is set and valid; the five-minute default is what remains
 only when the legacy name is unset or invalid too.
 
-Declaring these keys is a schema decision with consequences beyond this story and belongs to the
-env-key audit, not here.
+Which is why none of the four is given a restricted set of accepted values: an unrecognised one is
+not refused, it falls through, so the failure to guard against is a sweep that goes on running at a
+cycle you thought you had changed. Read the warning line the package prints before concluding that a
+value took.
 
 ## Checkpoints
 
@@ -387,9 +414,9 @@ Expected: two rows, both reading `lines=1` and `set`. A plain `grep -c` is not e
 the three ways this goes wrong still produce the right count:
 
 - **`EMPTY`** — the key is present but its value is blank, whitespace, or `""`.
-  `src/mastra/index.ts:240-243` trims before testing, so all three are the same as absent. With
-  `LINEAR_CLIENT_SECRET` in that state the integration is never constructed and **nothing is logged
-  about it**; this row is the only warning you get.
+  `src/mastra/config/integrations.ts:66-69` trims before testing, so all three are the same as absent.
+  With `LINEAR_CLIENT_SECRET` in that state the integration is never constructed and **nothing is
+  logged about it**; this row is the only warning you get.
 - **`lines=2`** or more — the key is written twice. `.env` keeps the last occurrence, which is why the
   check reads the last line; the danger is a duplicate of one key plus a missing other key giving a
   total of two and looking correct.

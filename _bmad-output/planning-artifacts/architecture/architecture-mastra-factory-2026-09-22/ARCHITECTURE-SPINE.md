@@ -11,7 +11,7 @@ updated: '2026-09-22'
 binds: []
 sources:
   - '_bmad-output/planning-artifacts/research/technical-repo-structure-for-self-hosted-factory-2026-09-22/research.md'
-  - 'docs/Self-hosting research.md'
+  - 'docs/self-hosting-research.md'
 companions: []
 ---
 
@@ -61,12 +61,46 @@ invocation — never an import.
   reuse the **identical** subject name; a subject present in both planes uses one spelling in both.
 - **Namespace:** a subject is either a **provider/app** — something with an external console and credentials
   (`github`, `linear`, `slack`) — which lives under `apps/`; or **host infrastructure** (`sandbox`, `ops`),
-  which lives at root. Root is a **closed set**: adding a new root directory is a spine change, not a local
-  call.
-- **Root allowlist** — files whose location is fixed by a tool and which therefore belong to no subject
-  directory: `package.json`, `package-lock.json`, `tsconfig.json`, `docker-compose.yml` (read from cwd by
-  `npm run db:up`), `.env`, `.env.schema`, `.env.example`, `.gitignore`. Moving any of them requires updating
-  its consuming tool in the same change.
+  which lives at root. Root is a **closed set**, enumerated in the two lists below: adding a new root
+  directory is a spine change, not a local call.
+- **Root directories — closed set, eleven** — `apps/`, `docs/`, `ops/`, `sandbox/`, `src/`, plus the six trees
+  AD-13 places outside both planes: `.agents/`, `_bmad/`, `_bmad-output/`, `.bmad-loop/`, `.claude/`,
+  `node_modules/` (the last is gitignored and never tracked). Those eleven names are the whole set; nothing
+  else may exist as a root directory — not a top-level test directory, not a scripts or config directory. A
+  test lives beside the code it covers under `src/`; a script that wants a language runtime lives under `src/`
+  behind an npm script (AD-4).
+- **Root allowlist — closed set, twelve files** — every file that may sit at root, each because a tool or a
+  platform convention fixes it there, so it belongs to no subject directory:
+
+  | File | What fixes its location |
+  | --- | --- |
+  | `package.json` | npm, at the package root (AD-1) |
+  | `package-lock.json` | npm, beside `package.json` (AD-1) |
+  | `tsconfig.json` | `tsc` and `mastra build`, resolved from the project root |
+  | `docker-compose.yml` | `docker compose`, read from cwd by `npm run db:up` |
+  | `.env` | varlock, resolved from the repo root (AD-11); gitignored, never tracked |
+  | `.env.schema` | varlock, resolved from the repo root (AD-11) |
+  | `.env.example` | convention, beside `.env.schema` — the file an operator copies |
+  | `.gitignore` | git, at the repo root |
+  | `AGENTS.md` | coding agents read it from the repo root; no path argument exists |
+  | `README.md` | forges and humans render the repo-root README; no path argument exists |
+  | `skills-lock.json` | the Mastra CLI writes it at the project root (vendored — AD-13, never hand-edited) |
+  | `.mastra-project.json` | the Mastra CLI writes it at the project root |
+
+  Moving any entry whose consumer *does* take a path requires updating that consuming tool in the same
+  change. The last four are worth spelling out because they look movable and are not: `AGENTS.md`,
+  `README.md`, `skills-lock.json` and `.mastra-project.json` are each located by a tool or a platform that
+  **accepts no path argument**, so moving them would mean editing a consumer this repo does not own. Nothing
+  else may be tracked at root. Adding an entry to either closed set is a spine change, recorded here — and for
+  a file whose location really is movable, the fix is to move it under its owning subject instead. The
+  bmad-loop verify gate **derives both sets from this section** — the table's rows and the closed-set bullet
+  above — and checks them against `git ls-files` *and* `git ls-files -o --exclude-standard`, because the
+  orchestrator stages the working tree when it commits a story, so an untracked-but-not-ignored root entry
+  would otherwise be verified green and then committed. A stray root file, a missing one, or a new root
+  directory fails the gate naming itself, and widening root is only possible by editing the two lists here.
+  Two editing constraints follow from the gate reading this section as machine input: keep the root-directory
+  bullet immediately above the root-allowlist bullet, and keep this section ending at the `### AD-4` heading —
+  the gate slices between those markers and fails, rather than guessing, if either range runs past its end.
 
 ### AD-4 — All first-party program code lives under `src/`
 
@@ -88,19 +122,38 @@ invocation — never an import.
 
 ### AD-6 — Environment-key truth is split by nature
 
-- **Binds:** `.env.schema`, every operator-plane subject README
+- **Binds:** `.env.schema`, every operator-plane subject README, `README.md`
 - **Prevents:** two competing definitions of the same key, with no rule for which wins.
 - **Rule:** `.env.schema` is normative for **validation, generated types, and `@public`/sensitive marking** —
   it is the only list of keys. **The owning subject's own README** is normative for **what the value must
-  contain and how to obtain it**: `apps/github/README.md` owns `GITHUB_APP_*`, `sandbox/README.md` owns
-  `FACTORY_SANDBOX_*` and `MASTRACODE_SANDBOX_WORKDIR`, `ops/README.md` owns `DOCKER_HOST` and the
-  supervision-facing vars. Every key has exactly one owning subject; neither side restates the other's half.
+  contain and how to obtain it**. Every key has exactly one owning subject, and the authority on which
+  subject that is, key by key, is the six owned-keys tables described below — not an enumeration here,
+  which would go stale the moment a key is added. Neither side restates the other's half.
+- **Residual owner:** the operator-plane subject set is closed by AD-3, so a key with no subject directory
+  of its own — database, credential encryption, platform, WorkOS, Postgres, model providers — is owned by
+  **`README.md`**. Inventing an `auth/` or `db/` directory to house one would be an AD-3 change, not a
+  local call. *(Added 2026-09-23 by Story 5.2; the audit found the rule written short.)*
+- **Ownership is written, and total:** each of the six owners carries a `## Keys this subject owns` section
+  (`## Keys this file owns` in `README.md`) whose table's first cell is one backticked key name. The six
+  key sets are pairwise disjoint and their union is exactly the `.env.schema` key set — a written partition
+  rather than prose, and checked by `[verify].commands` rather than asserted here. Disjoint and total does
+  not by itself say *which* owner, so for the four families whose owner is mechanical the gate pins it:
+  `GITHUB_APP_*`, `LINEAR_*`, `SLACK_APP_*` and `FACTORY_SANDBOX_*` are claimed by their own subject and
+  by no other table. That is a prefix rule, not the per-key enumeration declined above — it goes stale
+  only when a *family* is added, not when a key is. *(Added 2026-09-23 by Story 5.2's review pass, after
+  a `SLACK_APP_*` row was moved into `README.md` with the partition still total and the gate green.)*
+- **Where the restatement line falls:** a README **may** describe what goes wrong and what the operator
+  sees. It **may not** name the schema's own mechanism — `@required`, `@public`, `@sensitive`, or a
+  declared type or pattern. Symmetrically, `.env.schema` gives no provider-console navigation and no
+  credential-generation command; it points at the owning README for both. Non-obvious runtime behaviour
+  behind a key lives in `docs/self-hosting-research.md` §11, which every owned-keys section references by
+  path and none copies.
 
 ### AD-7 — One read site per environment key `[ADOPTED]`
 
 - **Binds:** code plane
 - **Prevents:** a key read in several places acquiring different defaults or trim/parse behavior, and the
-  `docs/Self-hosting research.md` §11 trap table becoming unfindable.
+  `docs/self-hosting-research.md` §11 trap table becoming unfindable.
 - **Rule:** `process.env.X` for any given `X` appears at **exactly one** location in first-party code. Its
   location is unrestricted within `src/mastra/`. Every consumer receives the parsed value by argument or
   module export. *(Facilitator addition; adopted by Yurii on 2026-09-22.)*
@@ -160,7 +213,7 @@ invocation — never an import.
   and the `redis` service is absent from `docker-compose.yml`. Sandboxes are Docker containers on the same
   host via Colima, capped by `MASTRACODE_MAX_SANDBOXES`. Any design assuming multiple replicas, shared
   external queues, or cross-process leases contradicts this AD and is a conflict to surface, not a local
-  choice. Full rationale and risk register: `docs/Self-hosting research.md` §0, §1, §7.
+  choice. Full rationale and risk register: `docs/self-hosting-research.md` §0, §1, §7.
 
 ### AD-13 — Vendored and tooling trees are outside both planes
 
@@ -169,7 +222,10 @@ invocation — never an import.
   hand-edits to hash-locked vendored content.
 - **Rule:** these trees belong to neither plane and are exempt from subject grouping. `.agents/skills/` is
   **vendored** — its content is hash-tracked in `skills-lock.json` and must be updated through its own tooling,
-  never hand-edited (a hand edit either breaks the hash or is silently overwritten). `_bmad/` and `.claude/`
+  never hand-edited (a hand edit either breaks the hash or is silently overwritten). The tree and
+  `skills-lock.json` are pinned **together** by a digest in the bmad-loop verify gate, so a legitimate
+  CLI-driven update moves the two files and that digest in the same change — and any other edit to either,
+  staged or committed, fails the gate. `_bmad/` and `.claude/`
   are tool-owned. `_bmad-output/` is generated. None of them is a home for first-party code (AD-4).
 
 ### Dependency direction
@@ -214,7 +270,7 @@ graph TD
 | Env keys | Groups share a prefix (`GITHUB_APP_*`, `FACTORY_SANDBOX_*`). All-or-nothing groups are validated at construction and report "not configured" rather than throwing. |
 | Config errors | An unconfigured integration degrades silently and reports its state to diagnostics; it never blocks boot. Partial configuration stays disabled and remains visible to the status route. |
 | Secrets | Never in the repo. `.env` is gitignored; `.env.schema` and `.env.example` carry key names and shapes only. |
-| Docs | Reference artifacts by repo-relative path. Section numbers in `docs/Self-hosting research.md` are stable citation anchors — don't renumber. |
+| Docs | Reference artifacts by repo-relative path. Section numbers in `docs/self-hosting-research.md` are stable citation anchors — don't renumber. |
 
 ## Stack
 
@@ -234,7 +290,7 @@ Seed. The code owns this from here.
 | Postgres | 18 + pgvector (`pgvector/pgvector:pg18`) |
 | npm | package manager, root lockfile (AD-1) |
 
-**Planned, not yet resolved** — versions carried from `docs/Self-hosting research.md`, which verified them
+**Planned, not yet resolved** — versions carried from `docs/self-hosting-research.md`, which verified them
 against packages inspected elsewhere. Neither is in `package.json` or `node_modules` as of 2026-09-22.
 **Re-verify at install; treat these numbers as intent, not as pins:**
 
@@ -270,11 +326,26 @@ mastra-factory/
     newsyslog/*.conf              # log rotation
     install.sh                    # symlink, mkdir logs, bootstrap
   docs/
-    Self-hosting research.md      # narrative + risk register; links out (AD-5)
+    self-hosting-research.md      # narrative + risk register; links out (AD-5)
   docker-compose.yml              # root — tool-mandated
   .env.schema / .env.example      # root — varlock resolves from here (AD-11)
   package.json / package-lock.json
+  AGENTS.md                       # root — coding agents read it from here, no path argument
+  README.md                       # root — the repo-root README forges render
+  skills-lock.json                # root — written by the Mastra CLI; vendored (AD-13)
+  .mastra-project.json            # root — written by the Mastra CLI
 ```
+
+Root is exactly the two closed sets AD-3 enumerates — those twelve files (`.env` and `.gitignore` included;
+`.env` is gitignored) and eleven directories — and nothing else. The bmad-loop verify gate derives both sets
+from AD-3 and checks them against `git ls-files`.
+
+The gate separately checks the **twelve operator-plane artifacts** in the tree above — everything under
+`apps/`, `sandbox/` and `ops/`, namely the three `apps/*/README.md` plus `apps/slack/manifest.yaml`, the two
+files in `sandbox/`, and `ops/README.md`, both `launchagents/*.plist`, `factory-start.sh`, `newsyslog/*.conf`
+and `install.sh` — requiring each to be tracked in the index as a real, non-empty regular file at exactly the
+path named here (AD-5). The `src/` entries, `docs/self-hosting-research.md` and the root files above are
+outside that list: the code plane is covered by `tsc` and the root files by the closed-set check.
 
 ### Deployment & operational envelope `[ADOPTED — AD-12]`
 
@@ -297,7 +368,7 @@ graph LR
 
 Single machine, started by LaunchAgents at user login (not daemons — Colima needs a session). FileVault is on,
 so unattended recovery from an unplanned reboot is impossible by design; accepted. No backups; the Postgres
-volume is the only copy. Details and the full risk register: `docs/Self-hosting research.md` §1, §7, §9, §10.
+volume is the only copy. Details and the full risk register: `docs/self-hosting-research.md` §1, §7, §9, §10.
 
 ## Deferred
 

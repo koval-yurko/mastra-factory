@@ -22,6 +22,7 @@ true — particularly `gates`, `scm.isolation`, `sweep.auto` and `operator.enabl
 Three commands start work, four answer a stopped line, two clean up after it. Nothing
 else is required to operate the loop.
 
+Non-normative — the records are `bmad-loop --help` and `.bmad-loop/policy.toml`.
 ```mermaid
 flowchart TD
   V["bmad-loop validate"] -->|15 checks green| DR["bmad-loop run --dry-run"]
@@ -61,6 +62,7 @@ three of the four end in `resume`.
 A run has five states. Most commands are only accepted in one of them — that is the
 whole grammar.
 
+Non-normative — the record is `bmad-loop --help`, which states where each command is accepted.
 ```mermaid
 stateDiagram-v2
   direction TB
@@ -128,6 +130,7 @@ run · **waiting**: needs something waiting on you · **terminal**: needs the ru
 This is the cycle the loop repeats 24 times. You are not in it — unless it hits one of
 the two human exits.
 
+Non-normative — the records are `.bmad-loop/policy.toml` and `bmad-loop --help`.
 ```mermaid
 flowchart TD
   P["story taken off sprint-status.yaml"] --> WT["fresh worktree + branch<br/>gitignored MCP/CLI configs seeded in"]
@@ -163,6 +166,7 @@ hidden.
 A desktop notification fires and an `ATTENTION` file lands in
 `.bmad-loop/runs/<run-id>/`. One `status` call tells you which of five things happened.
 
+Non-normative — the record is `bmad-loop --help`.
 ```mermaid
 flowchart LR
   N["notification<br/>+ ATTENTION file"] --> Q{"bmad-loop status"}
@@ -182,6 +186,7 @@ you.
 Fires after the last story of an epic commits, because `gates = "per-epic"`. Read the
 diff, then release the line.
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 git log --oneline main
 bmad-loop resume RUN_ID
@@ -192,6 +197,7 @@ bmad-loop resume RUN_ID
 Dev and review found a gap or a contradiction neither can safely settle — including
 review writing a story back off `done` (`on_status_contradiction = "escalate"`).
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 bmad-loop resolve RUN_ID
 # or, spec already fixed by hand:
@@ -207,6 +213,7 @@ The story shipped and committed, but its acceptance criteria need a human: start
 publish DNS, grant an API key. Several stories in this backlog are shaped exactly that
 way (`1-4-operator-…`, `2-1-operator-…`).
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 bmad-loop confirm --list
 bmad-loop confirm STORY_KEY --reverify
@@ -216,6 +223,7 @@ bmad-loop confirm STORY_KEY --reverify
 
 `sweep.auto = "never"`, so nothing is swept behind your back. Work it between runs.
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 bmad-loop sweep --dry-run
 bmad-loop sweep --min-severity high
@@ -228,6 +236,7 @@ bmad-loop decisions
 
 **Starting a shift**
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 bmad-loop validate                  # is the bench clean?
 bmad-loop run --epic 1 --dry-run    # is the plan right?
@@ -238,6 +247,7 @@ bmad-loop resume RUN_ID             # at the gate
 
 **Ending a shift**
 
+Non-normative — the record is `bmad-loop --help`.
 ```bash
 bmad-loop stop RUN_ID --graceful    # finish the story first
 bmad-loop status RUN_ID             # confirm it landed

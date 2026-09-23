@@ -442,3 +442,179 @@ source_spec: `spec-4-3-operator-prove-it-comes-back-on-its-own.md`
 severity: medium
 reason: `man launchctl` under `list`: "The second column displays the last exit status of the job. If the number in this column is negative, it represents the negative of the signal which stopped the job. Thus, `-15` would indicate that the job was terminated with SIGTERM." Confirmed live on this host: `launchctl list` currently shows `9226 -9 com.apple.spotlightknowledged.updater` — a running pid beside a negative status. `ops/README.md`'s supervision checkpoint 1 reads "each with a real pid in the first column and `0` in the second… a `0` beside a live pid is a job that is running and has not died yet in this session", and its failure reading treats "a pid that is different every time you run this, with a non-zero status" as the crash-loop signature — which a healthy kickstarted job also matches. Recovery proof 1 carried the same defect and was corrected in this story (the pass criterion is now the pid change plus the `200`, with the status column explicitly excluded). Not fixed here because
 status: open
+
+### DW-57: AD-4 forbids "`.ts`, `.js`, `.mjs`, `.cjs` or other program source" outside `src/`, but the only guard filters exactly those four extensions, so a first-party `.tsx`, `.jsx`, `.mts` or `.cts` outside
+origin: spec-deferred 7c6afed72d93
+location: .bmad-loop/policy.toml [verify].commands index 5
+source_spec: `spec-5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou.md`
+severity: low
+reason: `.bmad-loop/policy.toml` `[verify].commands` index 5 is `git ls-files "*.ts" "*.js" "*.mjs" "*.cjs" | grep -v "^src/"`; the four globs are literal and no other command widens them. `tsconfig.json` is `include: ["src/**/*"]`, so `tsc --noEmit` never sees such a file either — which is the exact condition AD-4 exists to prevent, one extension list away from the one that is enforced. Not fixed here: the guard predates this story (it was added with the gate itself), and Story 5.1's acceptance criterion names only the same four extensions, so widening it is a change to AD-4's enforcement surface rather than to this story's. Smallest fix: add `"*.tsx" "*.jsx" "*.mts" "*.cts"` to that one `git ls-files` invocation.
+status: open
+
+### DW-58: `docs/Self-hosting research.md` is named by the Structural Seed and cited as normative by AD-5 and AD-12, yet its deletion or truncation is invisible to every gate command, including the new
+origin: spec-deferred 97e6b19b6e9b
+location: docs/Self-hosting research.md vs .bmad-loop/policy.toml [verify].commands
+source_spec: `spec-5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou.md`
+severity: low
+reason: The new artifact guard covers the twelve operator-plane artifacts under `apps/`, `sandbox/` and `ops/` that Story 5.1's acceptance criterion enumerates; `docs/` is outside that list because the criterion does not name it. Confirmed no other command opens it: `grep -n "Self-hosting" .bmad-loop/policy.toml` returns nothing, `tsc` is `include: ["src/**/*"]`, and `npm test` is `vitest run --dir src`. So the one document AGENTS.md calls "normative operational detail in §2–§11" could be emptied with the gate green — the same failure mode the artifact guard was added to close, one directory over. Pre-existing, not caused by this story. Smallest fix: add `docs/Self-hosting research.md` to the seeded-artifact guard's path list once Story 5.3 has renamed it to its space-free path, so the entry lands on the final name.
+status: open
+
+### DW-59: Nothing asserts that `.env` is absent from the index, so `git add -f .env` commits a secrets file with all 24 gate commands green — and the root closed-set guard is the one place that explicitly
+origin: spec-deferred 3d4bfb9e7435
+location: .bmad-loop/policy.toml [verify].commands root closed-set guard vs .gitignore
+source_spec: `spec-5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou.md`
+severity: low
+reason: Verified in an isolated clone: `git add -f .env` with a `SECRET=` line left every command at exit 0. The membership assertion passes because `.env` is one of AD-3's twelve allowlist entries, so a tracked `.env` satisfies this story's acceptance criterion ("every tracked root file is one of the twelve AD-3 names") as written; the presence assertion skips it as gitignored. Pre-existing in the sense that no gate command ever observed it, and outside this story's intent, whose "Always" clause puts gitignored paths "out of view by construction" — the guard was built to that boundary deliberately. It still means the repo's cheapest secret-leak check does not exist. Smallest fix: one clause in the root closed-set guard asserting `.env` is NOT in the tracked root-file list, with its own message.
+status: open
+
+### DW-60: `_bmad-output/planning-artifacts/epics.md` still publishes the superseded eight-entry root allowlist as this story's own acceptance criterion, which the amended AD-3 now contradicts.
+origin: spec-deferred 36ee6516bf4e
+location: _bmad-output/planning-artifacts/epics.md:978-982
+source_spec: `spec-5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou.md`
+severity: low
+reason: `epics.md:978-982` reads "the only files outside a subject directory are `package.json`, `package-lock.json`, `tsconfig.json`, `docker-compose.yml`, `.env`, `.env.schema`, `.env.example` and `.gitignore`" — false against both the tree and AD-3's amended twelve-entry table, which this story widened on the AC's own amend-the-allowlist branch. A later story or retrospective reading epics.md rather than the spine would try to move four tool-located root files. Not fixed here: editing an epic acceptance criterion mid-epic is a correct-course action (bmad-correct-course), not a gate patch, and AD-3 is the normative home the same criterion points at. The sibling half self-heals: `epic-5-context.md` repeats the eight-entry list but is a cache invalidated by any newer file under planning-artifacts, and ARCHITECTURE-SPINE.md is now newer, so the next story recompiles it. Smallest fix: amend NFR4's acceptance criterion in epics.md to cite AD-3 instead of restating it.
+status: open
+
+### DW-61: No gate command resolves `.env.schema` against the environment the deployment actually boots with, so a future type, pattern or `@required` tightening on a key supplied through the process environment
+origin: spec-deferred 14b56007a3d2
+location: .bmad-loop/policy.toml [verify].commands vs ops/launchagents/ai.mastra.factory.plist
+source_spec: `spec-5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l.md`
+severity: low
+reason: Demonstrated by the verification-gap layer: adding `@type=enum("development", "test")` to the new `NODE_ENV` declaration left all 30 commands at exit 0, while `NODE_ENV=production npx varlock run -- node -e 'console.log(1)'` exited 1 with `Resolved config/env did not pass validation`. The gate runs with no `.env` and with none of the plists' `EnvironmentVariables` exported, so no declared key ever resolves to a value — entries 2 and 3 assert only that the schema parses and that three keys carry `@public`, and the new guard 4 reconciles key *names* without resolving a value. Pre-existing in kind rather than caused here: `DOCKER_HOST` has been declared and plist-supplied since Story 4.2 with the same exposure; this story adds `NODE_ENV` to the same class. Nothing in the tree carries such a constraint today, so the failure needs a future edit to become real. Smallest fix: one more gate command that reads each `ops/launchagents/*.plist` `EnvironmentVariables` pair with `plutil -extract …
+status: open
+
+### DW-62: The schema-completeness guard reads literal `process.env.KEY` and `process.env["KEY"]` only, so the four configuration keys read through `process.env[key]` over an array literal are invisible to it
+origin: spec-deferred abe6ea13ab87
+location: src/mastra/index.ts:576-578 vs .bmad-loop/policy.toml [verify].commands index 25
+source_spec: `spec-5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l.md`
+severity: low
+reason: `src/mastra/index.ts:576-578` is `['MASTRA_PLATFORM_ACCESS_TOKEN', 'MASTRA_PLATFORM_SECRET_KEY'].some(key => Boolean(process.env[key]?.trim()))` and `['MASTRA_ENVIRONMENT_ID', 'MASTRA_PROJECT_ID'].every(...)`. These select the Platform sandbox, so they are deployment configuration, not the sandbox-inherited host variables at `:255-275` that the guard is correctly blind to. Confirmed: adding `'MASTRA_ZZUNDECLARED'` to that array left all 30 commands at exit 0, while the same name written as `process.env.MASTRA_ZZUNDECLARED` trips the guard naming file and line. All four keys are declared today, so nothing is currently unclaimed. Not closed here because reading a name out of an array literal needs a parser rather than a grep, which is a new mechanism rather than a direct correction; the guard's comment now names the gap and the four keys instead of claiming coverage it does not have. Smallest fix: an AST-based extraction, or a convention that every such array is annotated with a comment
+status: open
+
+### DW-63: Nothing asserts that `package.json`'s `start` script keeps invoking the server through `varlock run --`, which is the single path on which `.env.schema` is applied at all, so dropping that prefix
+origin: spec-deferred 46d02b12c6b1
+location: package.json:15 vs .bmad-loop/policy.toml [verify].commands
+source_spec: `spec-5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l.md`
+severity: medium
+reason: `package.json:15` is `"start": "varlock run -- mastra start"`. Demonstrated by rewriting it to `"start": "mastra start"`: all 30 `[verify].commands` stayed at exit 0. The policy comment leans on that invocation twice when it explains why a bare `@required` cannot be used, and both `ops/README.md` and `README.md` tell the operator the schema is what validates the environment — none of which survives the prefix being removed. Deferred rather than patched because it is pre-existing, not caused here: `varlock run --` has been the only application point since long before this story, with no guard over it, and this change adds eleven declarations to a mechanism that was already unprotected. Smallest fix: one more gate command asserting that the `start` script in `package.json` contains `varlock run --`, with a message saying that without it the schema is never read.
+status: open
+
+### DW-64: Open deferred-work entries still point at the research document by its old path and by section/line anchors this story rewrote, so the next sweep follows dangling pointers.
+origin: spec-deferred 707ba5c656a0
+location: _bmad-output/implementation-artifacts/deferred-work.md
+source_spec: `spec-5-3-docs-links-out-and-the-path-loses-its-space.md`
+severity: medium
+reason: `_bmad-output/implementation-artifacts/deferred-work.md` carries 22 occurrences of `docs/Self-hosting research.md` inside entries whose `status:` is still `open`. DW-22 ("§2.1 / §2.2 / §8") and DW-51 ("§7.1-§7.4") describe fenced copies this story deleted, and DW-47 cites `docs/Self-hosting research.md:670`, a line number in a file that lost ~180 lines above it. The ledger is orchestrator-owned — this session may not re-open, rewrite or resolve its entries — so the correction has to come from a sweep run.
+status: open
+
+### DW-65: The §1 architecture diagram says the Factory Server runs "one Node 24" while the repo pins Node 22 everywhere else.
+origin: spec-deferred 5aec5e596ae9
+location: docs/self-hosting-research.md:57
+source_spec: `spec-5-3-docs-links-out-and-the-path-loses-its-space.md`
+severity: low
+reason: `docs/self-hosting-research.md:57` reads `Factory Server (one Node 24)`; `package.json:42` declares `"node": ">=22.19.0"`, `AGENTS.md` says "TypeScript on Node 22" and the sandbox image is `node:22-bookworm-slim`. Verified pre-existing: the same line is present at baseline `6dc8a9d` (`docs/Self-hosting research.md:56`), so this story did not introduce it — it only brought the block under a `Non-normative` marker. Note `ops/factory-start.sh` pins `NODE_BIN=.../v24.19.0`, so deciding which number is right is a real call, not a typo fix.
+status: open
+
+### DW-66: `AGENTS.md`'s "Running and verifying" section carries three false claims, two of them in ways that would mislead the next story: it says there is no test script, that the verify gate runs two guards,
+origin: spec-deferred bc1bce9a78f9
+location: AGENTS.md:47-53
+source_spec: `spec-5-4-a-config-module-with-recorded-provenance-holding-storage-vec.md`
+severity: medium
+reason: `AGENTS.md:47-48` reads "There is no test script, so it is the only automated check until a story adds one" while `package.json:13` has `"test": "vitest run --dir src"` and three test files now run. `AGENTS.md:49-51` says the gate runs `npm ci`, `npm run check` "and two guards" — `[verify].commands` holds 36 entries. `AGENTS.md:53` says `policy.toml` "is gitignored and exists only in the main checkout" — it is tracked, and `.gitignore:13-15` carries a comment saying so deliberately. All three are false at baseline `b321370`, so this story did not introduce them; and the block is a `<!-- bmad:context -->` managed region, which step-04 routes to defer.
+status: open
+
+### DW-67: `REDIS_URL` is the one key in the new config modules that is not trimmed, so a whitespace-only value constructs a real `RedisStreamsPubSub` on a blank URL at module load.
+origin: spec-deferred 479ee93a755f
+location: src/mastra/config/pubsub.ts:17
+source_spec: `spec-5-4-a-config-module-with-recorded-provenance-holding-storage-vec.md`
+severity: medium
+reason: `src/mastra/config/pubsub.ts:17` is `const redisUrl = process.env.REDIS_URL` with no `?.trim()`, while `config/database-url.ts` trims both its keys and every integration key in the entry is trimmed. `apps/github/README.md:454` and `apps/linear/README.md:415` make "blank, whitespace, or empty-quoted" the canonical `.env` failure shape, so the value is reachable. Verified pre-existing: the same untrimmed read is at baseline `b321370` (`src/mastra/index.ts:108`), so this story only moved it — and the Always clause required the move to be behaviour-preserving. Today's behaviour is now pinned explicitly in `src/mastra/config/infrastructure.test.ts`, so adding the trim would be a visible, deliberate edit. Note `index.test.ts`'s own docstring: a `REDIS_URL` the boot acts on makes it dial a Redis that need not exist, and the gate hangs rather than fails.
+status: open
+
+### DW-68: Three `src/mastra/index.ts:N` citations in `_bmad-output/planning-artifacts/epics.md`, and nine in `_bmad-output/implementation-artifacts/deferred-work.md`, name lines the entry no longer holds.
+origin: spec-deferred aab19e90f9fd
+location: _bmad-output/planning-artifacts/epics.md:303,308,314
+source_spec: `spec-5-4-a-config-module-with-recorded-provenance-holding-storage-vec.md`
+severity: low
+reason: `epics.md:303` cites `src/mastra/index.ts:45` for `positiveInt`, `:308` cites `:52` for `decodeCredentialEncryptionKey`, `:314` cites `:204` for `localSandboxEnv`. All three were ALREADY stale at baseline `b321370` — the functions sat at `:50`, `:64` and `:272` there — and this story shifted them again, to `:57`, `:71` and `:259`. `deferred-work.md` carries `index.ts` anchors in DW-25 (`:576-578`, now `:527-529`), DW-54 (`:69-86`), and six more. Not repaired here: the intent's Never clause forbids rewriting anything under `_bmad-output/`, and the deferred-work ledger is the orchestrator's to edit. Settling this needs a pass that owns both files at once.
+status: open
+
+### DW-69: `ops/README.md` and `.env.schema` both describe `REDIS_URL` as "unset keeps the in-process bus" without noting that a whitespace-only value is not unset and does construct a client.
+origin: spec-deferred 4d932a9d51a1
+location: ops/README.md (REDIS_URL section), .env.schema
+source_spec: `spec-5-4-a-config-module-with-recorded-provenance-holding-storage-vec.md`
+severity: low
+reason: Same root cause as the untrimmed-`REDIS_URL` entry above: `config/pubsub.ts:17` does not trim, so `REDIS_URL=" "` builds a `RedisStreamsPubSub` on a blank target while the identically padded `DATABASE_URL` reads as absent. The operator-facing text says only "Unset keeps the in-process bus". Not repaired here for two reasons: the intent's Never clause forbids editing `.env.schema`, and documenting the asymmetry would enshrine as intended a behaviour the entry above records as a defect. Both should move together — add the `?.trim()` and leave the docs saying what they already say.
+status: open
+
+### DW-70: The comment above `storage,` in the entry's `new MastraFactory({ … })` call says the factory falls back to "default storage resolution" when no database is configured, which never happens —
+origin: spec-deferred c9f4f1d1be29
+location: src/mastra/index.ts (new MastraFactory call, storage property comment)
+source_spec: `spec-5-4-a-config-module-with-recorded-provenance-holding-storage-vec.md`
+severity: low
+reason: `src/mastra/index.ts` factory call, the paragraph ending "Unset (bare local dev) → default storage resolution applies (local libSQL file)". `config/storage.ts:20-30` constructs `LibSQLFactoryStorage` on that branch, so the factory's own resolution is never reached. Verified pre-existing and byte-identical at baseline `b321370:src/mastra/index.ts:593` — the inline block there also always produced an instance, so this story neither introduced nor worsened it. Left alone because the Always clause makes this story a behaviour- preserving move and the comment is the entry's, not a moved concern's; `config/README.md`'s "a concern moves with the comments that explain it" is what will collect it, in the story that next edits this call.
+status: open
+
+### DW-71: A malformed or whitespace-only `FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS` aborts the boot with a raw `SyntaxError` from `JSON.parse` that never names the key, instead of the shaped message the
+origin: spec-deferred e55e4ef0bcf4
+location: src/mastra/config/auth.ts:55-56
+source_spec: `spec-5-5-extract-auth-integrations-and-sandbox.md`
+severity: medium
+reason: `src/mastra/config/auth.ts:55-56` reads the key into a local and parses it when truthy, so `' '` or `'{oops'` reaches `JSON.parse` unguarded. Verified pre-existing and semantically identical at baseline `4ba3bd4` (`src/mastra/index.ts:88-90` was `process.env.X ? JSON.parse(process.env.X) : {}`), so this story only moved it — and the intent's Always clause required the move to be behaviour-preserving, with the double read collapsed and nothing else changed. The adjacent shape error (`must be a JSON object of key ids to base64 keys.`) is now pinned whole by `config/auth.test.ts`, so adding the `try`/`catch` would be a visible, deliberate edit against a test that already exists.
+status: open
+
+### DW-72: A `FACTORY_SANDBOX_MEMORY_GIB` or `FACTORY_SANDBOX_CPUS` set to a very large safe integer passes `positiveInt` and is multiplied into a `memory`/`cpuQuota` outside any range Docker will accept, so
+origin: spec-deferred 9ad26926bae2
+location: src/mastra/config/sandbox.ts:119-121
+source_spec: `spec-5-5-extract-auth-integrations-and-sandbox.md`
+severity: low
+reason: `src/mastra/config/sandbox.ts:119-121` bounds the knobs only by `Number.isSafeInteger` and `> 0`, then multiplies by `1024 ** 3`. Verified pre-existing and byte-identical at baseline `4ba3bd4` (`src/mastra/index.ts:325-327`); `positive-int.test.ts` pins the parser's range behaviour unchanged. Capping the knobs is a behaviour change and a new ceiling constant, which `sandbox/README.md` would have to state — the story that adds the cap should own both.
+status: open
+
+### DW-73: `SLACK_APP_BOT_TOKEN` is the one Slack key read raw while `SLACK_APP_CLIENT_ID` and `SLACK_APP_CLIENT_SECRET` beside it are trimmed, and that asymmetry has no test.
+origin: spec-deferred 8abbf6649a78
+location: src/mastra/config/integrations.ts:102
+source_spec: `spec-5-5-extract-auth-integrations-and-sandbox.md`
+severity: low
+reason: `src/mastra/config/integrations.ts:102` passes `process.env.SLACK_APP_BOT_TOKEN` straight through while `:103-104` use `?.trim()`. Verified pre-existing and byte-identical at baseline `4ba3bd4` (`src/mastra/index.ts:513-515`), so this story moved it without touching it. `SlackIntegration.diagnostics()` exposes `botTokenConfigured`, so the whitespace case is observable and a test is cheap — but the behaviour it would pin is unchanged behaviour, and the Always clause put untrimmed reads out of this story's reach.
+status: open
+
+### DW-74: Two of the sandbox module's env reads are unpinned: `E2B_API_KEY`'s `.trim()` and `MASTRACODE_LOCAL_SANDBOX_ROOT`, which no test in `src/` stubs at all, leaving the `LocalSandbox` working-directory
+origin: spec-deferred ccb46363581e
+location: src/mastra/config/sandbox.ts:271,280
+source_spec: `spec-5-5-extract-auth-integrations-and-sandbox.md`
+severity: low
+reason: `src/mastra/config/sandbox.ts:271` and `:280`. `E2B_API_KEY` is stubbed in eight places in `config/sandbox.test.ts` but never to a whitespace-only value, so dropping the `.trim()` leaves the suite green; `MASTRACODE_LOCAL_SANDBOX_ROOT` appears nowhere under `src/` outside the module. Verified pre-existing: `git show 4ba3bd4:src/mastra/index.test.ts` mentions `MASTRACODE_LOCAL_SANDBOX_ROOT` zero times, so the relocated blocks moved this gap intact rather than creating it. Every other trim in the module (image, provider, workdir) has a dedicated case; closing these two is new coverage for unchanged behaviour.
+status: open
+
+### DW-75: The concern import order inside `src/mastra/config/factory.ts` carries the boot's evaluation order — which diagnostic an operator sees first when several things are wrong — and no test or guard reads
+origin: spec-deferred 0d5e45dddd54
+location: src/mastra/config/factory.ts:36-43
+source_spec: `spec-5-6-the-entry-is-four-things-and-the-build-proves-it.md`
+severity: low
+reason: Hoisting `import { auth, secretEncryption } from './auth'` above `./pubsub` in `config/factory.ts` leaves 120/120 tests and all 42 gate commands green. Verified pre-existing: the identical import block sat in `src/mastra/index.ts` at baseline `8b1fd1c` with exactly the same absence of cover, and Story 5.5's review logged and rejected the same finding against the entry. `config/factory.ts:26-35`, `config/README.md:78-86` and five module docstrings all assert the coupling holds. The cheap close is a case in `config/factory.test.ts` that stubs `REDIS_URL` plus a Slack group that throws and asserts the ordered `console.log` / `console.warn` / throw sequence.
+status: open
+
+### DW-76: A `MASTRACODE_PUBLIC_URL` that is present but empty or whitespace-only becomes the deployment's public origin, because the value is exported raw and `@mastra/factory` reaches for its
+origin: spec-deferred b05b5439d03e
+location: src/mastra/config/public-url.ts:19
+source_spec: `spec-5-6-the-entry-is-four-things-and-the-build-proves-it.md`
+severity: low
+reason: `src/mastra/config/public-url.ts:19` exports `process.env.MASTRACODE_PUBLIC_URL` untrimmed; `node_modules/@mastra/factory/dist/factory.js:180` uses `??`, so `''` is a configured origin and OAuth redirect URLs are built against it. Verified pre-existing and semantically identical at baseline `8b1fd1c`: `src/mastra/index.ts:78` was `publicUrl: process.env.MASTRACODE_PUBLIC_URL,` and `config/integrations.ts:92` read the same key raw. This story's Always clause required the collapse to be behaviour-preserving, and adding `?.trim() || undefined` is a deliberate behaviour change that `apps/slack/README.md:395`'s present-and-empty operator control would have to be re-reconciled against.
+status: open
+
+### DW-77: The Slack integration's `uiOrigin` slot — the origin every account-link redirect is built against — is asserted nowhere under `src/`, so severing it from the one `MASTRACODE_PUBLIC_URL` read leaves
+origin: spec-deferred 5d1e552c348e
+location: src/mastra/config/integrations.ts:103
+source_spec: `spec-5-6-the-entry-is-four-things-and-the-build-proves-it.md`
+severity: medium
+reason: Changing `integrations.ts:103` to `uiOrigin: undefined` keeps `tsc` clean (the slot is `uiOrigin?: string`), 121/121 tests passing and all 42 gate commands at exit 0: guard 41 counts read sites, guards 35/37 parse the factory call's property list, and `SlackIntegration.diagnostics()` returns only booleans, so no public member exposes the value. Verified pre-existing: `uiOrigin: publicUrl` sat at `config/integrations.ts:108` at baseline `8b1fd1c` with exactly the same absence of cover (`git grep uiOrigin 8b1fd1c -- src` returns that one line). The consequence if it is severed is that Slack redirects resolve against the API origin instead of the SPA origin. The cheap close is not cheap here: the house style in `integrations.test.ts` deliberately does not stub integration packages, so observing the value means either capturing the `SlackIntegration` constructor argument or driving its connect route.
+status: open
+
+### DW-78: Four test suites now carry their own hand-maintained environment-sweep prefix list, and a prefix added to one does not reach the others — a case can inherit an ambient value it never mentions.
+origin: spec-deferred 29b6e5bc8722
+location: src/mastra/config/factory.test.ts:77
+source_spec: `spec-5-6-the-entry-is-four-things-and-the-build-proves-it.md`
+severity: low
+reason: `src/mastra/index.test.ts:42,70`, `config/auth.test.ts:38,43`, `config/sandbox.test.ts:30,36` and now `config/factory.test.ts:77,78` each declare their own `*_ENV_PREFIXES` / `*_ENV_EXACT` pair; `factory.test.ts`'s comment asserts it is "the same list" as `../index.test.ts` and nothing enforces that. Verified pre-existing: three of the four suites carried their own copies at baseline `8b1fd1c`, so the new file follows the house pattern rather than introducing it. The fix — exporting one pair from a shared module and importing it in all four — is a test-infrastructure refactor across suites this story does not otherwise touch.
+status: open

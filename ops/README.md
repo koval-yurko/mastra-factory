@@ -3,12 +3,48 @@
 The operator-plane subject for the infrastructure this host runs underneath the Factory Server. Two
 things live here: the Docker engine and the Postgres service `docker-compose.yml` describes, and the
 Cloudflare Tunnel that makes this deployment reachable from the internet. This file is normative for
-what `DOCKER_HOST`, `MASTRA_HOST`, `PORT` and `MASTRACODE_PUBLIC_URL` must contain and how to obtain
-them, and for the order the bring-up commands run in.
+what each key under "Keys this subject owns" below must contain and how to obtain it, and for the
+order the bring-up commands run in.
 
 `.env.schema` is the list of keys. `README.md` ("Configure your Factory") states what the three
 `POSTGRES_*` values must contain and how to choose them, and `apps/slack/README.md` is the record for
 `MASTRACODE_CHANNELS_PUBLIC_URL`. None of them is restated here.
+
+## Keys this subject owns
+
+The table below is the closed list of the keys this file owns, and this file is the only record
+for what each must contain and how to obtain it. The four
+subject READMEs under `apps/` and `sandbox/`, plus `README.md` as the residual owner, claim the rest;
+between the six tables every key `.env.schema` declares is claimed exactly once.
+
+| Key | What the value must contain | Full record |
+|---|---|---|
+| `DOCKER_HOST` | a `unix://` URL naming the running Colima VM's socket | the `DOCKER_HOST` section below |
+| `MASTRA_HOST` | the dotted loopback address the listener binds to | the `MASTRA_HOST` section below |
+| `PORT` | the pinned port the server listens on | the `PORT` section below |
+| `MASTRACODE_PUBLIC_URL` | the origin the browser reaches this deployment at | the `MASTRACODE_PUBLIC_URL` section below |
+| `NODE_ENV` | the runtime mode this process runs as | the `NODE_ENV` section below |
+| `REDIS_URL` | the Redis the cross-process event bus rides on, when there is one | the `REDIS_URL` section below |
+
+`.env.schema` declares and validates every key in that table and is the only list of key names;
+this file never
+restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
+by path and never copied.
+
+Not .env keys: `PATH`.
+
+`PATH` is a process-environment setting rather than configuration: it is written into both plists
+because a launchd agent inherits a minimal one, and exported again by `ops/factory-start.sh`. It is
+not read from `.env` and does not belong in `.env.schema`, and "The artifacts" below is where it is
+described. `NODE_BIN` next to it in that wrapper is not an environment variable at all — it is a
+`readonly` shell constant holding the nvm prefix `node` and `npm` come from, and it exists only to
+build `PATH`, so it is neither set by the deployment nor carved out from anything.
+
+That line above is machine input, not prose. The verify gate reconciles every key the plists, the
+wrapper and `docker-compose.yml` set against `.env.schema`, and reads it as the carve-out list — so
+it has to stay a column-0 line beginning exactly `Not .env keys:` with the names backticked. Bullet
+it, indent it or reword the prefix and the gate fails, reporting that it found no carve-out list.
 
 ## `DOCKER_HOST`
 
@@ -181,7 +217,7 @@ listening for the internet on this host, on this network, or on this router.
 Two preconditions, both checked before the install rather than after:
 
 - **Registration is already closed.** Sign-up is disabled in committed source — the literal
-  `signUpEnabled: false` in `src/mastra/index.ts` — and your own account exists. `README.md` step 3
+  `signUpEnabled: false` in `src/mastra/config/auth.ts` — and your own account exists. `README.md` step 3
   is the procedure and its `POST /auth/api/sign-up/email` probe is the proof: a `400` carrying
   `EMAIL_PASSWORD_SIGN_UP_DISABLED`, and nothing else. A public hostname is a public DNS record, so a
   deployment published with that window still open gives the first account to whoever finds it first.
@@ -204,18 +240,14 @@ address that actually got bound rather than the one that was asked for.
 
 Unset is worse and quieter still. `@mastra/deployer` resolves
 `bindHost = serverOptions?.host ?? process.env.MASTRA_HOST`, so with neither set the server listens on
-**every** interface, this machine's LAN address included, and logs nothing about it. Declaring the key
-in `.env.schema` changes none of that. It carries no `@required`, so leaving it blank is not a boot
-error — `varlock load` exits 0 with the key unset, which is what keeps every path that legitimately
-runs without it working — and it gets no default either: a declared-but-unset key is absent from the
-server's environment entirely, not an empty string, so nothing is handed to the listener in its
-place. What the declaration buys is validation and `@public`, and only on the varlock path:
-`npm run start` is `varlock run -- mastra start`, while `npm run dev` is bare `mastra factory dev` and
-never opens `.env.schema` at all, so the bring-up in `README.md` step 2 gets neither. Where it does
-apply, `@public` keeps the *configured* value legible in the server's own stdout instead of masked —
-worth having, but what it echoes is what `.env` said, never the address the socket actually took.
-Ingress checkpoint 1 is the only thing that reports the latter. `HOST` is not a substitute either; it
-changes the URL printed in the startup banner and moves no socket.
+**every** interface, this machine's LAN address included, and logs nothing about it. Listing the key
+in `.env.schema` changes none of that: leaving it blank is not a boot error, and an unset key is
+absent from the server's environment entirely rather than reaching it as an empty string, so nothing
+is handed to the listener in its place. On the `npm run start` path the server's own stdout does echo
+the value it was given — but that is what `.env` said, never the address the socket actually took,
+and `npm run dev` is bare `mastra factory dev`, so the bring-up in `README.md` step 2 gets not even
+that. Ingress checkpoint 1 is the only thing that reports what was bound. `HOST` is not a substitute
+either; it changes the URL printed in the startup banner and moves no socket.
 
 **How to obtain it.** Nothing issues it. It is a constant for a single-machine deployment, and the
 tunnel is not a reason to change it — the tunnel is what reaches this address.
@@ -226,10 +258,12 @@ tunnel is not a reason to change it — the tunnel is what reaches this address.
 public-hostname target below and in the loopback `MASTRACODE_PUBLIC_URL` of `README.md` step 1; all of
 them have to agree.
 
-Unset, `npm run dev` scans 4111–4131 and quietly takes 4112 when 4111 is busy. The tunnel keeps
-sending to 4111, so the public hostname answers `502` while the server runs perfectly well on a port
-nobody is pointing at. Pinned, a busy port stops the boot with `EADDRINUSE`, which is the loud failure
-worth having.
+Unset, `npm run dev` scans 4111–4131 and quietly takes 4112 when 4111 is busy. Before the tunnel
+exists — the loopback bring-up of `README.md` step 1 — every request then arrives on an origin
+sign-in does not trust, with nothing saying why, because `MASTRACODE_PUBLIC_URL` still names 4111.
+Once the tunnel exists it keeps sending to 4111 too, so the public hostname answers `502` while the
+server runs perfectly well on a port nobody is pointing at. Pinned, a busy port stops the boot with
+`EADDRINUSE`, which is the loud failure worth having.
 
 **How to obtain it.** Nothing issues it either. It is chosen here and then copied into the tunnel's
 public-hostname target.
@@ -239,6 +273,11 @@ public-hostname target.
 **What the value must contain.** With the tunnel serving: exactly `https://factory.kovalchuk.win` —
 scheme and host, no port, no path, no trailing slash. Before the tunnel exists it is the loopback
 origin `README.md` step 1 sets, and it stays that way for as long as the first bring-up runs.
+
+In that loopback form it carries the port as well — `http://127.0.0.1:4111` — and has to agree with
+`MASTRA_HOST` and `PORT` character for character. `localhost` and `127.0.0.1` are not interchangeable
+here either: the browser sends whichever one the address bar holds, and an origin differing from this
+value by that name alone is refused with the same `403` described below.
 
 This is the origin the browser uses and the only origin sign-in trusts — the trusted-origin list is
 seeded from this value — and it is also what every provider callback URL is derived from. Left on
@@ -253,6 +292,37 @@ dead-ends in the operator's own browser.
 `https://` in front. No provider issues it. Change it only together with the tunnel's public-hostname
 mapping and the callback URLs recorded in `apps/github/README.md`, `apps/linear/README.md` and
 `apps/slack/README.md`.
+
+## `NODE_ENV`
+
+**What the value must contain.** On this deployment, `production` — and it is set in
+`ops/launchagents/ai.mastra.factory.plist` rather than in `.env`, because it describes the process
+launchd starts and not a feature of the app. Leave it out of `.env` entirely.
+
+`development` and `test` are the two values that change behaviour here, and both change it in the
+same dangerous direction: they make `DATABASE_URL` optional and move all storage to a local libSQL
+file. A `NODE_ENV=development` line in `.env` therefore does not fail — it silently relocates every
+account, session and work item off the Postgres this deployment runs, where `README.md` step 4's
+query then finds nothing and reads as a failed bootstrap. Any other value, unset included, keeps the
+production requirement, which is why the bring-up in `README.md` leaves it unset on the
+`npm run dev` path.
+
+**How to obtain it.** Nothing issues it. It is a constant for this deployment, and the only place it
+is written is that plist.
+
+## `REDIS_URL`
+
+**What the value must contain.** A Redis connection URL — `redis://` or `rediss://`, with whatever
+credentials the instance needs. It is the bus the server publishes session, workflow and signal
+events on, and the lease provider that replaces the file-based thread locks once it is set.
+
+**How to obtain it.** There is nothing to obtain on this host: this deployment runs one server
+process, the in-process bus is what a single process wants, and the key stays unset. It exists for
+the multi-replica case, where every replica must be given the *same* Redis — two replicas on
+different instances share no events at all and each behaves as though it were alone. Nothing reports
+that; the symptom is a session whose stream stops updating in one browser while the work proceeds in
+another. The value may embed a password, so it is one of the keys the server's own log masks rather
+than echoing.
 
 ## Bringing the tunnel up
 
@@ -825,9 +895,9 @@ Expected: `-rw-r--r--` owned by `root  wheel`, then four rows — one each for
 `/Users/koval/Library/Logs/mastra-factory/err.log`,
 `/Users/koval/Library/Logs/mastra-factory/colima.log` and
 `/Users/koval/Library/Logs/mastra-factory/colima.err.log`. Four and not three:
-`ops/newsyslog/ai.mastra.factory.conf` rotates Colima's stderr as well, while
-`docs/Self-hosting research.md` §7.4 still shows the three-row version. The committed conf is what the
-installer copies, so four is the number to expect here.
+`ops/newsyslog/ai.mastra.factory.conf` rotates Colima's stderr as well, and
+`docs/self-hosting-research.md` §7.4 references that conf by path rather than reproducing it. The
+committed conf is what the installer copies, so four is the number to expect here.
 
 `-n` makes this a dry run that rotates nothing, which is what makes it safe to run at any point. Each
 row reads either `--> will trim at <date>` or `does not exist, skipped`. Before the agents have ever
