@@ -395,3 +395,50 @@ source_spec: `spec-3-4-operator-a-linear-app-that-belongs-to-yurii.md`
 severity: low
 reason: `docs/Self-hosting research.md` §11 says an unset `GITHUB_APP_WEBHOOK_SECRET` with no `WORKOS_COOKIE_PASSWORD`/`SLACK_APP_SIGNING_SECRET` means "random per process ⇒ OAuth breaks across restarts". With any integration declaring `requiresStableStateSigner` registered — Linear at `node_modules/@mastra/factory/dist/integrations/linear/integration.js:306`, GitHub likewise — `node_modules/@mastra/factory/dist/factory.js:369` throws during `prepare()` and the server does not start. Story 3.3 corrected the same claim in `.env.schema`, `.env.example` and `apps/github/README.md` and left this row; this story corrects the Linear row's equivalent and leaves it too. Not done here: this spec's Never list forbids adding, removing or changing any table row or heading in that file — §6 and §11 are a dated research record corrected by appending. The row is pre-existing rather than caused by this change, and a §11 pass that re-reads every trap row at once is the right owner; §6 and §5 both already
 status: open
+
+### DW-51: `docs/Self-hosting research.md` §7 still carries verbatim, unmarked copies of all five supervision artifacts, and three of those copies are now wrong: the wrapper is sited at `~/bin/factory-start.sh`,
+origin: spec-deferred 4f56c5245270
+location: docs/Self-hosting research.md §7.1-§7.4 vs ops/launchagents/, ops/factory-start.sh, ops/newsyslog/ai.mastra.factory.conf
+source_spec: `spec-4-1-the-supervision-artifacts-as-real-files-in-the-repo.md`
+severity: medium
+reason: §7.1 (:408-431), §7.2 (:437-455), §7.3 (:459-483) and §7.4 (:494-499) reproduce the plists, the wrapper and the newsyslog conf in full, in unannotated fences; `grep -rn "non-normative" docs/` returns nothing, so AD-5's requirement that a `docs/` code block be marked illustrative is unmet for all four. Three are also stale against what this story committed: §7.2's heading sites the wrapper at `~/bin/factory-start.sh` while the canonical file is `ops/factory-start.sh`; §7.3:468 is `<string>/Users/koval/bin/factory-start.sh</string>` while the committed plist names `/Users/koval/dev/test/mastra-factory/ops/factory-start.sh`; and §7.4 rotates `out.log`, `err.log` and `colima.log` only, missing the `colima.err.log` row the committed conf adds. An operator following §7 rather than `ops/` would therefore install a plist whose `ProgramArguments` point at a file that was never created — launchd reports that as a spawn failure with no hint at the cause — and a rotation conf that leaves the
+status: open
+
+### DW-52: `AGENTS.md` still describes the verify gate as `npm ci`, `npm run check` "and two guards"; it is now eleven commands, four of them new here.
+origin: spec-deferred 9819176cf508
+location: AGENTS.md:46-49 vs .bmad-loop/policy.toml [verify].commands
+source_spec: `spec-4-1-the-supervision-artifacts-as-real-files-in-the-repo.md`
+severity: low
+reason: `AGENTS.md:46-49` reads "runs `npm ci --no-audit --no-fund`, `npm run check`, and two guards"; `[verify].commands` in `.bmad-loop/policy.toml` holds eleven entries after this story (parsed and counted). The same sentence also still says `policy.toml` "is gitignored and exists only in the main checkout", which this story relied on being false — the file is tracked and was edited in this worktree. Both halves are already recorded as open DW-5 and DW-29; this story compounds the count rather than introducing a new condition. Not fixed here because the smallest fix edits an agent-context file, which this workflow routes to the ledger rather than patching mid-story.
+status: open
+
+### DW-53: Whether a rotated `out.log` keeps being written is unverified: macOS `newsyslog` rotates by rename with no copy-truncate, `launchd` holds the descriptor it opened at spawn, and the `N` flag signals
+origin: spec-deferred e553d5efb542
+location: ops/newsyslog/ai.mastra.factory.conf:2-5 vs ops/launchagents/ai.mastra.factory.plist
+source_spec: `spec-4-1-the-supervision-artifacts-as-real-files-in-the-repo.md`
+reason: `man 5 newsyslog.conf` on this host lists the flags as `B C D G J N U Z` plus `-`: there is no run-a-command flag, and the only notification mechanism is a signal to a pid read from `path_to_pid_file`. A launchd-managed node process has no pid file this repo controls, and SIGHUP would kill it rather than make it reopen, so `N` is the only correct spelling — which is also what Story 4.1's acceptance criterion pins ("with the `N` and `J` flags — no process to signal"). The open-descriptor consequence follows from launchd opening `StandardOutPath` once per spawn, but it was not observed: rotation cannot be exercised in a story worktree, which is why the conf was left as specified and the limit written into `ops/README.md` instead. What would settle it: Story 4.3's rotation criterion — force a rotation, then confirm a compressed generation exists **and** the live `out.log` is still growing. If it is not, the remedy is `launchctl kickstart -k gui/$(id -u)/ai.mastra.factory` after a
+status: open
+
+### DW-54: `AGENTS.md` still describes the verify gate as `npm ci`, `npm run check` "and two guards" and says there is no test script; the gate is fifteen commands, eight of them over `ops/`, and `npm test` has
+origin: spec-deferred ac4161b09558
+location: AGENTS.md:44-49 vs .bmad-loop/policy.toml [verify].commands
+source_spec: `spec-4-2-operator-bring-the-agents-up.md`
+severity: low
+reason: `AGENTS.md:44-49` reads "There is no test script, so it is the only automated check until a story adds one" and "runs `npm ci --no-audit --no-fund`, `npm run check`, and two guards"; `[verify].commands` in `.bmad-loop/policy.toml` holds fifteen entries after this story (parsed and counted), including `npm test` and eight `ops/` guards. The same sentence also still says `policy.toml` "is gitignored and exists only in the main checkout", which is false — `git ls-files .bmad-loop` returns it, and this story edited it in a worktree. Story 4.1 recorded the same condition (open as DW-5 and DW-29); this story moves the guard count again rather than introducing a new condition. Not fixed here because the smallest fix edits an agent-context file, which this workflow routes to the ledger rather than patching mid-story.
+status: open
+
+### DW-55: `ops/install.sh` and `ops/factory-start.sh` point the reader at story keys ("bootstrap the agents per Story 4.2", "Story 4.3 reads out of out.log") that stop resolving once those stories are
+origin: spec-deferred 1da806fe09e0
+location: ops/install.sh:5,98 and ops/factory-start.sh:70
+source_spec: `spec-4-2-operator-bring-the-agents-up.md`
+severity: low
+reason: `ops/install.sh:5` and `:98` and `ops/factory-start.sh:70` carry the references. Before this story there was nowhere else to point; `ops/README.md` now has "Bringing the agents up" and six numbered supervision checkpoints, so `:98`'s closing line in particular would be more useful as a pointer to that section than to a sprint row a reader cannot look up. Not done here because this story's intent sets the five `ops/` artifacts read-only — it exercises them unchanged, and a defect or staleness in one is a finding to record rather than a silent edit in a story that touches nothing else under `ops/`.
+status: open
+
+### DW-56: Supervision checkpoint 1 in `ops/README.md` (Story 4.2's) expects `0` in the second column of `launchctl list` beside a live pid, but that column is the job's *last exit status* and reads as the
+origin: spec-deferred f1156e28a493
+location: ops/README.md, supervision checkpoint 1 ("both agents are registered, and neither is looping")
+source_spec: `spec-4-3-operator-prove-it-comes-back-on-its-own.md`
+severity: medium
+reason: `man launchctl` under `list`: "The second column displays the last exit status of the job. If the number in this column is negative, it represents the negative of the signal which stopped the job. Thus, `-15` would indicate that the job was terminated with SIGTERM." Confirmed live on this host: `launchctl list` currently shows `9226 -9 com.apple.spotlightknowledged.updater` — a running pid beside a negative status. `ops/README.md`'s supervision checkpoint 1 reads "each with a real pid in the first column and `0` in the second… a `0` beside a live pid is a job that is running and has not died yet in this session", and its failure reading treats "a pid that is different every time you run this, with a non-zero status" as the crash-loop signature — which a healthy kickstarted job also matches. Recovery proof 1 carried the same defect and was corrected in this story (the pass criterion is now the pid change plus the `200`, with the status column explicitly excluded). Not fixed here because
+status: open

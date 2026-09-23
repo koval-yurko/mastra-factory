@@ -78,6 +78,124 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 # annotation exits 0 through every other command here. Verified both ways in a
 # story worktree: the guard passes as written and fails naming the key when a
 # `# @public` line is removed.
+#
+# The last eleven guards cover ops/, which nothing else here opens: `tsc` is
+# include: ["src/**/*"], vitest runs --dir src, and the AD-4 path guard filters
+# *.ts/*.js/*.mjs/*.cjs, so a plist, a shell script and a newsyslog conf are all
+# invisible to every command above. They are launchd's own inputs, so a mistake
+# in one surfaces as a crash-looping or silently-misconfigured agent rather than
+# as a failed build:
+#   1. `plutil -lint` on both plists — launchd refuses a malformed property list
+#      and reports it only in its own log.
+#   2. `zsh -n` on both ops/*.sh — a syntax error in the wrapper is a job that
+#      never starts, and in the installer a partial placement.
+#   3. Both ops/*.sh are mode 100755 in the index. launchd execs the wrapper by
+#      path and `ops/install.sh` refuses to link a non-executable one; a lost
+#      +x is invisible in a diff. Counts the 100755 rows and requires exactly 2,
+#      so a wrong mode and a missing file both fail while the correct tree passes.
+#   4. The one baked repo root agrees across all three files that hard-code it.
+#      Every path in the plists is absolute (launchd never expands $HOME), so a
+#      moved repo has to be rewritten in three places at once. Reads
+#      EXPECTED_ROOT out of ops/install.sh and requires the factory plist's
+#      WorkingDirectory, its ProgramArguments wrapper path and the wrapper's own
+#      REPO_ROOT to match it. Verified both ways in this worktree: passes as
+#      written, fails when any one of the four is pointed elsewhere. Both `sed`
+#      reads strip quotes, so quoting either literal — which the surrounding
+#      style invites — does not fail the gate with a misleading message.
+#   5. Each plist's Label equals its filename stem, it carries no UserName key,
+#      and no value in it contains a literal $HOME. plutil -lint above proves
+#      well-formedness only, and all three are things launchd acts on silently:
+#      a job registers under its Label, so a label-addressed `launchctl
+#      kickstart` misses a job that is loaded and running; UserName is the
+#      daemon spelling this deployment must not use (agents, not daemons); and
+#      launchd never expands $HOME, so such a path is simply never created.
+#   6. The rotation conf parses: every non-comment row is one of exactly four,
+#      on the specified terms `koval:staff 644 7 10240 * NJ`. Guards 1-4 never
+#      open this file — it could be deleted outright and the gate stayed green —
+#      and its failure mode is silence, since an unrotated log just grows.
+#   7. The log paths agree between the conf and the plists, and sit under the
+#      EXPECTED_HOME that ops/install.sh creates. This is the drift these files
+#      exist to eliminate and the one docs/Self-hosting research.md §7 actually
+#      has: a conf row naming a file no plist writes rotates nothing, and a
+#      plist log path outside the directory the installer creates is an agent
+#      that will not spawn. Guard 4 reconciles the repo root only.
+#      Together, 4 and 7 are AD-11's "update the plist, the wrapper and the conf
+#      in the same change" made mechanical.
+#   8. The rotated log paths agree between the conf and the ONE paragraph of
+#      ops/README.md that claims to list them: supervision checkpoint 4, which
+#      tells the operator a `sudo newsyslog -nvv` dry run prints all four by
+#      name. Guard 7 reconciles the conf against the plists; nothing here reads
+#      the prose, and the prose is what the operator actually runs, so a fifth
+#      row added to the conf or a renamed one leaves the README teaching the
+#      wrong expected list and the right one as a fault.
+#      docs/Self-hosting research.md §7.4 is the live proof that a conf and its
+#      narrative drift apart in silence: it still carries the superseded
+#      three-row version. Scoped and compared deliberately: the README side is
+#      the `### 4 — rotation is in force` section only (sliced to the next
+#      `### 5 `), so prose elsewhere — a rotated-generation glob in checkpoint 3,
+#      a bare `out.log` in a sentence — is neither a claim nor a false failure;
+#      and both sides are compared as whole absolute paths rather than bare
+#      basenames or a shared tail, so a home or directory rewritten on either
+#      side alone is caught too — a tail-only comparison passed a checkpoint 4
+#      that named /Users/bob, which is the drift this guard exists for.
+#      Verified both ways in this worktree: passes as written, and fails naming
+#      ops/README.md when a conf row is dropped, when a fabricated path is added
+#      to checkpoint 4, when one of checkpoint 4's four expected paths is
+#      deleted, and when the home is rewritten on either side alone; a novel log
+#      path written outside the sliced section still passes, and a deleted
+#      ops/README.md or conf is reported as missing rather than as disagreement.
+#   9. Every launchd job name ops/README.md addresses is one the plists
+#      actually declare, read two ways: the `gui/$(id -u)/<name>` service
+#      targets against each plist's Label, and the
+#      `~/Library/LaunchAgents/<name>.plist` paths the bootstrap and teardown
+#      commands name against the plist filenames. Guard 5 pins each Label to
+#      its filename stem; nothing pins the prose, and the prose is what the
+#      operator types. A renamed job silently orphans every `launchctl
+#      kickstart`, `bootout` and `print` command in that document — the
+#      recovery proofs are built out of them — and launchctl reports an unknown
+#      job name as a bare `No such process` and nothing else; the reverse,
+#      prose naming a job no plist declares, reads identically. Two extraction
+#      details. The service-target class [A-Za-z0-9_.-] admits a trailing `.`,
+#      so an un-backticked job name ending a sentence would be read as
+#      `ai.mastra.factory.` and fail a correct document; trailing `.` and `-`
+#      are stripped before the comparison. And the filename side requires the
+#      capitalised `LaunchAgents/` directory, so the lowercase
+#      `ops/launchagents/` references in the same prose are not swept in. The
+#      literal `<label>` placeholder in supervision checkpoint 1 and the bare
+#      `gui/$(id -u)` of the four `bootstrap` calls both match nothing.
+#      Verified both ways in this worktree: passes as written, and with a
+#      sentence-ending `gui/$(id -u)/ai.mastra.factory.` added; fails naming
+#      both sides when a plist Label is rewritten, when a fabricated
+#      gui/$(id -u)/ai.mastra.nope is added, and when a
+#      LaunchAgents/<name>.plist the prose bootstraps is renamed.
+#  10. The `[factory] …` lines ops/README.md greps out.log for are printed
+#      verbatim by ops/factory-start.sh. Recovery proof 3's entire result is
+#      two such greps and supervision checkpoint 3 carries a third, and nothing
+#      else in this gate compares the two files: a reworded `print` in the
+#      wrapper leaves every one of those greps matching nothing — a guaranteed
+#      false failure for the operator — while all fifteen commands above stay
+#      green. Scoped to the grep arguments (`grep -F '[factory]…'`, which also
+#      catches the `bzgrep` form), not to every [factory] string in the file,
+#      so a full line quoted inside a sentence stays narrative rather than
+#      becoming a claim. Verified both ways in this worktree: passes as
+#      written; fails naming the text when ops/factory-start.sh:72's "waiting
+#      up to" or :107's "docker socket is up" is reworded, and when the README
+#      greps for a line the wrapper never prints.
+#  11. The forced rotation in recovery proof 4 names a log the conf actually
+#      rotates. `sudo newsyslog -F <path>` is the one command in this document
+#      that trims a real log; its path argument is what keeps the run off every
+#      other conf in /etc/newsyslog.d/, and it sits one heading below guard 8's
+#      slice, so nothing read it — the deployment home could be moved in the
+#      conf, both plists and ops/install.sh while that one line stayed on
+#      /Users/koval, with guards 4, 5, 7, 8 and 9 all passing. Only the last
+#      field of a `newsyslog -F …` command is extracted, rather than widening
+#      guard 8's path regex over the whole file, which would sweep in
+#      out.log.0.bz2 and checkpoint 3's bzgrep glob and fail on correct prose.
+#      Verified both ways in this worktree: passes as written; fails naming the
+#      path when the home is rewritten in that argument alone, when the conf
+#      row it names is renamed, and when the path argument is dropped from the
+#      command altogether — which is the bare `-F` form that would trim every
+#      log on the host.
 commands = [
   "npm ci --no-audit --no-fund",
   "npm run check",
@@ -86,6 +204,17 @@ commands = [
   '''sh -c 'git ls-files "*.ts" "*.js" "*.mjs" "*.cjs" | grep -v "^src/" && exit 1 || exit 0' ''',
   '''sh -c 'git status --porcelain -- .agents/skills | grep . && exit 1 || exit 0' ''',
   "npm test",
+  '''sh -c 'plutil -lint ops/launchagents/*.plist' ''',
+  '''sh -c 'for f in ops/*.sh; do zsh -n "$f" || exit 1; done' ''',
+  '''sh -c 'git ls-files -s ops/factory-start.sh ops/install.sh | grep -c "^100755 " | grep -qx 2 || { echo "ops/*.sh must be mode 100755 in the index"; exit 1; }' ''',
+  '''sh -c 'r=$(sed -n "s/^readonly EXPECTED_ROOT=//p" ops/install.sh | tr -d "\""); p=ops/launchagents/ai.mastra.factory.plist; test -n "$r" && test "$(plutil -extract WorkingDirectory raw $p)" = "$r" && test "$(plutil -extract ProgramArguments.2 raw $p)" = "$r/ops/factory-start.sh" && test "$(sed -n "s/^readonly REPO_ROOT=//p" ops/factory-start.sh | tr -d "\"")" = "$r" || { echo "baked repo root disagrees across ops/install.sh, $p and ops/factory-start.sh"; exit 1; }' ''',
+  '''sh -c 'for p in ops/launchagents/*.plist; do b=$(basename "$p" .plist); l=$(plutil -extract Label raw "$p") || exit 1; test "$l" = "$b" || { echo "$p: Label $l does not match filename stem $b — launchd registers the job under its Label"; exit 1; }; if plutil -extract UserName raw "$p" >/dev/null 2>&1; then echo "$p: carries UserName — these are agents, not daemons"; exit 1; fi; if grep -q "[$]HOME" "$p"; then echo "$p: contains a literal \$HOME, which launchd never expands"; exit 1; fi; done' ''',
+  '''sh -c 'c=ops/newsyslog/ai.mastra.factory.conf; test -f "$c" || { echo "missing $c"; exit 1; }; d=$(grep -cvE "^[[:space:]]*(#.*)?$" "$c"); n=$(grep -cE "^[^[:space:]]+[[:space:]]+koval:staff[[:space:]]+644[[:space:]]+7[[:space:]]+10240[[:space:]]+\*[[:space:]]+NJ$" "$c"); test "$d" = "4" && test "$n" = "4" || { echo "$c: expected 4 rotation rows on koval:staff 644 7 10240 * NJ — found $d data rows, $n well-formed"; exit 1; }' ''',
+  '''sh -c 'h=$(sed -n "s/^readonly EXPECTED_HOME=//p" ops/install.sh | tr -d "\""); test -n "$h" || { echo "no EXPECTED_HOME in ops/install.sh"; exit 1; }; d="$h/Library/Logs/mastra-factory"; pl=$(for p in ops/launchagents/*.plist; do plutil -extract StandardOutPath raw "$p" || exit 1; plutil -extract StandardErrorPath raw "$p" || exit 1; done | sort); cf=$(grep -vE "^[[:space:]]*(#.*)?$" ops/newsyslog/ai.mastra.factory.conf | awk "{print \$1}" | sort); test "$pl" = "$cf" || { echo "rotation conf log paths differ from the plists StandardOutPath/StandardErrorPath"; exit 1; }; echo "$pl" | grep -qvE "^$d/[^/]+$" && { echo "a log path is not directly under $d, which ops/install.sh is what creates"; exit 1; }; exit 0' ''',
+  '''sh -c 'c=ops/newsyslog/ai.mastra.factory.conf; d=ops/README.md; for f in "$c" "$d"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; e="/[A-Za-z0-9_./-]*mastra-factory/[A-Za-z0-9_.-]+\.log"; cf=$(grep -vE "^[[:space:]]*(#.*)?$" "$c" | awk "{print \$1}" | grep -oE "$e" | sort -u); rd=$(sed -n "/^### 4 — rotation is in force$/,/^### 5 /p" "$d" | grep -oE "$e" | sort -u); test -n "$rd" || { echo "$d: supervision checkpoint 4 names no $e path, so it asserts nothing about $c"; exit 1; }; test "$cf" = "$rd" || { echo "$d supervision checkpoint 4 and $c disagree on the rotated log paths: conf has [$(echo $cf)], checkpoint 4 has [$(echo $rd)]"; exit 1; }' ''',
+  '''sh -c 'd=ops/README.md; test -f "$d" || { echo "missing $d"; exit 1; }; pl=$(for p in ops/launchagents/*.plist; do plutil -extract Label raw "$p" || exit 1; done | sort -u); rd=$(grep -oE "gui/[$]\(id -u\)/[A-Za-z0-9_.-]+" "$d" | sed "s|.*/||; s|[.-]*$||" | sort -u); fn=$(grep -oE "LaunchAgents/[A-Za-z0-9_.-]+[.]plist" "$d" | sed "s|.*/||; s|[.]plist$||" | sort -u); test -n "$rd" || { echo "$d addresses no gui/\$(id -u)/<job> name, so it asserts nothing about the plist Labels"; exit 1; }; test "$pl" = "$rd" || { echo "$d and ops/launchagents/*.plist disagree on the launchd job names: plists declare [$(echo $pl)], $d addresses [$(echo $rd)]"; exit 1; }; test -n "$fn" || { echo "$d names no ~/Library/LaunchAgents/<name>.plist, so it asserts nothing about the plist filenames"; exit 1; }; test "$pl" = "$fn" || { echo "$d and ops/launchagents/*.plist disagree on the plist filenames: plists are [$(echo $pl)].plist, $d bootstraps [$(echo $fn)].plist"; exit 1; }' ''',
+  '''sh -c 'd=ops/README.md; s=ops/factory-start.sh; for f in "$d" "$s"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; q=$(printf "\47"); l=$(grep -oE "grep -F $q\[factory\][^$q]*" "$d" | sed "s/^.*-F $q//" | sort -u); test -n "$l" || { echo "$d greps for no [factory] line, so it asserts nothing about $s"; exit 1; }; m=$(echo "$l" | while IFS= read -r x; do grep -Fq -e "$x" "$s" || echo "$x"; done); test -z "$m" || { echo "$d greps out.log for [factory] text $s does not print: $m"; exit 1; }' ''',
+  '''sh -c 'd=ops/README.md; c=ops/newsyslog/ai.mastra.factory.conf; for f in "$d" "$c"; do test -f "$f" || { echo "missing $f"; exit 1; }; done; a=$(grep -oE "newsyslog -F[^|;]*" "$d" | awk "{print \$NF}" | sort -u); test -n "$a" || { echo "$d forces no newsyslog -F run, so it asserts nothing about $c"; exit 1; }; cf=$(grep -vE "^[[:space:]]*(#.*)?$" "$c" | awk "{print \$1}" | sort -u); m=$(echo "$a" | while IFS= read -r x; do echo "$cf" | grep -qxF -e "$x" || echo "$x"; done); test -z "$m" || { echo "$d forces newsyslog -F on a path that is no row of $c: $m"; exit 1; }' ''',
 ]
 stream_capture_kb = 256      # per-stream cap (KiB) on the verifier stdout/stderr retained under the run's verify/ directory; the TAIL is kept and the journal records the full byte count plus a truncation flag. 0 = capture nothing (records still land, with null pointers)
 
