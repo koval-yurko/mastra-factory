@@ -1,21 +1,22 @@
 <!-- bmad:context -->
-<!-- Verified 2026-09-22 against 5e09129. Managed by bmad-project-context; edits inside
-     this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
+<!-- Verified 2026-09-25 against 4c176b4f84cdc16cd322c840c0d10d3d27d44596. Managed by
+     bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want
+     preserved outside the markers. -->
 
 ## mastra-factory
 
 A self-hosted Mastra Factory deployment: one operator, one Mac, own GitHub/Linear/Slack apps,
 own identity, own Docker sandboxes, own Postgres, and no dependency on Mastra's platform.
-TypeScript on Node 22, npm, one package. The requirements contract is
-`_bmad-output/specs/spec-self-hosted-factory/SPEC.md` plus the files it names in `companions:`
-— there is no PRD.
+TypeScript on Node 22.19+ or 24 (`engines.node` in `package.json`), npm, one package. The
+requirements contract is `_bmad-output/specs/spec-self-hosted-factory/SPEC.md` plus the files it
+names in `companions:` — there is no PRD.
 
 ## Policy
 
 - Keep first-party `.ts`/`.js`/`.mjs`/`.cjs` under `src/` only, and keep `tsconfig.json` at
-  `include: ["src/**/*"]` — `tsc --noEmit` is the only real check, so code outside `src/` is
-  silently unverified. Sole carve-out: `ops/*.sh`, limited to process supervision and file
-  placement, never application logic.
+  `include: ["src/**/*"]` — `tsc --noEmit` type-checks only the files that `include` names, so
+  code outside `src/` is never type-checked. Sole carve-out: `ops/*.sh`, limited to process
+  supervision and file placement, never application logic.
 - Never add `workspaces` to `package.json`, add a second package, or switch package managers.
   One root `package.json` + `package-lock.json`, npm.
 - Never add a root directory — root is a closed set and changing it is an architecture-spine
@@ -46,12 +47,17 @@ TypeScript on Node 22, npm, one package. The requirements contract is
 
 ## Running and verifying
 
-- Verify with `npm run check`. There is no test script, so it is the only automated check until
-  a story adds one.
-- The bmad-loop verify gate runs `npm ci --no-audit --no-fund`, `npm run check`, and two guards
-  (no first-party code outside `src/`; `.agents/skills/` unmodified) in a worktree holding tracked
-  files only. A story that adds a check must also add it to `[verify].commands` in
-  `.bmad-loop/policy.toml`, which is gitignored and exists only in the main checkout.
+- Verify with `npm run check`, `npm test` and `npm run build` — the bmad-loop gate runs each of
+  them, so a change that only typechecks is not verified.
+- The bmad-loop verify gate runs every entry of `[verify].commands` in `.bmad-loop/policy.toml`, in
+  order, starting with `npm ci`, in a worktree holding tracked files only (no `node_modules/`, no
+  `.env`). Those entries reconcile the layout rules (no first-party code outside `src/`, root a
+  closed set), the vendored `.agents/skills/` tree, the environment-key split, the `ops/` and
+  `sandbox/` artifacts, the compose project and this block's own prose against the files they
+  describe — read the array rather than restating the guard list or its length anywhere. A story
+  that adds a check APPENDS it there and never rewrites or reorders the array, because the guards
+  already in it are enforced nowhere else; gating a new `npm run <script>` also obliges naming it
+  in this section. `.bmad-loop/policy.toml` is tracked, so a story worktree has it.
 - `npm run start` is the production entry point and must keep working with the repo root as cwd.
   Renaming the script, or moving the repo, requires updating the LaunchAgent plist,
   `ops/factory-start.sh` and the newsyslog conf in the same change.
@@ -70,8 +76,12 @@ TypeScript on Node 22, npm, one package. The requirements contract is
   and `localhost` is not equivalent here.
 - Leave these unset or self-hosting silently defers back to Mastra's platform:
   `MASTRA_SHARED_API_URL`, `MASTRA_PLATFORM_ACCESS_TOKEN`, `MASTRA_PLATFORM_SECRET_KEY`,
-  `MASTRA_PROJECT_ID`, `MASTRA_ENVIRONMENT_ID`, `E2B_API_KEY`, `SANDBOX_PROVIDER`, `WORKOS_*`,
-  `MASTRACODE_AUTH_DISABLED`.
+  `MASTRA_PROJECT_ID`, `MASTRA_ENVIRONMENT_ID`, `E2B_API_KEY`, `SANDBOX_PROVIDER`,
+  `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_REDIRECT_URI`, `MASTRACODE_AUTH_DISABLED`.
+- Keep `WORKOS_COOKIE_PASSWORD` set wherever it already is, and never add it to the list above — it
+  is the second link of the OAuth/link `state` signer chain in
+  `src/mastra/config/integrations.ts`, so clearing it drops the deployment back to a per-process
+  random secret and invalidates every `state` in flight across a restart.
 - Tag sandbox images by date (`factory-sandbox:YYYY-MM-DD`), never `latest`, so a bad image is a
   `FACTORY_SANDBOX_IMAGE` rollback.
 - Operator-plane directories hold no first-party code and reach the code plane only through

@@ -34,6 +34,10 @@ integration rather than to this deployment's own GitHub App, and `README.md` own
 | `GITHUB_APP_WEBHOOK_SECRET` | the one random string the console field and `.env` both carry | the `GITHUB_APP_WEBHOOK_SECRET` section below |
 | `MASTRACODE_GITHUB_RECONCILE_ENABLED` | left unset, so the sweep runs | the "Reconcile sweep" section below |
 | `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` | left unset, so the cycle is an hour | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_PR_RECONCILE_ENABLED` | left unset, so the pull-request half falls back to the pair above | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED` | left unset, so the issue half falls back to the pair above | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_PR_RECONCILE_INTERVAL_MS` | left unset, so the pull-request cycle is an hour | the "Reconcile sweep" section below |
+| `MASTRACODE_GITHUB_ISSUE_RECONCILE_INTERVAL_MS` | left unset, so the issue cycle is an hour too — it takes the legacy interval first and the pull-request-effective one only after that | the "Reconcile sweep" section below |
 | `MASTRACODE_GITHUB_AUTHORIZED_BOTS` | extra reviewer bot logins to trust, if any | the `MASTRACODE_GITHUB_AUTHORIZED_BOTS` section below |
 
 `.env.schema` declares and validates every key in that table and is the only list of key names;
@@ -390,8 +394,34 @@ package treats anything that is not `false` as enabled, empty included
 requests and for issues first, and consults these two only where the matching per-sweep key is
 unset. That is the state this deployment is in — none of the per-sweep keys is set, so these two are
 what is actually in force — but it is why everything below is stated as "unless a per-sweep override
-is set". Those override keys are declared in no schema here and setting them is not part of this
-deployment.
+is set".
+
+Four per-sweep names exist, and this deployment leaves all four unset. They are listed here because
+this file owns them and because a sweep behaving unexpectedly on one half and not the other is traced
+through them, not because anything sets them (`reconciliation-config.js:3-15`):
+
+| Name | Effect |
+|---|---|
+| `MASTRACODE_GITHUB_PR_RECONCILE_ENABLED` | `false` turns the pull-request half off and `true` turns it on even where `MASTRACODE_GITHUB_RECONCILE_ENABLED` is `false`; any other value falls back to that key |
+| `MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED` | the same for the issue half, with the same fallback |
+| `MASTRACODE_GITHUB_PR_RECONCILE_INTERVAL_MS` | a positive integer in milliseconds for the pull-request cycle; anything else falls back to `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` |
+| `MASTRACODE_GITHUB_ISSUE_RECONCILE_INTERVAL_MS` | a positive integer in milliseconds for the issue cycle; anything else falls back to `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS`, and only then to whatever the pull-request half ended up running at |
+
+The per-sweep name wins **only when its value is one this package recognises**. The enable keys accept
+`true` and `false`, matched after the value is trimmed and lowercased — so `FALSE` and a padded
+` false ` both count — and treat anything else as absent, so a half set to `0`, `no` or `off` is not
+turned off: it falls through to the legacy name and then to enabled. The interval keys accept a positive
+whole number of milliseconds and treat anything else as absent the same way, but their chain has one
+link more than the enable keys. An absent issue interval takes
+`MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` first (`integration.js:1014`), and only when that is absent
+too does it take whatever the pull-request half ended up running at (`reconcile-worker.js:35-36`),
+which with everything unset is the hour above. So with the legacy interval set and the pull-request
+override set to something else, the issue half runs at the legacy value, not alongside the
+pull-request half. Setting one of these is supported but is not part of this deployment; turning
+**both** halves off is what `MASTRACODE_GITHUB_RECONCILE_ENABLED=false` alone already does, so what the
+enable pair adds is running one half only — `MASTRACODE_GITHUB_RECONCILE_ENABLED=false` with
+`MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED=true` leaves the issue sweep running and the pull-request
+one off, which no single key can express.
 
 **The cycle is one hour.** The worker defaults to `intervalMs ?? 36e5` (`reconcile-worker.js:35`),
 and the package's own `DEFAULT_GITHUB_RECONCILE_INTERVAL_MS = 60 * 6e4` (`reconcile-worker.js:5`) is

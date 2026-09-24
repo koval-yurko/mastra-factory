@@ -82,6 +82,13 @@ value is matched after trimming, so surrounding spaces are harmless, but the cas
 `factory-sandbox:YYYY-MM-DD`, naming an image that exists in the local image store of the engine
 `DOCKER_HOST` points at. Never `latest` — a moving tag makes a bad image impossible to roll back from.
 
+A value that is neither blank nor of that form stops the **server** at startup, before any session
+exists: `npm start` refuses to come up and the error names this key. That is a different failure from
+the blank case below — nothing is running, so there is no session view to open and no container to
+look for. Fix the line in `.env` and start the server again. `npm run dev` does not apply this check
+and takes whatever is written, so a tag of the wrong shape can survive a development run and only show
+up the first time the server is started for real.
+
 **How to obtain it.** Build the image (below) and use the tag you built. The tag history table at the
 bottom of this file records which ones exist. There is no default and none is invented: with
 `FACTORY_SANDBOX_PROVIDER=docker` and this key blank, the first session refuses to start and the error
@@ -221,7 +228,10 @@ resize.
 
 - **The error names `FACTORY_SANDBOX_IMAGE`.** The key is unset or blank while
   `FACTORY_SANDBOX_PROVIDER=docker`. There is no default to fall back to; set it to a tag from the
-  history table below and restart.
+  history table below and restart. A non-blank value that is not a date-stamped `factory-sandbox:`
+  tag never reaches this point — it stops the server at startup instead — so a session reaching this
+  error means the key is blank. A tag of the right shape that this engine does not hold is not caught
+  at startup either, and surfaces as the registry error below rather than as this one.
 - **The error names `MASTRACODE_MAX_SANDBOXES`.** This server process is already holding sandboxes for
   as many sessions as that key allows, so this one was refused before a container was created —
   nothing is wrong with the image or the engine. Free a slot by letting a running session's work item

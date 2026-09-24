@@ -9,10 +9,13 @@
 #   npm run db:up            # docker compose up -d --wait --wait-timeout 120
 #   npm run db:down          # docker compose down
 #
-# db:up is bounded on purpose: `--wait` alone defaults to --wait-timeout 0,
+# db:up is bounded on purpose: a bare `--wait` defaults to a zero timeout,
 # which waits forever, and `restart: unless-stopped` below keeps a container
 # that fails initdb out of the exited state — so an unbounded wait on a broken
-# volume never returns.
+# volume never returns. State the bound only on the db:up line above: a
+# `[verify]` guard reconciles every --wait-timeout value written in this file
+# against package.json scripts[db:up], so a second one here fails the gate
+# even when it is prose about the default rather than the value in force.
 #
 # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB are read from .env, which
 # Compose loads automatically. POSTGRES_PASSWORD has no default, and Compose
