@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "dev": "mastra factory dev --dir src/mastra",
-    "db:up": "docker compose up -d --wait",
+    "db:up": "docker compose up -d --wait --wait-timeout 120",
     "db:down": "docker compose down",
     "check": "tsc --noEmit",
     "test": "vitest run --dir src",

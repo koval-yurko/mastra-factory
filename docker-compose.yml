@@ -6,8 +6,13 @@
 # deprecated APP_DATABASE_URL name is still honored as a fallback.
 #
 # Usage:
-#   npm run db:up            # docker compose up -d --wait
+#   npm run db:up            # docker compose up -d --wait --wait-timeout 120
 #   npm run db:down          # docker compose down
+#
+# db:up is bounded on purpose: `--wait` alone defaults to --wait-timeout 0,
+# which waits forever, and `restart: unless-stopped` below keeps a container
+# that fails initdb out of the exited state — so an unbounded wait on a broken
+# volume never returns.
 #
 # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB are read from .env, which
 # Compose loads automatically. POSTGRES_PASSWORD has no default, and Compose
@@ -15,6 +20,23 @@
 # all of them abort until it is set. See README.md ("Configure your Factory")
 # for what the values must contain. Set DATABASE_URL in the same .env to match:
 #   postgres://<POSTGRES_USER>:<POSTGRES_PASSWORD>@127.0.0.1:54329/<POSTGRES_DB>
+
+# Pinned, not derived: without this key Compose names the project after the
+# checkout directory's basename and prefixes named volumes with it, so the same
+# repo checked out under a second path (a worktree, a rename) resolves to a
+# DIFFERENT, empty volume. AGENTS.md records this volume as the only copy of
+# projects, work items, sessions, memory and tokens.
+
+# The Compose project name, which prefixes the named volume below — the data
+# lands in `mastra-factory_mastracode-web-pgdata`. Left unset, Compose derives
+# the project from the checkout directory's basename, so a renamed, moved or
+# worktree copy of this repo would address a DIFFERENT volume and come up on an
+# empty database. That volume is the only copy of projects, work items,
+# sessions, memory and tokens, and there are no backups (AGENTS.md), so the name
+# is pinned here rather than left to the filesystem. `mastra-factory` is the
+# name the running deployment already uses; changing it orphans the data.
+name: mastra-factory
+
 services:
   app-db:
     # pgvector build of the official postgres image — agent memory (recall +

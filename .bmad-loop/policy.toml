@@ -1224,6 +1224,719 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 # `vi.stubEnv` call and key-name array in the `config/*.test.ts` suites,
 # including the new `config/factory.test.ts`, which name declared keys as quoted
 # strings without reading them.
+# Six more guards, 43 to 48, close four invariants this repo depends on that
+# NOTHING here checked. Each was re-verified breakable first: the break was
+# applied, all forty-two commands above were run, and all forty-two exited 0.
+# They are appended at the very END of the array rather than beside the guards
+# they are kin to, because `[verify].commands` is append-only: an insertion
+# renumbers guard 42, which the prose above names in four places. The cost is
+# accepted and worth stating rather than rediscovering — a Dockerfile typo is now
+# reported only after `npm run build` has finished its second dependency install.
+# The sharper case is guard 43, whose subject IS that install: a `packageManager`
+# pin disagreeing with the running npm is reported only after `npm ci` and
+# `npm run build` have both already installed under the npm the pin says is
+# wrong. Correctness of the gate outweighs failure latency in an unattended run,
+# and neither install is destructive — but the ordering is a real cost, not a
+# free one, and the next reader should not have to rediscover it.
+#  43. THE SINGLE-PACKAGE SHAPE. Three assertions about `package.json` and the
+#      index, in one guard because they are one claim: this is ONE npm package.
+#      (a) `packageManager` is exactly `npm@` + the output of `npm --version`,
+#      after a trailing `+<suffix>` is stripped from the declared value: the
+#      canonical way to write this pin is `corepack use npm@11.17.0`, which
+#      writes `npm@11.17.0+sha512.<hash>`, and a guard that told the maintainer
+#      to strip the hash corepack just added would be wrong about the repo.
+#      The message prints the value as DECLARED, hash and all, so it is
+#      searchable in the file.
+#      (b) There is no `workspaces` key at all — the test is `hasOwnProperty`
+#      rather than truthiness, because an empty array is still a workspaces
+#      declaration. A `workspaces` key changes what `npm ci` installs and where
+#      `node_modules` lands, and nothing else here would notice.
+#      (c) `git -c core.quotePath=false ls-files` lists no `pnpm-workspace.yaml`,
+#      `pnpm-workspace.yml`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`,
+#      `bun.lock`, `npm-shrinkwrap.json`, `lerna.json`, `turbo.json`, `nx.json`
+#      or `rush.json` at ANY depth, and no `package.json` BELOW the repository
+#      root. The second-package-manager names alone were not enough for a guard
+#      whose heading is the single-package shape: the strongest signal of a
+#      second package is a second `package.json`, and `packages/foo/package.json`
+#      needs no lockfile beside it to be one. Guard 20 already closes the
+#      repository ROOT against everything the AD-3 allowlist does not name, so
+#      (c) earns its keep only below the root — `packages/foo/pnpm-lock.yaml`
+#      passes guard 20 and fails this one — and the two in-`package.json` keys
+#      are invisible to it either way.
+#      The cheaper form — assert `packageManager` is merely PRESENT — was
+#      rejected because a pin nothing compares against is decoration: a scratch
+#      package pinned to `npm@99.99.99-does-not-exist` installs cleanly, measured.
+#      Comparing it to the npm actually running the gate has an admitted cost:
+#      upgrading the host npm fails the gate on an unrelated story. That is the
+#      intended signal, and the message says so — including the part an operator
+#      has to act on, that this guard fails EVERY subsequent unattended run until
+#      the pin is moved — because the fix, bump the pin and regenerate the
+#      lockfile in one commit, is the same review moment guard 25's pinned digest
+#      asks for.
+#      Below the root, a lone `package-lock.json` counts the same as a
+#      `package.json`: npm resolves it against whichever manifest is nearest, so
+#      it is a second install however it got there, and the root lockfile this
+#      guard pins says nothing about it. The rule is written `/(package|package-
+#      lock)\.json$` with a LEADING slash so the repository's own root lockfile —
+#      the one thing here that must exist — is not caught by it.
+#      `package.json` is parsed inside a `try`/`catch` that reports
+#      `package.json unreadable or not valid JSON: <message>`, the shape guard 21
+#      uses for `tsconfig.json`, so a truncated file fails as this guard rather
+#      than as a node stack trace; and the file census refuses to run against an
+#      empty `ls-files`, which would otherwise pass vacuously. `try`/`catch` is
+#      not enough on its own: a file holding the literal `null` PARSES, and
+#      `p.packageManager` on it is a TypeError, which is the stack trace the
+#      `catch` exists to prevent — measured. A non-object manifest is therefore
+#      rejected by name before any property is read.
+#      Verified both ways: passes as committed, and passes on the corepack form
+#      `npm@11.17.0+sha512.deadbeefdeadbeef`; fails naming the pin as declared
+#      and the npm running the gate when `packageManager` is bumped to
+#      `npm@10.0.0`, when it is bumped to `npm@10.0.0+sha512.deadbeef` and when
+#      it is deleted outright, naming the key and its value when
+#      `"workspaces": ["packages/*"]` is added, naming the path when
+#      `packages/foo/pnpm-lock.yaml` is added to the index, when
+#      `packages/foo/package.json` is added with no lockfile beside it, and when
+#      each of `tools/pnpm-workspace.yml`, `tools/npm-shrinkwrap.json`,
+#      `tools/nx.json` and `tools/rush.json` is added, naming the path when
+#      `packages/foo/package-lock.json` is added with NO `package.json` beside it
+#      while a root `package-lock.json` still passes; with its own
+#      unreadable-JSON message when `package.json` is replaced by `not json`; and
+#      with its own not-a-JSON-object message when it is replaced by `null`.
+#  44. THE TWO `@public` POSTGRES KEYS. Guard 4's pipeline — `npx varlock load
+#      --format json-full` into `node -e`, failing when a key is absent from the
+#      loaded config or its `isSensitive` is anything but `false` — with the key
+#      list `["POSTGRES_USER","POSTGRES_DB"]`. It is a mirror of guard 4 rather
+#      than a widening of it on purpose: guard 4's three keys are the server's
+#      own, these two are Compose's, and the two lists go stale for different
+#      reasons. `.env.schema`'s header sets `@defaultSensitive=true`, so these
+#      two are public only because of the `# @public` line directly above each;
+#      delete that one line and varlock masks the value in the stdout of
+#      `varlock run -- mastra start` and in every dump, which is where the
+#      operator and `docker compose` read them. Grepping `.env.schema` for the
+#      literal `# @public` was rejected: it proves the bytes are in the file, not
+#      that varlock resolved the key as public, which is the thing that matters.
+#      What guard 4 does NOT do, and what this one has to, is separate a masked
+#      key from a broken schema. Measured: with `.env.schema` DELETED, `varlock
+#      load --format json-full` exits 0 and writes well-formed JSON whose
+#      `config` simply has no such keys, and with the schema UNPARSEABLE it still
+#      writes well-formed JSON on stdout — so a `try`/`catch` around `JSON.parse`
+#      never fires in either case, and the census would blame the two POSTGRES
+#      keys for a schema that is broken or absent. The order is therefore: the
+#      schema must be a non-empty file (catches deleted and emptied), then
+#      `varlock load` itself must exit 0 (catches unparseable — it exits 1 there,
+#      measured), and only then are the keys judged. The `try`/`catch` is kept
+#      behind all three as a backstop against empty stdin, not as the cover for
+#      any of them. Once the keys ARE judged, absent and masked are two failures
+#      and not one: a key missing from the resolved config has lost its
+#      DECLARATION, and telling the operator to restore a `# @public` line above
+#      a declaration that is not there sends them to the wrong edit. The two
+#      branches print different messages for that reason.
+#      Verified both ways: passes as committed (measured: varlock reports
+#      `isSensitive:false` for both with no `.env` present); fails naming the key
+#      when the `# @public` line above `POSTGRES_USER` is removed and when the
+#      one above `POSTGRES_DB` is removed; fails with its absent-declaration
+#      message, not its masked-key message, when the `POSTGRES_USER=` line itself
+#      is deleted from an otherwise valid schema; and fails naming `.env.schema`
+#      as the cause, not the keys, when the schema is replaced by text varlock
+#      rejects, when it is deleted outright, and when it is truncated to zero
+#      bytes.
+#  45. NO `COPY` AND NO `ADD` IN THE SANDBOX DOCKERFILE. That is the whole rule,
+#      stated no wider than the check: `sandbox/factory-sandbox.Dockerfile` is
+#      non-empty and carries no `COPY` and no `ADD` instruction
+#      (`grep -nEi "^[[:space:]]*(ONBUILD[[:space:]]+)?(COPY|ADD)[[:space:]]"`,
+#      so an indented or lower-case one is caught too, and so is an `ONBUILD
+#      COPY` — which does not avoid the bake, it defers the same one to every
+#      image built FROM this). Guards 19 and 23 already name this file,
+#      but only assert that it is tracked, non-empty and a regular file — they
+#      say nothing about what is IN it, which is exactly the gap. The sandbox
+#      carries a generic toolchain; the repository is CLONED into `/workspace` at
+#      run time, never COPYed or ADDed in at build time, and a baked copy is
+#      stale the moment the tree moves. The message prints the offending line.
+#      It does NOT claim nothing is baked into the image: a
+#      `RUN git clone https://example.com/repo.git /workspace` bakes a repository
+#      in and this guard exits 0 on it. Widening the grep to RUN-side fetches was
+#      tried and rejected — the Dockerfile's own legitimate
+#      `curl -fsSL … -o /usr/share/keyrings/…` for the GitHub CLI keyring would
+#      trip it, and a guard that fails the correct tree is worse than the gap.
+#      `test -s` alone is not enough to earn the absence of a match: a DIRECTORY
+#      passes `test -s`, and a `grep` over one reports nothing, so this guard —
+#      and 46 and 47, which have the same shape — would pass vacuously on a
+#      subject it never opened. `test -f` is asserted beside it for that reason.
+#      Verified both ways: passes as committed; fails printing the line when
+#      `COPY . /workspace` is appended, when `  add ./src /workspace/src` is, and
+#      when `ONBUILD COPY . /workspace` is; fails with its own missing-or-empty
+#      message when the file is moved away; and fails with its own
+#      not-a-regular-file message when a directory is put at that path.
+#  46. THE SANDBOX WORKDIR AND BASE TAG. Same file: EXACTLY one `WORKDIR`
+#      instruction and its argument is `/workspace`; EXACTLY one `FROM` and its
+#      image reference carries an explicit tag or an `@sha256:` digest that is
+#      not `latest`. The counts are asserted, not just the values, because a
+#      second `WORKDIR` wins silently and `sandbox/README.md` ties
+#      `MASTRACODE_SANDBOX_WORKDIR` to this one by sight, and because a second
+#      `FROM` is a multi-stage image — a different artifact from the one that
+#      README documents. What is deliberately NOT asserted is the literal
+#      `node:22-bookworm-slim`: the rule is that the base is PINNED, so a
+#      considered base bump is a review conversation and not a gate failure,
+#      while `node`, `node:latest` and a malformed digest all fail. The
+#      reference is read by dropping leading `--flag value` pairs and then taking
+#      the FIRST whitespace-delimited token that remains — which is what discards
+#      an `AS <stage>` suffix, rather than a branch of its own — and the tag is
+#      looked for in the last path segment so
+#      that a registry host carrying a port (`registry.example.com:5000/node`) is
+#      not mistaken for a tag. Messages print the value found.
+#      A reference containing a `$` is rejected outright, before the tag is
+#      inspected at all, because a build argument defeats the whole check:
+#      `ARG BASE_TAG=latest` with `FROM node:${BASE_TAG}` yields a tag of
+#      `${BASE_TAG}` — non-empty, and not the string `latest` — so an unpinned
+#      base would pass. The tag is whatever ARG default or `--build-arg` is in
+#      force at build time, which this file cannot tell you; the base must be a
+#      literal tag or digest written here. `--platform=$TARGETPLATFORM` is
+#      unaffected, since flags are stripped before the reference is read.
+#      Verified both ways: passes as committed, and still passes on
+#      `FROM --platform=linux/arm64 node:24-trixie-slim`, on
+#      `FROM --platform=$TARGETPLATFORM node:22-bookworm-slim`, on a 64-hex
+#      `@sha256:` digest and on `registry.example.com:5000/node:22-bookworm-slim`;
+#      fails printing what it found when `WORKDIR` is moved to `/app`, when a
+#      second `WORKDIR /srv` is appended, when the `WORKDIR` line is deleted,
+#      when the base is retagged `node:latest`, when it is left bare as `node`,
+#      when `registry.example.com:5000/node` is left untagged, when
+#      `ARG BASE_TAG=latest` + `FROM node:${BASE_TAG}` is introduced, when the
+#      whole reference is `FROM $BASE`, and when the file is turned into a
+#      two-stage build; fails with its own missing-or-empty message when the
+#      file is moved away; and fails with its own not-a-regular-file message when
+#      a directory is put at that path, which `test -s` alone accepts and a grep
+#      over which would read as zero WORKDIR and zero FROM lines.
+#  47. THE DATE-STAMPED TAG IN THE DOCS. `sandbox/README.md` AND `README.md` are
+#      non-empty and contain no `factory-sandbox:latest` and no untagged
+#      `factory-sandbox` in a command that would name an image — which docker
+#      resolves to `:latest` for you. NFR19 fixes the form at
+#      `factory-sandbox:YYYY-MM-DD`; a moving tag is the one tag an operator
+#      cannot roll a bad image back from. BOTH files are read, not just the
+#      sandbox one: `sandbox/README.md` is where the image is BUILT, but
+#      `README.md` step 6 is where the operator copies
+#      `FACTORY_SANDBOX_IMAGE=factory-sandbox:<YYYY-MM-DD>` into `.env`, which is
+#      the tag the server actually runs. Guarding the build doc and not the run
+#      doc lets `latest` back in through the setup instructions with the gate
+#      green — measured before this was widened. (What the DECLARATION of
+#      `FACTORY_SANDBOX_IMAGE` accepts at `.env.schema` is a separate, still-open
+#      gap; this guard covers the docs only.)
+#      The bare word was rejected as the pattern for a reason worth recording:
+#      line 83 of `sandbox/README.md` says "Never `latest`" in prose, so
+#      `grep latest` fails a correct tree. Three alternations do the work
+#      instead: the literal `factory-sandbox:latest`; a `-t` or `--tag` whose
+#      operand is `factory-sandbox` with no `:` after it, bare or single- or
+#      double-quoted, separated by spaces, by an `=`, or joined to the flag with
+#      nothing at all; and a `docker run`/`docker image`/`docker tag` whose
+#      operand is an untagged `factory-sandbox`, likewise quoted or not, at any
+#      argument position. An earlier draft matched only `-t` with an optional
+#      DOUBLE quote, and three forms that all resolve to `factory-sandbox:latest`
+#      walked through it: `--tag factory-sandbox`, `-t 'factory-sandbox'`, and
+#      `docker run --rm factory-sandbox sh -c …`. The draft after THAT still let
+#      four through, each measured: `-tfactory-sandbox` and `--tag=factory-sandbox`
+#      (the flag arm required at least one space), `docker tag <id>
+#      factory-sandbox` (not in the verb list), and — the one that mattered —
+#      ANY `docker run` line carrying a colon before the image operand, because
+#      the arm skipped intermediate arguments with `[^:]*` and that class cannot
+#      cross a `:`. `docker run --rm -v "$PWD:/workspace" factory-sandbox …` is
+#      the most likely future edit to these very lines, the sandbox's whole
+#      subject being `/workspace`, and it passed. Arguments are now skipped as
+#      whole whitespace-delimited words, which colons do not terminate.
+#      What the pattern deliberately does not touch: `docker images
+#      factory-sandbox` — a listing, not a tagging, and `images` is why the third
+#      alternation requires whitespace directly after `image`; every
+#      `factory-sandbox.Dockerfile` path, which is followed by a `.`; and every
+#      legitimate `factory-sandbox:$TAG`, `factory-sandbox:<YYYY-MM-DD>` and
+#      `factory-sandbox:2026-09-23`, which are followed by a `:`.
+#      Verified both ways: passes as committed against BOTH files, prose at line
+#      83, every `docker images factory-sandbox` listing, `README.md` line 156's
+#      `FACTORY_SANDBOX_IMAGE=factory-sandbox:<YYYY-MM-DD>`, line 326's
+#      "a `factory-sandbox:` tag" and every `.Dockerfile` path included; fails
+#      printing the line when the build command is rewritten to
+#      `-t "factory-sandbox:latest"`, to `--tag factory-sandbox`, to
+#      `-t 'factory-sandbox'`, to `-tfactory-sandbox` and to
+#      `--tag=factory-sandbox`, when `docker tag abc123 factory-sandbox` is
+#      added, when the run command is rewritten to
+#      `docker run --rm factory-sandbox sh -c …`, to
+#      `docker run factory-sandbox sh -c …`, to
+#      `docker run --rm -v "$PWD:/workspace" factory-sandbox …` and to
+#      `docker run --rm -p 8080:8080 factory-sandbox`, and when `README.md` line
+#      156 is set to `factory-sandbox:latest`; fails with its own
+#      missing-or-empty message when either file is moved away; and fails with
+#      its own not-a-regular-file message when a directory is put at either path.
+#  48. THE `varlock run --` PREFIX. `scripts.start` in `package.json` is a string
+#      containing `varlock run --`, read through the same `try`/`catch` as guard
+#      43. This is the narrowest guard here and the widest in consequence: that
+#      prefix is the ONLY path on which `.env.schema` is applied at all. Drop it
+#      and the server boots on whatever the ambient environment happens to hold,
+#      every default, type and `required` check in the schema is skipped, and
+#      nothing fails loudly — guards 4, 26 and 44 all keep passing, because they
+#      run varlock themselves and never look at how the server is started.
+#      Containment rather than equality, so that flags may be added to either
+#      side of the `--` without a gate failure.
+#      Verified both ways: passes as committed; fails printing the script found
+#      when `start` is rewritten to `mastra start` and when the key is deleted,
+#      prints its own unreadable-JSON message when `package.json` is replaced
+#      by `{oops`; and prints its own not-a-JSON-object message, not a node stack
+#      trace, when it is replaced by `null` — which parses, so the `try`/`catch`
+#      does not fire and `p.scripts` is a TypeError.
+# All six verified both ways in THIS worktree, break by break, each break
+# reverted immediately, with `git status --porcelain` back to naming no product
+# file but this one at the end. (The loop's own bookkeeping — the story spec and
+# the deferred-work ledger — is written by the orchestrator around this change
+# and is expected in the tree alongside it.)
+# The last four guards put `docker-compose.yml` under this gate for the first
+# time. Until now NOTHING here parsed or executed it: all forty-eight commands
+# above produce byte-identical results whether that file is correct or
+# gibberish. Guard 28 is the only command that opens it at all, and it reads the
+# bytes with a `grep -oE` for `${…}` to collect the keys the deployment
+# interpolates — it never asks Compose what the file MEANS, so a malformed
+# healthcheck list, an unknown top-level key, or a service that no longer exists
+# all ship green. Re-verified breakable first, as the sweep before this one did:
+# `bogus_top_level_key: yes` was appended to the file and all forty-eight
+# commands above were run — all forty-eight exited 0.
+# Three of the four shell out to a tool this repo does not install, and they
+# resolve it the same way: `command -v docker`, else `/opt/homebrew/bin/docker`,
+# else FAIL naming both locations and saying the subject is UNVERIFIED rather
+# than satisfied. The gate is a subprocess whose environment is not guaranteed
+# to carry `/opt/homebrew/bin`, and that directory is already this repo's
+# recorded answer for where the engine lives — `ops/factory-start.sh` and both
+# plists bake it into `PATH` for the same reason. Failing loudly when neither
+# location has it is deliberate: a silent skip is the vacuous pass these guards
+# exist to end.
+# Finding the binary is not enough, and this was measured rather than assumed:
+# the engine and the Compose CLI plugin are separate installs, and against a
+# `docker` on `PATH` whose `compose` subcommand is missing, the parse guard
+# printed "docker compose could not parse docker-compose.yml" — blaming a
+# correct file for a broken toolchain. Each of the three therefore probes
+# `docker compose version` immediately after resolving the binary and fails with
+# its own message, pointing at the `~/.docker/cli-plugins` symlink that step 1 of
+# `ops/README.md` already documents for exactly this split state.
+# All three also export a throwaway `POSTGRES_PASSWORD` in their own
+# environment. That key uses required interpolation (`:?`), `.env` is gitignored
+# and absent from every story worktree, and Compose interpolates this file for
+# EVERY subcommand — so without one they would fail on a correct file. This
+# depends on `POSTGRES_PASSWORD` being the ONLY `:?` interpolation in the file,
+# which was checked and is true today. Add a second required key with no default
+# and all three start failing on a correct file until each learns to supply that
+# one too; that is the standing cost of the throwaway, and it is cheaper than the
+# alternative, which is a gate that cannot read its own deployment file.
+# None of them needs a running daemon and none writes anything: `docker compose
+# config` is a local parse, confirmed exit 0 with `DOCKER_HOST` pointed at a
+# nonexistent socket. Nothing here runs `up` or `down`, which matters more after
+# this change than it did before — see guard 50.
+#  49. THE COMPOSE FILE PARSES AT ALL. `docker-compose.yml` is a non-empty
+#      regular file and `docker compose -f docker-compose.yml config -q` accepts
+#      it, with Compose's own diagnostic allowed through on failure rather than
+#      replaced by a summary of it. That is the whole rule, and it is the one
+#      that was missing: every `up`, `down`, `ps` and `logs` against this
+#      deployment fails identically on a file Compose will not read, and nothing
+#      else in this gate would have said so.
+#      A YAML-only parse was rejected as the cheaper form, because it answers a
+#      different question. Compose validates against its own schema, and the
+#      breaks that matter are well-formed YAML: `bogus_top_level_key: yes` and a
+#      `name:` nested under `services.app-db` both parse as YAML and are both
+#      rejected by Compose.
+#      The `test -f` and `test -s` arms are about WHICH file gets named, not
+#      about vacuity — measured: Compose 5.5.1 rejects an empty file on its own,
+#      printing `empty compose file` and exiting 1. `test -f` runs before
+#      `test -s` so a DIRECTORY at that path is reported as such rather than as
+#      an empty file.
+#      What this guard genuinely cannot see is the parseable but SERVICE-LESS
+#      file. Measured: a `docker-compose.yml` that resolves to
+#      `{"name":"mastra-factory","services":{}}` exits 0 here. (The most degenerate
+#      spelling of that, a file containing nothing but `name: mastra-factory`, now
+#      trips the required-key arm below instead, because it declares no
+#      `POSTGRES_PASSWORD` either — but a service-less file that keeps that
+#      declaration still passes, so the hole is real.) It is closed by guard 52,
+#      which requires `app-db` to exist and to resolve to specific values; this
+#      guard stays the cheap parse it is.
+#      One more thing this guard reads out of the same file, because nothing else
+#      does: the set of keys marked REQUIRED with the `${…:?}` form must be
+#      exactly `POSTGRES_PASSWORD`. That key has no default on purpose — the file
+#      itself says a committed password would be a published credential — and
+#      rewriting it to `${POSTGRES_PASSWORD:-committedpw}` parses, resolves, and
+#      passes every other arm in this gate while handing every fresh deployment
+#      the same known password. Measured: all of 49, 50 and 52 exit 0 on that
+#      file before this arm existed.
+#      The arm doubles as the self-report for a dependency 49, 50 and 52 all
+#      share and none of them could otherwise explain: each exports ONE throwaway
+#      `POSTGRES_PASSWORD` before calling `config`, so a SECOND required key
+#      fails all three in every story worktree, where no `.env` exists. Without
+#      this arm that shows up three times as Compose's own interpolation error
+#      against a file that is arguably correct; with it, the cause is named once.
+#      Verified both ways: passes as committed, with no `.env` in the worktree
+#      and with `DOCKER_HOST=unix:///nonexistent/docker.sock`; fails printing
+#      Compose's own diagnostic when an unknown top-level key is appended, when
+#      the `image:` line is over-indented, and when the healthcheck list is given
+#      an empty element; fails with its own missing-or-not-a-regular-file message
+#      when the file is moved away and when a directory is put at that path;
+#      fails with its own empty-file message when it is truncated; fails with its
+#      own no-compose-plugin message against a stub `docker` that answers
+#      `--version` but not `compose`; and fails with its own no-docker message,
+#      naming both locations, when `PATH` carries no docker and the fallback path
+#      does not exist; and fails naming the required-key set it found when
+#      `POSTGRES_PASSWORD` is rewritten to `${POSTGRES_PASSWORD:-committedpw}`
+#      and when a second key is given the `:?` form.
+#      Added after the second review pass: the `config` call passes NO `-f`.
+#      Under `-f docker-compose.yml` Compose skips the override file it merges
+#      automatically and ignores `COMPOSE_FILE`, so this guard read a project no
+#      operator command ever resolves. Measured before the change: a root
+#      `docker-compose.override.yml` carrying `name: someother-project` and a
+#      second `'54329:5432'` port left 49, 50, 51 and 52 all at 0 while
+#      `npm run db:up` resolved the other project and published 54329 on every
+#      interface. With `-f` dropped, 50 and 52 both fail on that file and a
+#      benign override that changes neither still passes.
+#      Note the required-key grep matches the `:?` spelling only. Compose's
+#      equally valid `${VAR?msg}` form is invisible to it — measured, that is
+#      not a vacuous pass: 49, 50 and 52 all still exit 1, printing Compose's own
+#      diagnostic, which names the missing variable itself.
+#  50. THE PROJECT NAME AND THE VOLUME IT PREFIXES. Two readings of one
+#      invariant, because either alone is satisfiable by accident.
+#      (a) `docker-compose.yml` literally carries a column-0
+#      `name: mastra-factory` line. (b) `docker compose config --format json`,
+#      piped into `node` with guard 4's stdin-accumulate shape and a
+#      `try`/`catch` around `JSON.parse`, resolves `name` to exactly
+#      `mastra-factory` and the volume set to exactly one entry:
+#      `mastracode-web-pgdata` -> `mastra-factory_mastracode-web-pgdata`.
+#      (a) is there because (b) is vacuous in the checkout that matters. Compose
+#      falls back to the checkout directory basename when the file pins no name,
+#      and the main checkout is `/Users/koval/dev/test/mastra-factory` — basename
+#      `mastra-factory`. Measured: deleting the `name:` key THERE leaves both of
+#      (b)'s assertions passing. This worktree caught that deletion only because
+#      its own basename differs, which is an accident of where the gate happened
+#      to run, not an invariant. (a) does not depend on the directory at all.
+#      (a) matches the VALUE rather than one spelling of the line: single or
+#      double quotes around `mastra-factory`, and a trailing `#` comment, are all
+#      accepted, because Compose resolves every one of them to the same project.
+#      An exact-line grep rejected `name: "mastra-factory"` and told the
+#      maintainer to restore a key that was already present and already correct,
+#      which is a false failure pointing at the wrong file.
+#      (b) is there because (a) is not the last word. `COMPOSE_PROJECT_NAME`, in
+#      the environment or in a root `.env`, OVERRIDES the file — measured:
+#      `COMPOSE_PROJECT_NAME=someother` makes `config --format json` resolve the
+#      project to `someother` with the `name:` key untouched. So the guard also
+#      fails with its own message when a root `.env` declares that key, and the
+#      resolved-name message names the override as a cause rather than telling
+#      the maintainer to restore a key that may already be correct.
+#      The stake: the project name prefixes every named volume, and that volume
+#      is the only copy of projects, work items, sessions, memory and tokens,
+#      with no backups (AGENTS.md). Measured before the fix: this worktree
+#      resolved to project `dw-compose-file-hardening-and-gate` and volume
+#      `dw-compose-file-hardening-and-gate_mastracode-web-pgdata`, while the live
+#      container carries `com.docker.compose.project=mastra-factory` and the one
+#      volume on this host is `mastra-factory_mastracode-web-pgdata`.
+#      `mastra-factory` is the pinned value because it is the name the deployment
+#      already runs under; any other spelling would be a live migration of the
+#      only copy of the data.
+#      The volume set is compared as a whole rather than by looking the one key
+#      up, so a SECOND named volume appearing here fails too: a new volume is new
+#      unbacked-up state, and this file is where that should get noticed.
+#      A consequence worth writing down because it is a real cost: once the
+#      project name is pinned, EVERY checkout — including each story worktree
+#      under `.bmad-loop/runs/` — addresses the same Compose project and the same
+#      volume. Measured: after this change `docker compose ps` from this worktree
+#      lists the live `mastracode-web-db`; before it, that listed nothing. That is
+#      the intent — a moved or renamed repo keeps its data — and it is why no
+#      command in this gate may run `docker compose down`, and above all not
+#      `down -v`, from a worktree, and why guard 51 now refuses a `down` inside
+#      `db:up` and a `-v` inside `db:down`. `config` writes nothing; keep it that
+#      way.
+#      Verified both ways: passes as committed, with no `.env` and with
+#      `DOCKER_HOST` pointed at a nonexistent socket; passes on the quoted forms
+#      `name: "mastra-factory"` and `name: 'mastra-factory'` and on
+#      `name: mastra-factory # pinned`, all three of which Compose resolves
+#      identically; fails with its own
+#      missing-`name:`-line message when the key is deleted and when it is
+#      changed to `mastra-factory-2` — (a) runs first and does not depend on the
+#      directory the gate is run in, which is what makes it hold in the main
+#      checkout, where the resolved read alone passes; fails naming the project
+#      found and the volume it would produce when `COMPOSE_PROJECT_NAME=someother`
+#      is set in the environment; fails with its own `.env` message when a root
+#      `.env`
+#      declaring `COMPOSE_PROJECT_NAME` is placed; fails naming the resolved
+#      volume set when the volume is renamed to `mastracode-web-pgdata2`; fails
+#      with its own missing-or-not-a-regular-file message when the file is moved
+#      away and when a directory is put at that path; and fails with its own
+#      no-docker and no-compose-plugin messages for those two toolchain states.
+#      Added after the second review pass: the `.env` arm now reads the VALUE.
+#      It failed on any `COMPOSE_PROJECT_NAME` at all, `=mastra-factory`
+#      included, which names the very project the file pins and overrides
+#      nothing; `.env` is the file `README.md` tells the operator to write, so
+#      that was a red gate on a correct machine. It now fails only on a value
+#      that differs, quoted or bare. The volume set comparison also reads the
+#      named volume's `driver` and `driver_opts`: a `type none` / `o bind` /
+#      `device <path>` block keeps the resolved NAME this arm compares and keeps
+#      guard 52's mount arm satisfied while moving the bytes to a host directory
+#      outside docker's volume management — measured green on all four before
+#      this arm, failing on 50 after it.
+#  51. THE BOUND ON `db:up`, AND THE TWO SCRIPTS AROUND IT. `scripts["db:up"]`
+#      in `package.json`, read through the same `try`/`catch` and
+#      not-a-JSON-object check as guards 43 and 48, invokes `docker compose up`,
+#      carries `--wait`, carries `--wait-timeout` followed by a positive integer
+#      (separate token or joined with `=`), and does NOT also invoke
+#      `docker compose down`. `scripts["db:down"]` invokes `docker compose down`
+#      and carries no `-v`/`--volumes`. And every `--wait-timeout <N>` written
+#      into `docker-compose.yml` and `ops/README.md` states the same N as
+#      `db:up`.
+#      What the bound is actually for, measured rather than reasoned, because the
+#      obvious story turned out to be wrong. A bare `--wait` defaults to
+#      `--wait-timeout 0`, which Compose documents as waiting forever. The
+#      predicted hazard was a crash-looping container under
+#      `restart: unless-stopped` — and on Compose 5.5.1 that does NOT hang:
+#      measured twice in an isolated scratch project with a deliberately failing
+#      `initdb`, `up -d --wait` with no timeout returned in about a second, rc=1,
+#      `container … is unhealthy` on stderr, the container left `Restarting`. A
+#      crash-looping container is classified unhealthy, and that ENDS the wait.
+#      The unbounded wait is real for the other state: a container held in
+#      `health: starting` has returned no verdict at all. Measured: a service with
+#      `start_period: 600s` and an always-failing probe kept `up -d --wait`
+#      running until an external watchdog killed it at 45s, the container still
+#      `Up 44 seconds (health: starting)`; the same service with
+#      `--wait-timeout 15` exited at exactly 15s, rc=1, `application not healthy
+#      after 15s`. That is the case the bound ends, and it is why guard 52
+#      additionally requires the timeout to EXCEED this service's own healthcheck
+#      floor rather than merely being positive.
+#      The `down` arms guard new state, not tidiness. With the project name
+#      pinned by guard 50, a `docker compose down -v` hidden in any script
+#      reaches the ONE live volume from ANY checkout, every story worktree
+#      included. Without that arm
+#      `docker compose down -v && docker compose up -d --wait --wait-timeout 120`
+#      satisfies every other assertion in this guard.
+#      The detection is token-aware, not substring-aware, because the substring
+#      form missed exactly the spellings that matter. Measured passing against
+#      `s.indexOf("docker compose down")`:
+#      `docker compose -f docker-compose.yml down -v && docker compose up …`,
+#      which puts a global flag between the command and the subcommand, and the
+#      legacy `docker-compose down -v && …`, which is one token where the
+#      substring expects two. So the scan finds a `docker compose` or
+#      `docker-compose` invocation, steps over its global flags — consuming a
+#      value for the ones that take one, `-f`/`-p`/`--env-file` and friends — and
+#      asks whether the subcommand that follows is `down`. The volume ban then
+#      matches `-v` exactly or ANY token beginning `--volumes`, because
+#      `--volumes=true` is a real spelling that the exact-token check accepted.
+#      And the ban is swept over EVERY value in `scripts`, not just the two keys
+#      named above. A `"db:reset": "docker compose down -v && npm run db:up"` is
+#      exactly as destructive as the same text inside `db:down`, and was
+#      completely unguarded while only two keys were read. The per-key arms stay
+#      because they say something the sweep cannot — `db:down` must still BE a
+#      `docker compose down`, and `db:up` must not run one at all, with or
+#      without `-v`.
+#      Two cheaper forms were rejected. Equality against the exact script string
+#      would fail the next time a flag is added to either side, and this guard is
+#      about the bound, not the spelling. Merely requiring `--wait-timeout` to be
+#      PRESENT accepts `--wait-timeout 0`, precisely the default it exists to
+#      displace — hence the positive-integer check, done by scanning the token
+#      for digits rather than with `Number()` alone, which would accept `0x10`
+#      and `1e3`.
+#      The agreement check has two shapes, because the prose sites do. The FLAG
+#      scan covers `docker-compose.yml` and `ops/README.md`: every
+#      `--wait-timeout N` written there must state the same N as `db:up`, and
+#      each file must state it at least once, so the number cannot quietly vanish
+#      from the docs. The scanner crosses a newline between the flag and its
+#      value, so a hand-wrap that puts `--wait-timeout` at the end of one line
+#      and `120` at the start of the next is read correctly instead of failing a
+#      correct document with `states --wait-timeout [""]`.
+#      `README.md` needs the other shape: it carries no `--wait-timeout` text at
+#      all, so the flag scan cannot see it, and its "waits up to 120 seconds"
+#      sentence — added by the same change that added this guard — was free to
+#      drift. Measured: moving all three flag sites to 600 and leaving
+#      `README.md` at 120 exited 0. That sentence now has its own arm, matched in
+#      its prose form.
+#      What stays hand-maintained is the English that states no number this guard
+#      can anchor on: `ops/README.md`'s "The 120-second bound" line, and its
+#      "about 80 seconds" statement of the healthcheck floor (both in
+#      `ops/README.md`, in the paragraph beginning "Record it if you ever hit the
+#      first case", cited by its text rather than by a line number that moves). A
+#      maintainer who changes 120 to 600 still has to fix those by hand. This
+#      narrows the drift; it does not close it.
+#      Verified both ways: passes as committed and on the joined form
+#      `--wait --wait-timeout=120`; fails printing the script found when the
+#      timeout is dropped, when it is set to `0`, to `abc` and to nothing at all,
+#      when `--wait` is dropped, when the script is reduced to
+#      `docker compose up -d`, when a `docker compose down -v &&` prefix is
+#      added, when `scripts` is not an object, and when the key is deleted; fails
+#      naming the script when `db:down` grows a `-v` or a `--volumes` and when
+#      `db:down` is deleted; fails naming both values and the file when
+#      `docker-compose.yml` or `ops/README.md` is edited to `--wait-timeout 600`
+#      while `db:up` still says 120, and when the flag is removed from either
+#      file entirely; prints its own unreadable-JSON message when `package.json`
+#      is replaced by `{oops`; and prints its own not-a-JSON-object message, not
+#      a node stack trace, when it is replaced by `null` and by `[]`.
+#      Verified both ways for the arms added after the first review: fails naming
+#      the script when `db:up` becomes
+#      `docker compose -f docker-compose.yml down -v && docker compose up …` and
+#      when it becomes `docker-compose down -v && docker compose up …`, both of
+#      which the earlier substring check passed; fails naming the script when
+#      `db:down` becomes `docker compose down --volumes=true`, which the earlier
+#      exact-token check passed; fails naming the KEY when a third script
+#      `"db:reset": "docker compose down -v && npm run db:up"` is added, which
+#      nothing read before; fails naming `README.md` and both numbers when the
+#      three flag sites move to 600 and `README.md` keeps saying 120, and with
+#      its own message when that sentence is deleted outright; and passes,
+#      rather than failing, when `ops/README.md` wraps `--wait-timeout` and its
+#      value onto separate lines.
+#      Added after the second review pass. The teardown detector tokenized on
+#      whitespace alone, which left four spellings green — measured, each as a
+#      `scripts` entry: `docker compose down -v&&echo done` (the operator glued
+#      to the flag), `sh -c "docker compose down -v"` (one quote deep),
+#      `docker --context default compose down -v` (a global flag BEFORE the
+#      `compose` word — the earlier fix stepped over flags only AFTER it), and
+#      `docker compose down -vt 10` (a clustered short flag). Tokenizing now
+#      strips quotes and splits `&&`, `||`, `;` and `|` into their own tokens,
+#      global flags are consumed on both sides of `compose`, and any single-dash
+#      token containing a `v` counts. All four now fail; `docker compose down`,
+#      `docker compose logs app-db` and a plain `tsc --noEmit` still pass.
+#      The sweep also refuses `docker volume rm`, `docker volume prune` and
+#      `docker system prune` in any script. Banning the FLAG and not the
+#      OPERATION left the shortest path to the same loss wide open: with the
+#      project name pinned, `docker volume rm mastra-factory_mastracode-web-pgdata`
+#      in a `db:reset` deletes the one copy from any checkout, and it was green.
+#      A `--wait-timeout` mentioned with NO number after it is now ignored rather
+#      than read as the empty value: prose such as "a bare `--wait-timeout` is
+#      not enough" failed a correct document with `states --wait-timeout [""]`.
+#      A value that genuinely drifts is still caught.
+#      What stays hand-maintained, restated: `ops/README.md`'s "The 120-second
+#      bound" and "about 80 seconds" lines, AND this comment block's own numbers
+#      — the "80 seconds today" derivation under guard 52 and the worked examples
+#      here. This guard can never scan `policy.toml`, because its own prose
+#      quotes `--wait-timeout` at 0, 15, 60, 120 and 600 deliberately. A
+#      maintainer who moves 120 fixes all of those by hand.
+#  52. WHAT THE app-db SERVICE ACTUALLY RESOLVES TO. The same
+#      `config --format json` guard 50 reads, asked a different question: the
+#      resolved `services["app-db"]` exists, and carries exactly one published
+#      port at `host_ip` `127.0.0.1`, `published` `54329`, `target` `5432`,
+#      `protocol` `tcp`; exactly one mount, of `type` `volume`, `source`
+#      `mastracode-web-pgdata`, `target` `/var/lib/postgresql`; `restart`
+#      `unless-stopped`; `container_name` `mastracode-web-db`; an `image` whose
+#      repository is `pgvector/pgvector` and whose last path segment carries a
+#      tag that is neither empty nor `latest`; a `CMD-SHELL` healthcheck probing
+#      `-h 127.0.0.1 -p 5432` whose resolved `-U` and `-d` arguments are
+#      non-empty and equal the resolved `environment.POSTGRES_USER` and
+#      `environment.POSTGRES_DB`; and a `--wait-timeout` in `scripts["db:up"]`
+#      strictly greater than the floor derived from that healthcheck.
+#      Four of those arms exist because the resolved JSON was being held and only
+#      partly read. Each of these was measured exiting 0 across all fifty-two
+#      commands before its arm was added. Moving the mount target down to
+#      `/var/lib/postgresql/data` puts `PGDATA` OUTSIDE the named volume — the
+#      container starts, reports healthy, and loses the database on the next
+#      recreate — which is the single most expensive one-token edit available in
+#      this file. Reducing the probe to `pg_isready -U … -d …` drops the `-h`/`-p`
+#      the file itself records as load-bearing: during `initdb` the entrypoint
+#      runs a temporary SOCKET-ONLY server, so the shortened probe reports
+#      healthy before 5432 is listening. Retagging the image `postgres:18` keeps
+#      a valid, explicit, non-`latest` tag while shipping no `vector` extension,
+#      which agent memory needs, so the repository is pinned as well as the tag
+#      shape. And `'127.0.0.1:54329:5432/udp'` satisfied every field the port arm
+#      read while leaving the database answering nothing on 54329; an absent
+#      `protocol` is read as `tcp`, which is what Compose means by it.
+#      Two arms are about this guard failing HONESTLY rather than about the file.
+#      `test[0]` must be `CMD-SHELL`, because the probe is read out of the LAST
+#      element: the equally valid exec form `["CMD","pg_isready",…]` made the
+#      guard report `probes role undefined` and blame a correct healthcheck. And
+#      the `-U`/`-d` agreement requires both sides to be non-empty strings first,
+#      because deleting `-U` from the probe AND `POSTGRES_USER` from
+#      `environment:` made `undefined === undefined` pass — the comparison
+#      succeeding, not the invariant holding.
+#      This is the guard that makes the compose file's CONTENT checked rather
+#      than merely parseable. Two drifts were measured passing all fifty-one
+#      other commands: inverting the publish to `'54329:5432'`, which gives up
+#      the loopback-only guarantee this file calls mandatory on a host that sits
+#      behind a public tunnel, and drifting the healthcheck's
+#      `${POSTGRES_USER:-…}` off the environment's, which makes the probe report
+#      unhealthy forever against a database that started perfectly well. Both are
+#      one-token edits to a file that still parses.
+#      Why the RESOLVED JSON rather than the source text: the healthcheck
+#      arguments arrive already interpolated — `-U "factory" -d "mastracode_web"`
+#      — so they can be compared directly against the resolved environment, which
+#      is the only comparison that answers whether the probe and the server agree
+#      about the role and the database. Grepping the source would compare
+#      `${POSTGRES_USER:-factory}` against `${POSTGRES_USER:-factory}` and learn
+#      nothing about the defaults that actually apply.
+#      The healthcheck floor is DERIVED, never hard-coded:
+#      `start_period + retries * (interval + timeout)`, parsed out of the
+#      resolved duration strings, which is 80 seconds today (`30s` plus 5 x
+#      (`5s` + `5s`)). The `timeout` term is in there because it is real time a
+#      verdict can take: a probe that hangs burns its whole `timeout` before the
+#      interval to the next one even starts, so `start_period + interval *
+#      retries` understates the worst case by `retries * timeout`. Measured
+#      against the earlier formula: `--wait-timeout 60`, set consistently in all
+#      three sites, cleared the 55-second floor and passed while the true
+#      worst-case wait for a verdict is 80 seconds — a bound that reports a slow
+#      but healthy first `initdb` as a failure. 120 sits above 80 deliberately.
+#      Lower `retries`, `interval` or `timeout` and the floor falls with them and
+#      the guard keeps holding, unedited. A hard-coded number would have to be
+#      maintained in two places and would quietly stop meaning anything the first
+#      time the healthcheck changed.
+#      Durations are summed group by group rather than read as one number plus
+#      one unit, because Compose accepts compound spellings: `interval: 1m30s` is
+#      valid and made the single-group reader return `NaN`, which aborted this
+#      guard with "states no floor this guard can derive" against a correct
+#      healthcheck.
+#      The port list and the mount list are each compared as a WHOLE, so a SECOND
+#      published port or a SECOND mount fails too — a new mount is new state and
+#      this file is where that should get noticed. The image arm splits the
+#      reference at the last path segment, so a registry host carrying a port is
+#      not mistaken for a tag — the same reading guard 46 does for the sandbox
+#      Dockerfile — and the repository is everything to the left of that tag.
+#      Verified both ways: passes as committed; fails naming what it found when
+#      the publish is inverted to `'54329:5432'`, when a second port is
+#      published, when `restart` is changed to `always`, when `container_name` is
+#      changed, when the image is retagged `:latest` and when its tag is dropped,
+#      when the healthcheck `-U` default is drifted to `${POSTGRES_USER:-other}`,
+#      when the `-d` default is drifted the same way, when the `app-db` service is
+#      renamed so the file parses with no `app-db` in it, when the file is cut
+#      down to nothing but `name: mastra-factory` — the service-less case guard 49
+#      cannot see — and when `db:up`'s `--wait-timeout` is lowered to `80` and to
+#      `30`, at and under the derived floor; and fails with its own no-docker and
+#      no-compose-plugin messages for those two toolchain states.
+#      Verified both ways for the arms added after the first review: fails naming
+#      the mount found when the target is moved to `/var/lib/postgresql/data`,
+#      when the named volume is swapped for a bind mount, and when a second mount
+#      is added; fails naming the port found when `/udp` is appended to the
+#      publish; fails naming the repository found when the image is retagged
+#      `postgres:18`, which keeps a valid non-`latest` tag; fails naming the host
+#      and port probed when `-h 127.0.0.1 -p 5432` is dropped from the
+#      healthcheck; fails with its own non-empty-strings message when `-U` is
+#      dropped from the probe AND `POSTGRES_USER` from `environment:` together,
+#      and likewise for `-d`/`POSTGRES_DB`, both of which passed before; fails
+#      naming the `CMD-SHELL` requirement, instead of reporting `probes role
+#      undefined`, when the healthcheck is converted to the exec form
+#      `["CMD","pg_isready","-h","127.0.0.1",…]`; PASSES, rather than aborting on
+#      an underivable floor, when `interval` is written as the compound `1m30s`
+#      — and then correctly fails `--wait-timeout 120` against the 505-second
+#      floor that spelling implies; and fails `--wait-timeout 60`, set
+#      consistently in all three sites, which cleared the old `interval x
+#      retries` floor of 55 and does not clear the 80 this service actually
+#      needs.
+#      Added after the second review pass, five arms and one relaxation, each
+#      measured green on all four commands before it existed. (a) The resolved
+#      service set must be exactly `app-db`: everything here reads `app-db` by
+#      key, so a whole second service — its image, its published ports, its state
+#      — was invisible, and FR37/AD-12 make the absence of a `redis` service a
+#      requirement nothing else in this gate can see. (b) `network_mode` must be
+#      absent: host mode makes the `ports:` mapping inert while Compose still
+#      RESOLVES it, so the port arm went on reading `127.0.0.1:54329` out of a
+#      mapping the engine ignores. (c) The resolved `environment` must carry a
+#      non-empty `POSTGRES_PASSWORD`: guard 49 proves the `:?` form is still
+#      SPELLED in the file, never which key it is ASSIGNED to, so renaming the
+#      mapping key beside it to `PGPASSWORD` was green on all four and refuses a
+#      fresh `initdb` — invisible on the existing volume, surfacing on the first
+#      clean deployment. (d) An `@sha256:` digest reference is now accepted in
+#      place of a tag, and the repository read strips the digest first: a
+#      digest-pinned `pgvector/pgvector@sha256:…` — the strongest pin, and the one
+#      guard 46 asks for on the sandbox Dockerfile — was rejected with a message
+#      blaming a repository of `pgvector/pgvector@sha256`. (e) Probe arguments
+#      wrapped in single quotes are unquoted like double-quoted ones; the valid
+#      `-U '${POSTGRES_USER:-factory}'` spelling failed a correct healthcheck
+#      with `probes role "'factory'"`. (f) `dur()` accepts a decimal point, so
+#      the valid `interval: 1.5s` no longer reports "states no floor this guard
+#      can derive"; `1m30s` still parses to 90 and still fails the floor.
+# All four verified both ways in this worktree, break by break, each break
+# reverted immediately, with `git status --porcelain` back to naming only this
+# story's own files at the end. Guard 28, the other command that reads
+# `docker-compose.yml`, was re-checked explicitly rather than assumed: a
+# top-level `name:` adds no `${…}` interpolation, so the key set it extracts is
+# unchanged and it stays green.
 commands = [
   "npm ci --no-audit --no-fund",
   "npm run check",
@@ -1267,6 +1980,16 @@ commands = [
   '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); e=src/mastra/index.ts; c=src/mastra/config; test -f "$e" || { echo "missing $e — AD-2/NFR1 make this exact path the deployment entry, and FR34 says what it may contain"; exit 1; }; st=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -nE "^[^[:space:]]"); test -n "$st" || { echo "$e has no top-level statement outside its comments, so it is not the entry AD-2 requires and this guard would pass vacuously"; exit 1; }; o=$(printf "%s\n" "$st" | grep -vE "^[0-9]+:(import[[:space:]][^;]*(;[[:space:]]*(//.*)?)?\$|[}][[:space:]]*from[[:space:]][^;]*(;[[:space:]]*(//.*)?)?\$|const[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*await[[:space:]]+factory[.]prepare[(][)];[[:space:]]*(//.*)?\$|export[[:space:]]+const[[:space:]]+mastra[[:space:]]*(:[^=]*)?=[^;]*(;[[:space:]]*(//.*)?)?\$|[}][)];[[:space:]]*(//.*)?\$|await[[:space:]]+factory[.]finalize[(][)];[[:space:]]*(//.*)?\$)"); test -z "$o" || { echo "FR34/AD-8 make $e exactly four things — its imports, one const = await factory.prepare();, one export const mastra = new Mastra({ … }); and one await factory.finalize(); — and these top-level lines are none of them. A new MastraFactory({ … }) is environment reading plus instance construction and belongs in $c/factory.ts beside the concerns it assembles; anything else that creeps back here is a read or a constructor the deployer bundles and nothing else looks at. Whole-comment lines and blank lines are not scanned, and a line indented by at least one space is the body of the statement above it. Every pattern above ends at the end of its line, so a second statement appended to one of them is an offending line rather than part of it. Offending lines (line:text):"; printf "%s\n" "$o"; exit 1; }; for pair in "prepare const[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*await[[:space:]]+factory[.]prepare[(][)];" "mastra export[[:space:]]+const[[:space:]]+mastra[[:space:]]*(:[^=]*)?=" "finalize await[[:space:]]+factory[.]finalize[(][)];"; do w=${pair%% *}; x=${pair#* }; n=$(printf "%s\n" "$st" | grep -cE "^[0-9]+:$x"); test "$n" = "1" || { echo "$e carries $n top-level $w statements rather than exactly one. The boot has two halves and one construction between them, each happening ONCE at module load: a second prepare() is a second factory, and a missing finalize() is a deployment that imports cleanly and never starts its workers"; exit 1; }; done; ev=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -nE "process[.]env|process([?][.])?[[][[:space:]]*[\"$q$bt]env[\"$q$bt]"); test -z "$ev" || { echo "$e reads the environment. AD-8 keeps every env read under $c/, beside the module that owns the parsed value, and AD-7 keeps each key at one site — a read here is a second site no census names and a slot no test can reach. Both process.env.X and process indexed by a quoted env count, because this guard only has to prove that THIS file reads nothing. Lines (line:text):"; printf "%s\n" "$ev"; exit 1; }; nw=$(sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$e" | grep -onE "new[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*([[:space:]]*<[^;(]*>)?[[:space:]]*[(]" | grep -vE "^[0-9]+:new[[:space:]]+Mastra[[:space:]]*[(]\$"); test -z "$nw" || { echo "$e constructs something other than its own Mastra. FR34 admits exactly one constructor here — the literal new Mastra( the deployer checkConfigExport plugin reads, which guard 36 owns — and every other instance is construction AD-8 moved into $c/. Type arguments count, so new Foo<T>( is a constructor here too. Constructors found (line:match):"; printf "%s\n" "$nw"; exit 1; }; il=$(grep -E "^import[[:space:]]*[{][^}]*[}][[:space:]]*from[[:space:]]*[\"$q][.]/config/factory[\"$q]" -- "$e"); test -n "$il" || { echo "$e has no named import from ./config/factory. The entry takes the assembled factory as a finished value: a bare side-effect import would still build it and still run every concern module, so the failure would surface as prepare() on an undefined binding rather than as the missing import it is"; exit 1; }; ns=$(printf "%s\n" "$il" | sed "s/^import[^{]*[{]//; s/[}].*\$//" | tr "," "\n" | sed "s/^[[:space:]]*//; s/[[:space:]]*\$//" | grep .); printf "%s\n" "$ns" | grep -qx "factory" || { echo "$e does not import the factory binding BY NAME from ./config/factory — that value is the whole of what the entry takes from $c/. Bindings read from that import line:"; printf "%s\n" "$ns" | sed "s|^|  |"; exit 1; }; exit 0' ''',
   '''sh -c 'q=$(printf "\47"); bt=$(printf "\140"); c=src/mastra/config; s=.env.schema; test -s "$s" || { echo "missing or empty $s — AD-6 makes it the only list of environment keys, and this census derives its key set from it rather than carrying a fourth hand-written list"; exit 1; }; ks=$(grep -oE "^[A-Za-z_][A-Za-z0-9_]*=" "$s" | sed "s/=\$//" | sort -u); kn=$(printf "%s\n" "$ks" | grep -c .); test "$kn" -ge 40 || { echo "only $kn keys could be read out of $s, fewer than this deployment declares — the extraction (a line beginning NAME=) has stopped matching, and a census over a truncated key set passes vacuously"; exit 1; }; for k in MASTRACODE_PUBLIC_URL MASTRACODE_DISPATCH_MAX_IN_FLIGHT MASTRACODE_ALLOWED_ORIGINS; do printf "%s\n" "$ks" | grep -qx "$k" || { echo "$k is not declared in $s, so the exactly-one arm of this census would never run for it. AD-6 keeps every key first-party code reads declared there, and these three are the ones Story 5.6 moved out of the entry"; exit 1; }; done; f=$(git -c core.quotePath=false ls-files "src/*.ts" "src/*.tsx" "src/*.mts" "src/*.cts" "src/*.js" "src/*.jsx" "src/*.mjs" "src/*.cjs"); test -n "$f" || { echo "git lists no first-party source under src/, so this census asserts nothing — AD-4 keeps all first-party TypeScript there"; exit 1; }; for k in $ks; do pd="process[.]env[?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; pb="process[.]env([?][.])?[[][[:space:]]*[\"$q$bt]$k[\"$q$bt][[:space:]]*[]]([[:space:]]*==?)?"; pe="process([?][.])?[[][[:space:]]*[\"$q$bt]env[\"$q$bt][[:space:]]*[]][?]?[.]$k([[:space:]]*==?|[^A-Za-z0-9_=]|\$)"; ps="[{]([^}]*[^A-Za-z0-9_])?$k([^A-Za-z0-9_][^}]*)?[}][[:space:]]*=[[:space:]]*process[.]env"; h=$(printf "%s\n" "$f" | while IFS= read -r p; do sed -E "s,^[[:space:]]*(//|[*]|/[*]).*,," "$p" | grep -onE -e "$pd" -e "$pb" -e "$pe" -e "$ps" | sed "s|^|$p:|"; done); rd=$(printf "%s\n" "$h" | grep -vE "[^=]=\$" | grep .); n=$(printf "%s\n" "$rd" | grep -c .); case " MASTRACODE_PUBLIC_URL MASTRACODE_DISPATCH_MAX_IN_FLIGHT MASTRACODE_ALLOWED_ORIGINS " in *" $k "*) test "$n" = "1" || { echo "AD-7/NFR8 put $k at EXACTLY one literal process.env read site in first-party code; this tree has $n. These are the three keys Story 5.6 moved out of the entry with the factory call, and each has a named home: MASTRACODE_PUBLIC_URL in $c/public-url.ts, because its two consumers sit in different concerns, and the other two in $c/factory.ts, the only thing that takes them. Read sites (file:line:match):"; printf "%s\n" "$rd"; exit 1; }; case "$k" in MASTRACODE_PUBLIC_URL) hm=$c/public-url.ts; hw="its two consumers sit in different concerns, so the value belongs to neither of them";; *) hm=$c/factory.ts; hw="the factory call is the only thing that takes it";; esac; printf "%s\n" "$rd" | grep -q "^$hm:" || { echo "the one read of $k is not in $hm, which is the module AD-8 gives it: $hw. Counting the read anywhere under $c/ would leave the key owned by whichever module happened to take it, and a guard that names a home in its message without checking it asserts less than it claims. Read site (file:line:match):"; printf "%s\n" "$rd"; exit 1; };; *) test "$n" -le 1 || { echo "AD-7/NFR8 put every key declared in $s at AT MOST one literal process.env read site across src/, and $k has $n. Every consumer takes the parsed value by argument or module export; a second read is a second spelling of the same decision, and the two drift with nothing reporting it. The key set here is DERIVED from $s rather than written out in this guard, so a key added tomorrow is censused without anyone remembering this exists. These spellings count as a read — process.env.$k, process.env[quoted $k] in any of the three quote styles, process indexed by a quoted env and then $k, any of those reached through optional chaining, and a { $k } destructuring off process.env — and an assignment does not. An alias (const e = process.env) is not a literal read and is outside what AD-7 says here. A line that is WHOLLY a comment is not scanned. Read sites (file:line:match):"; printf "%s\n" "$rd"; exit 1; };; esac; done; exit 0' ''',
   "npm run build",
+  '''sh -c 'nv=$(npm --version 2>/dev/null); test -n "$nv" || { echo "npm --version produced nothing, so the packageManager pin in package.json has nothing to be compared against"; exit 1; }; node -e "const fs=require(\"fs\");let p;try{p=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"))}catch(e){console.error(\"package.json unreadable or not valid JSON: \"+e.message);process.exit(1)}if(p===null||typeof p!==\"object\"||Array.isArray(p)){console.error(\"package.json parsed but is not a JSON object: \"+JSON.stringify(p)+\" — a manifest that is not an object declares neither packageManager nor workspaces, and reading a property off it would kill this guard with a node stack trace instead of naming the file\");process.exit(1)}const v=process.argv[1];const want=\"npm@\"+v;const dec=p.packageManager;const base=typeof dec===\"string\"?dec.split(\"+\")[0]:dec;if(base!==want){console.error(\"package.json packageManager is \"+JSON.stringify(dec)+\" but the npm running this gate is \"+v+\", so the pin must read \"+want+\" (a +sha512 integrity suffix, which corepack use writes, is accepted and ignored) — a pin nothing compares against is decoration: npm installs cleanly against a pin naming a version that does not exist. Move the pin and the regenerated lockfile together in one commit; until that lands this guard fails EVERY subsequent unattended run.\");process.exit(1)}if(Object.prototype.hasOwnProperty.call(p,\"workspaces\")){console.error(\"package.json declares a workspaces key: \"+JSON.stringify(p.workspaces)+\" — this repo is ONE package; a workspaces key changes what npm ci installs and where node_modules lands, and nothing else here would notice\");process.exit(1)}" "$nv" || exit 1; all=$(git -c core.quotePath=false ls-files); test -n "$all" || { echo "git lists no tracked files, so the second-package census in this guard would pass vacuously"; exit 1; }; off=$(printf "%s\n" "$all" | grep -E "(^|/)(pnpm-workspace\.yaml|pnpm-workspace\.yml|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|bun\.lock|npm-shrinkwrap\.json|lerna\.json|turbo\.json|nx\.json|rush\.json)$"); test -z "$off" || { echo "tracked multi-package or second-package-manager file, which this single-package npm repo has none of: $off"; exit 1; }; sub=$(printf "%s\n" "$all" | grep -E "/(package|package-lock)\.json$"); test -z "$sub" || { echo "tracked package.json or package-lock.json below the repository root: $sub — that is a second package, manifest or lockfile either way, and this repo is ONE package. A nested lockfile on its own is the same second install: npm resolves it against whatever manifest is nearest, and the root lockfile this gate pins says nothing about it"; exit 1; }' ''',
+  '''sh -c 's=.env.schema; test -f "$s" || { echo "missing $s — AD-6 makes it the only list of environment keys, and varlock loads a tree without one without complaint, so this @public census would otherwise blame the two POSTGRES keys for a schema that is not there"; exit 1; }; test -s "$s" || { echo "empty $s — an empty schema loads clean and declares nothing, which this census would otherwise report as the two POSTGRES keys having lost their # @public lines"; exit 1; }; out=$(npx varlock load --format json-full) || { echo "npx varlock load --format json-full exited non-zero against $s, so the schema itself is broken — fix it; the keys this guard censuses cannot be judged against a schema varlock will not parse"; exit 1; }; printf "%s" "$out" | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{let c;try{c=JSON.parse(s).config||{}}catch(e){console.error(\"varlock load --format json-full produced no parseable output, so this @public census would assert nothing: \"+e.message);process.exit(1)}for(const k of [\"POSTGRES_USER\",\"POSTGRES_DB\"]){if(!c[k]){console.error(\"env key absent from the resolved schema: \"+k+\" — varlock parsed .env.schema and this key is not in it at all, so the fix is to restore the DECLARATION, not a # @public line above one that is already there\");process.exit(1)}if(c[k].isSensitive!==false){console.error(\"env key not marked @public in .env.schema: \"+k+\" — the schema header sets @defaultSensitive=true, so the moment the # @public line above it is dropped varlock masks the value in the stdout of varlock run -- mastra start and in every varlock dump, and docker compose reads these two by sight\");process.exit(1)}}})"' ''',
+  '''sh -c 'd=sandbox/factory-sandbox.Dockerfile; test -s "$d" || { echo "missing or empty $d — NFR19 makes this the sandbox image, and this guard asserts what it may not contain"; exit 1; }; test -f "$d" || { echo "$d is not a regular file — a grep over a directory or a device reports no matches, and an absence-of-match guard would then pass vacuously on a subject it never read"; exit 1; }; m=$(grep -nEi "^[[:space:]]*(ONBUILD[[:space:]]+)?(COPY|ADD)[[:space:]]" "$d"); test -z "$m" || { echo "$d bakes content into the image: $m — the sandbox carries a generic toolchain only; the repository is CLONED into /workspace at run time, never COPYed or ADDed at build time, and a baked copy is stale the moment the tree moves. ONBUILD COPY/ADD counts: it defers the same bake to every derived build rather than avoiding it"; exit 1; }' ''',
+  '''sh -c 'd=sandbox/factory-sandbox.Dockerfile; test -s "$d" || { echo "missing or empty $d — this guard asserts its one WORKDIR and its one explicitly tagged FROM"; exit 1; }; test -f "$d" || { echo "$d is not a regular file — a grep over a directory or a device reports no matches, and the WORKDIR and FROM counts would then be read as zero on a subject this guard never opened"; exit 1; }; wl=$(grep -nEi "^[[:space:]]*WORKDIR[[:space:]]" "$d"); wn=$(printf "%s\n" "$wl" | grep -c .); test "$wn" = "1" || { echo "$d must carry exactly one WORKDIR instruction, found $wn: $wl — sandbox/README.md ties MASTRACODE_SANDBOX_WORKDIR to it by sight, and zero or two of them make that binding unreadable"; exit 1; }; wd=$(printf "%s\n" "$wl" | sed -E "s/^[0-9]+:[[:space:]]*[Ww][Oo][Rr][Kk][Dd][Ii][Rr][[:space:]]+//" | tr -d "\042\047\015" | tr "\011" " "); wd=${wd%% *}; test "$wd" = "/workspace" || { echo "$d WORKDIR is $wd, not /workspace — that is the clone path the Factory mounts and the one sandbox/README.md documents"; exit 1; }; fl=$(grep -nEi "^[[:space:]]*FROM[[:space:]]" "$d"); fn=$(printf "%s\n" "$fl" | grep -c .); test "$fn" = "1" || { echo "$d must carry exactly one FROM instruction, found $fn: $fl — a multi-stage sandbox image is a different artifact from the one sandbox/README.md documents"; exit 1; }; ref=$(printf "%s\n" "$fl" | sed -E "s/^[0-9]+:[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+//" | tr -d "\042\047\015" | tr "\011" " "); while :; do case "$ref" in "--"*" "*) ref=${ref#* };; *) break;; esac; done; ref=${ref%% *}; if printf "%s" "$ref" | grep -q "[\$]"; then echo "$d FROM $ref resolves its base through a build argument or variable, so the tag is whatever ARG default or --build-arg happens to be in force at build time and this guard can read nothing — the base must be a literal tag or an @sha256: digest written here"; exit 1; fi; seg=${ref##*/}; case "$seg" in *@sha256:*) dg=${seg#*@sha256:}; printf "%s" "$dg" | grep -qE "^[0-9a-f]{64}$" || { echo "$d FROM $ref carries a malformed @sha256: digest: $dg"; exit 1; };; *:*) tg=${seg#*:}; test -n "$tg" || { echo "$d FROM $ref has an empty tag"; exit 1; }; test "$tg" != "latest" || { echo "$d FROM $ref is pinned to the moving tag latest — the base must carry an explicit immutable tag or an @sha256: digest, or a rebuild of the same Dockerfile is silently a different image"; exit 1; };; *) echo "$d FROM $ref carries no explicit tag and no @sha256: digest, so docker resolves it to latest — pin it, or a rebuild of the same Dockerfile is silently a different image"; exit 1;; esac' ''',
+  '''sh -c 'dq=$(printf "\42"); sq=$(printf "\47"); qq="[$dq$sq]"; for r in sandbox/README.md README.md; do test -s "$r" || { echo "missing or empty $r — NFR19 puts the date-stamped build and run commands for the sandbox image in sandbox/README.md, and step 6 of README.md is where the operator copies the tag the server actually runs into .env"; exit 1; }; test -f "$r" || { echo "$r is not a regular file — a grep over a directory or a device reports no matches, and this absence-of-match guard would then pass vacuously"; exit 1; }; m=$(grep -nE "factory-sandbox:latest|(-t|--tag)[[:space:]=]*$qq?factory-sandbox$qq?([[:space:]]|\$)|docker[[:space:]]+(run|image|tag)[[:space:]]+([^[:space:]]+[[:space:]]+)*$qq?factory-sandbox$qq?([[:space:]]|\$)" "$r"); test -z "$m" || { echo "$r documents an untagged or latest sandbox image: $m — NFR19 fixes the form at factory-sandbox:YYYY-MM-DD, and an untagged factory-sandbox is docker shorthand for factory-sandbox:latest, which is the one tag the operator can never tell two builds apart by"; exit 1; }; done' ''',
+  '''sh -c 'node -e "const fs=require(\"fs\");let p;try{p=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"))}catch(e){console.error(\"package.json unreadable or not valid JSON: \"+e.message);process.exit(1)}if(p===null||typeof p!==\"object\"||Array.isArray(p)){console.error(\"package.json parsed but is not a JSON object: \"+JSON.stringify(p)+\" — a manifest that is not an object declares no scripts at all, and reading a property off it would kill this guard with a node stack trace instead of naming the file\");process.exit(1)}const s=(p.scripts||{}).start;if(typeof s!==\"string\"||s.indexOf(\"varlock run --\")===-1){console.error(\"package.json scripts.start is \"+JSON.stringify(s)+\" — it must go through varlock run --, the ONLY path on which .env.schema is applied at all: drop the prefix and the server boots on whatever the ambient environment happens to hold, every default, type and required check in the schema is skipped, and nothing fails loudly\");process.exit(1)}"' ''',
+  '''sh -c 'd=$(command -v docker 2>/dev/null); test -n "$d" || { test -x /opt/homebrew/bin/docker && d=/opt/homebrew/bin/docker; }; test -n "$d" || { echo "no docker on PATH and none at /opt/homebrew/bin/docker, so docker-compose.yml is UNVERIFIED rather than satisfied — nothing else in this gate parses that file, and a typo in it would ship green. Put the engine on PATH: ops/factory-start.sh and both launchagent plists bake /opt/homebrew/bin in for the same reason"; exit 1; }; "$d" compose version >/dev/null 2>&1 || { echo "the docker at $d has no compose subcommand, so docker-compose.yml is UNVERIFIED rather than satisfied — the engine and the Compose CLI plugin are separate installs, and without this probe the next command would report a parse failure and blame a correct file. Link the plugin in as step 1 of ops/README.md shows: mkdir -p ~/.docker/cli-plugins, then symlink docker-compose into it"; exit 1; }; c=docker-compose.yml; test -f "$c" || { echo "missing $c, or it is not a regular file — it is the entire definition of the app-db service this deployment runs on"; exit 1; }; test -s "$c" || { echo "$c is empty. Compose rejects an empty file on its own, with an empty compose file diagnostic; this arm names WHICH file is empty rather than leaving that to be inferred from the engine output"; exit 1; }; rq=$(grep -oE "[$][{][A-Za-z_][A-Za-z0-9_]*:[?]" "$c" | sed "s/^..//; s/..$//" | sort -u | tr "\n" ","); test "$rq" = "POSTGRES_PASSWORD," || { echo "the keys $c marks REQUIRED with the :? interpolation form are [$rq], and they must be exactly [POSTGRES_PASSWORD,]. That key carries no default on purpose — a committed password would be a published credential — so rewriting it to the defaulting form still parses, still resolves, and hands every fresh deployment the same known password. It must also stay the ONLY required key: guards 49, 50 and 52 each export one throwaway POSTGRES_PASSWORD of their own before calling docker compose config, so a second required key fails all three in every worktree, where no .env exists"; exit 1; }; POSTGRES_PASSWORD=gate-throwaway-not-a-real-password "$d" compose config -q || { echo "docker compose could not parse the project rooted at $c — its own diagnostic is above. Every up, down, ps and logs against this deployment fails the same way, and no other command in this gate would have noticed. This guard passes no -f on purpose, so it resolves exactly what npm run db:up resolves: $c PLUS any docker-compose.override.yml Compose merges automatically and any COMPOSE_FILE set in .env. Under -f both are invisible here, and the operator would be running a project this gate never looked at"; exit 1; }; exit 0' ''',
+  '''sh -c 'd=$(command -v docker 2>/dev/null); test -n "$d" || { test -x /opt/homebrew/bin/docker && d=/opt/homebrew/bin/docker; }; test -n "$d" || { echo "no docker on PATH and none at /opt/homebrew/bin/docker, so the Compose project name and the data volume it prefixes are UNVERIFIED rather than satisfied. Put the engine on PATH: ops/factory-start.sh and both launchagent plists bake /opt/homebrew/bin in for the same reason"; exit 1; }; "$d" compose version >/dev/null 2>&1 || { echo "the docker at $d has no compose subcommand, so the Compose project name and the data volume it prefixes are UNVERIFIED rather than satisfied — the engine and the Compose CLI plugin are separate installs. Link the plugin in as step 1 of ops/README.md shows: mkdir -p ~/.docker/cli-plugins, then symlink docker-compose into it"; exit 1; }; c=docker-compose.yml; test -f "$c" || { echo "missing $c, or it is not a regular file — this guard reads the project name and volume set docker compose resolves from it"; exit 1; }; test -s "$c" || { echo "$c is empty, so it pins no project name at all"; exit 1; }; q=$(printf "\47"); dq=$(printf "\42"); grep -qxE "name:[[:space:]]*[$dq$q]?mastra-factory[$dq$q]?[[:space:]]*(#.*)?" "$c" || { echo "$c carries no column-0 name: mastra-factory line — single or double quoting around the value and a trailing # comment are all accepted, because Compose resolves every one of those to the same project. The resolved read below cannot stand in for this one: Compose falls back to the checkout directory basename, and the main checkout IS named mastra-factory, so there the resolved name comes out right with no name: key in the file at all and this invariant would hold only by accident of where the gate was run"; exit 1; }; test -f .env && cpn=$(grep -E "^[[:space:]]*COMPOSE_PROJECT_NAME[[:space:]]*=" .env | tail -1 | sed -E "s/^[[:space:]]*COMPOSE_PROJECT_NAME[[:space:]]*=[[:space:]]*//; s/[[:space:]]*$//; s/^[$dq$q]//; s/[$dq$q]$//") && test -n "$cpn" && test "$cpn" != "mastra-factory" && { echo ".env at the repository root declares COMPOSE_PROJECT_NAME=$cpn, which OVERRIDES the name: key in docker-compose.yml — measured: COMPOSE_PROJECT_NAME=someother makes docker compose config resolve the project to someother. Remove it, or set it to mastra-factory, which this arm accepts because it names the very project the file pins. The project name is what prefixes the named volume, and that volume is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md)"; exit 1; }; j=$(POSTGRES_PASSWORD=gate-throwaway-not-a-real-password "$d" compose config --format json) || { echo "docker compose could not resolve $c to JSON — its own diagnostic is above"; exit 1; }; printf "%s" "$j" | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{let j;try{j=JSON.parse(s)}catch(e){console.error(\"docker compose config --format json emitted output this guard could not parse: \"+e.message);process.exit(1)}if(j===null||typeof j!==\"object\"||Array.isArray(j)){console.error(\"the resolved compose config is not a JSON object: \"+JSON.stringify(j));process.exit(1)}const want=\"mastra-factory\";const stake=\" The project name is what prefixes the named volume, and that volume is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md) — an unpinned project follows the checkout directory basename, so a renamed, moved or worktree copy of this repo comes up on a DIFFERENT, empty volume.\";if(j.name!==want){console.error(\"docker compose resolves the project name to \"+JSON.stringify(j.name)+\", not \"+JSON.stringify(want)+\", so the data volume would be \"+JSON.stringify(j.name+\"_mastracode-web-pgdata\")+\" instead of \"+JSON.stringify(want+\"_mastracode-web-pgdata\")+\". Either the top-level name: key in docker-compose.yml is missing or changed, or a docker-compose.override.yml merged over it changes it, or COMPOSE_PROJECT_NAME is set in this environment — that variable WINS over the file, so editing the file will not fix it.\"+stake);process.exit(1)}const v=j.volumes;if(v===null||typeof v!==\"object\"||Array.isArray(v)){console.error(\"the resolved compose config declares no volumes object: \"+JSON.stringify(v)+\".\"+stake);process.exit(1)}const got=Object.keys(v).sort().map(k=>k+\" -> \"+((v[k]||{}).name));const exp=[\"mastracode-web-pgdata -> mastra-factory_mastracode-web-pgdata\"];if(got.length!==exp.length||got.some((x,i)=>x!==exp[i])){console.error(\"docker compose resolves the volume set to \"+JSON.stringify(got)+\", not \"+JSON.stringify(exp)+\".\"+stake);process.exit(1)}const vd=v[\"mastracode-web-pgdata\"]||{};if((vd.driver!==undefined&&vd.driver!==null&&vd.driver!==\"local\")||vd.driver_opts!==undefined){console.error(\"the mastracode-web-pgdata volume resolves driver \"+JSON.stringify(vd.driver)+\" and driver_opts \"+JSON.stringify(vd.driver_opts)+\" — it must be the default local driver with no driver_opts. A driver_opts block spelling type none, o bind, device <path> keeps this volume NAME intact and keeps guard 52 mount arm satisfied, while moving the bytes to a host directory outside docker volume management: the resolved name this arm compares stops describing where the data actually lives.\"+stake);process.exit(1)}})" || exit 1; exit 0' ''',
+  '''sh -c 'node -e "const fs=require(\"fs\");let p;try{p=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"))}catch(e){console.error(\"package.json unreadable or not valid JSON: \"+e.message);process.exit(1)}if(p===null||typeof p!==\"object\"||Array.isArray(p)){console.error(\"package.json parsed but is not a JSON object: \"+JSON.stringify(p)+\" — a manifest that is not an object declares no scripts at all, and reading a property off it would kill this guard with a node stack trace instead of naming the file\");process.exit(1)}const bad=m=>{console.error(m);process.exit(1)};const Q1=String.fromCharCode(39);const TOK=x=>String(x).split(Q1).join(\" \").replace(/[\"]/g,\" \").replace(/(&&|\|\||;|\|)/g,function(m){return \" \"+m+\" \"}).split(/[ \t\n\r]+/).filter(Boolean);const VF=[\"-f\",\"--file\",\"-p\",\"--project-name\",\"--project-directory\",\"--env-file\",\"--profile\",\"-H\",\"--host\",\"--context\",\"--progress\",\"--ansi\"];const SKIP=(t,j)=>{while(j<t.length&&t[j].charAt(0)===\"-\"){if(VF.indexOf(t[j])!==-1){j+=2}else{j++}}return j};const DW=(t,k)=>{let j=-1;if(t[k]===\"docker\"){const m=SKIP(t,k+1);if(t[m]===\"compose\"){j=m+1}}else if(t[k]===\"docker-compose\"){j=k+1}if(j===-1){return -1}while(j<t.length&&t[j].charAt(0)===\"-\"){if(VF.indexOf(t[j])!==-1){j+=2}else{j++}}return t[j]===\"down\"?j:-1};const hasDown=x=>{const t=TOK(x);for(let k=0;k<t.length;k++){if(DW(t,k)!==-1){return true}}return false};const volDown=x=>{const t=TOK(x);for(let k=0;k<t.length;k++){const j=DW(t,k);if(j===-1){continue}for(let m=j+1;m<t.length;m++){const w=t[m];if(w===\"&&\"||w===\"||\"||w===\";\"||w===\"|\"){break}if(w.indexOf(\"--volumes\")===0){return true}if(w.charAt(0)===\"-\"&&w.charAt(1)!==\"-\"&&w.indexOf(\"v\")!==-1){return true}}}return false};const volRm=x=>{const t=TOK(x);for(let k=0;k<t.length;k++){if(t[k]!==\"docker\"){continue}const m=SKIP(t,k+1);if(t[m]===\"volume\"&&(t[m+1]===\"rm\"||t[m+1]===\"prune\")){return true}if(t[m]===\"system\"&&t[m+1]===\"prune\"){return true}}return false};const sc=p.scripts;const ok=!(sc===null||typeof sc!==\"object\"||Array.isArray(sc));const s=ok?sc[\"db:up\"]:undefined;const dn=ok?sc[\"db:down\"]:undefined;const why=\" A bare --wait defaults to --wait-timeout 0, which Compose documents as waiting forever. Measured on Compose 5.5.1: a container crash-looping after a failed initdb is classified unhealthy and ENDS the wait in about a second with rc=1 and container is unhealthy on stderr — but a container held in health: starting does not end it, and a service with a long start_period and an always-failing probe kept up -d --wait running with no verdict until it was killed from outside. The timeout is what ends that one: the same service with --wait-timeout 15 exited at exactly 15s with application not healthy after 15s.\";if(typeof s!==\"string\"||s.indexOf(\"docker compose up\")===-1){bad(\"package.json scripts[db:up] is \"+JSON.stringify(s)+\" — it must invoke docker compose up.\"+why)}if(hasDown(s)){bad(\"package.json scripts[db:up] is \"+JSON.stringify(s)+\" — it must not also run a docker compose down, in any spelling: the legacy docker-compose binary, global flags on either side of the compose word, quoting, and a shell operator glued straight onto a flag are all detected. docker-compose.yml now pins the project name, so a down here, and above all a down -v, reaches the ONE live project from ANY checkout, every story worktree under .bmad-loop/runs/ included; that volume is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md)\")}const t=s.split(/[ \t]+/).filter(Boolean);if(t.indexOf(\"--wait\")===-1){bad(\"package.json scripts[db:up] is \"+JSON.stringify(s)+\" — it carries no --wait, so it returns as soon as the container is created and waits for nothing at all.\"+why)}const i=t.indexOf(\"--wait-timeout\");let raw;if(i!==-1){raw=t[i+1]}else{const e=t.filter(x=>x.indexOf(\"--wait-timeout=\")===0)[0];if(e!==undefined){raw=e.slice(15)}}const digits=typeof raw===\"string\"&&raw.length>0&&raw.split(\"\").every(ch=>ch>=\"0\"&&ch<=\"9\");if(!digits||Number(raw)<=0){bad(\"package.json scripts[db:up] is \"+JSON.stringify(s)+\" — it must carry --wait-timeout followed by a positive integer number of seconds; the value found was \"+JSON.stringify(raw)+\".\"+why)}if(typeof dn!==\"string\"||dn.indexOf(\"docker compose down\")===-1){bad(\"package.json scripts[db:down] is \"+JSON.stringify(dn)+\" — it must invoke docker compose down; it is the teardown both README.md and ops/README.md tell the operator to run\")}if(volDown(dn)){bad(\"package.json scripts[db:down] is \"+JSON.stringify(dn)+\" — it must NOT carry -v in any spelling — --volumes, --volumes=true, and a clustered short flag such as -vt 10 included. With the project name pinned in docker-compose.yml that flag deletes the live data volume from ANY checkout, and it is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md)\")}for(const sk of Object.keys(ok?sc:{})){const sv=sc[sk];if(typeof sv===\"string\"&&volRm(sv)){bad(\"package.json scripts[\"+sk+\"] is \"+JSON.stringify(sv)+\" — no script in this manifest may remove docker volumes directly. docker volume rm, docker volume prune and docker system prune all reach the named volume from ANY checkout now that docker-compose.yml pins the project name, and the docker compose down ban beside this one does not cover any of them. That volume is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md)\")}if(typeof sv===\"string\"&&volDown(sv)){bad(\"package.json scripts[\"+sk+\"] is \"+JSON.stringify(sv)+\" — no script in this manifest may run a volume-removing docker compose down. docker-compose.yml pins the project name, so that command reaches the ONE live project from ANY checkout, every story worktree under .bmad-loop/runs/ included, and the volume it removes is the only copy of projects, work items, sessions, memory and tokens, with no backups (AGENTS.md)\")}}const occ=x=>{const out=[];let k=0;for(;;){const q=x.indexOf(\"--wait-timeout\",k);if(q===-1){break}k=q+14;let z=k;while(z<x.length&&(x.charAt(z)===\" \"||x.charAt(z)===\"=\"||x.charAt(z)===\"\t\"||x.charAt(z)===\"\n\"||x.charAt(z)===\"\r\")){z++}let n=\"\";while(z<x.length&&x.charAt(z)>=\"0\"&&x.charAt(z)<=\"9\"){n+=x.charAt(z);z++}out.push(n)}return out};for(const f of [\"docker-compose.yml\",\"ops/README.md\"]){let txt;try{txt=fs.readFileSync(f,\"utf8\")}catch(e){bad(f+\" is unreadable: \"+e.message+\" — this guard reconciles the --wait-timeout value restated there against package.json scripts[db:up]\")}const found=occ(txt).filter(x=>x!==\"\");if(found.length===0){bad(f+\" states no --wait-timeout value at all, so it no longer documents the bound scripts[db:up] carries (\"+raw+\") and the two can drift apart unnoticed\")}const off=found.filter(x=>x!==raw);if(off.length>0){bad(f+\" states --wait-timeout \"+JSON.stringify(off)+\" but package.json scripts[db:up] carries \"+JSON.stringify(raw)+\" — the number is restated as operator-facing prose in that file and the two must agree\")}}let rm;try{rm=fs.readFileSync(\"README.md\",\"utf8\")}catch(e){bad(\"README.md is unreadable: \"+e.message+\" — this guard reconciles the bound restated there in prose against package.json scripts[db:up]\")}const pm=rm.match(/waits up to [0-9]+ seconds/g)||[];if(pm.length===0){bad(\"README.md no longer states the db:up bound in the prose form waits up to <N> seconds, so the number the operator reads there can drift from scripts[db:up] (\"+raw+\") unnoticed. README.md carries no --wait-timeout flag text at all, so the flag scan above cannot see that sentence and this arm is what covers it\")}const po=pm.filter(x=>x!==\"waits up to \"+raw+\" seconds\");if(po.length>0){bad(\"README.md says \"+JSON.stringify(po)+\" but package.json scripts[db:up] carries \"+JSON.stringify(raw)+\" — the bound is restated as operator-facing prose there and the two must agree\")}"' ''',
+  '''sh -c 'd=$(command -v docker 2>/dev/null); test -n "$d" || { test -x /opt/homebrew/bin/docker && d=/opt/homebrew/bin/docker; }; test -n "$d" || { echo "no docker on PATH and none at /opt/homebrew/bin/docker, so the resolved app-db service is UNVERIFIED rather than satisfied. Put the engine on PATH: ops/factory-start.sh and both launchagent plists bake /opt/homebrew/bin in for the same reason"; exit 1; }; "$d" compose version >/dev/null 2>&1 || { echo "the docker at $d has no compose subcommand, so the resolved app-db service is UNVERIFIED rather than satisfied — the engine and the Compose CLI plugin are separate installs. Link the plugin in as step 1 of ops/README.md shows: mkdir -p ~/.docker/cli-plugins, then symlink docker-compose into it"; exit 1; }; c=docker-compose.yml; test -f "$c" || { echo "missing $c, or it is not a regular file — this guard reads the app-db service docker compose resolves from it"; exit 1; }; test -s "$c" || { echo "$c is empty, so it resolves no app-db service"; exit 1; }; j=$(POSTGRES_PASSWORD=gate-throwaway-not-a-real-password "$d" compose config --format json) || { echo "docker compose could not resolve $c to JSON — its own diagnostic is above"; exit 1; }; printf "%s" "$j" | node -e "const fs=require(\"fs\");let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{const bad=m=>{console.error(m);process.exit(1)};let j;try{j=JSON.parse(s)}catch(e){bad(\"docker compose config --format json emitted output this guard could not parse: \"+e.message)}if(j===null||typeof j!==\"object\"||Array.isArray(j)){bad(\"the resolved compose config is not a JSON object: \"+JSON.stringify(j))}const ss=j.services;if(ss===null||typeof ss!==\"object\"||Array.isArray(ss)){bad(\"the resolved compose config declares no services object: \"+JSON.stringify(ss))}const v=ss[\"app-db\"];if(v===null||typeof v!==\"object\"||Array.isArray(v)){bad(\"the resolved compose config declares no app-db service — the services it does resolve are \"+JSON.stringify(Object.keys(ss))+\". A file that parses but defines no app-db satisfies the parse guard and is not a deployment\")}const svc=Object.keys(ss).sort();if(svc.length!==1||svc[0]!==\"app-db\"){bad(\"the resolved compose config declares services \"+JSON.stringify(svc)+\" — it must declare exactly one, app-db. This deployment is single-datastore by design: FR37 and AD-12 make the ABSENCE of a redis service a requirement, and nothing else in this gate can see a compose service at all. A second service brings its own image, its own published ports and its own state, and every other arm here reads app-db by key and would never look at it\")}if(v.network_mode!==undefined&&v.network_mode!==null&&v.network_mode!==\"\"){bad(\"app-db resolves network_mode to \"+JSON.stringify(v.network_mode)+\" — it must declare none. Host network mode makes the ports: mapping inert while Compose still RESOLVES it, so the port arm below goes on reading 127.0.0.1:54329 out of a mapping the engine ignores, and postgres listens on every interface of the host instead. This host sits behind a public tunnel, which is the whole reason the publish is loopback-only\")}const ports=v.ports;if(!Array.isArray(ports)||ports.length!==1){bad(\"app-db publishes \"+JSON.stringify(ports)+\" — it must publish exactly one port\")}const pt=ports[0]||{};const proto=(pt.protocol===undefined||pt.protocol===null||pt.protocol===\"\")?\"tcp\":String(pt.protocol);if(String(pt.host_ip)!==\"127.0.0.1\"||String(pt.published)!==\"54329\"||String(pt.target)!==\"5432\"||proto!==\"tcp\"){bad(\"app-db resolves its published port to \"+JSON.stringify(pt)+\" — it must be host_ip 127.0.0.1, published 54329, target 5432, protocol tcp. An absent protocol means tcp; a /udp suffix parses and publishes, and leaves the database answering nothing at all on 54329. This host sits behind a public tunnel, so the database must never answer on the LAN or the public interface; an empty host_ip publishes on every interface, and an inverted 54329:5432 spelling is one of the two drifts this guard exists to catch\")}const mts=v.volumes;if(!Array.isArray(mts)||mts.length!==1){bad(\"app-db resolves its mounts to \"+JSON.stringify(mts)+\" — it must declare exactly one; a second mount is new state this file is where to notice\")}const mt=mts[0]||{};if(String(mt.type)!==\"volume\"||String(mt.source)!==\"mastracode-web-pgdata\"||String(mt.target)!==\"/var/lib/postgresql\"){bad(\"app-db resolves its mount to \"+JSON.stringify(mt)+\" — it must be type volume, source mastracode-web-pgdata, target /var/lib/postgresql. postgres:18+ images keep the cluster in a version-specific subdirectory of that path, so moving the target down to /var/lib/postgresql/data puts PGDATA OUTSIDE the named volume: the container still starts, still reports healthy, and loses the entire database the next time it is recreated. A bind mount in place of the named volume is the same class of change\")}if(v.restart!==\"unless-stopped\"){bad(\"app-db restart is \"+JSON.stringify(v.restart)+\", not unless-stopped — the database must come back with the host and after any crash unless an operator stopped it on purpose\")}if(v.container_name!==\"mastracode-web-db\"){bad(\"app-db container_name is \"+JSON.stringify(v.container_name)+\", not mastracode-web-db — README.md and ops/README.md name that container in every diagnostic and recovery command they print\")}const img=v.image;const ims=typeof img===\"string\"?img:\"\";const dgi=ims.indexOf(\"@sha256:\");const base=dgi===-1?ims:ims.slice(0,dgi);const dg=dgi===-1?\"\":ims.slice(dgi);const seg=base.split(\"/\").pop();const ci=seg.lastIndexOf(\":\");const tag=ci===-1?\"\":seg.slice(ci+1);if(typeof img!==\"string\"||(tag===\"\"&&dg===\"\")||tag===\"latest\"){bad(\"app-db image is \"+JSON.stringify(img)+\" — it must carry an explicit tag that is not latest, which docker also resolves an untagged reference to; a moving tag is the one tag a bad image cannot be rolled back from. An @sha256: digest reference is accepted in place of a tag and pins harder, which is the same reading guard 46 gives the sandbox Dockerfile\")}const repo=ci===-1?base:base.slice(0,base.length-(seg.length-ci));if(repo!==\"pgvector/pgvector\"){bad(\"app-db image repository is \"+JSON.stringify(repo)+\", not pgvector/pgvector — the full reference found was \"+JSON.stringify(img)+\". A plain postgres image is correctly tagged, starts, and reports healthy, but ships no vector extension: agent memory (recall and observational memory) stores its embeddings in this database and needs it, so postgres:18 passes every other arm here and fails only at runtime\")}const env=v.environment;if(env===null||typeof env!==\"object\"||Array.isArray(env)){bad(\"app-db resolves no environment object: \"+JSON.stringify(env))}const hc=v.healthcheck;if(hc===null||typeof hc!==\"object\"||Array.isArray(hc)){bad(\"app-db resolves no healthcheck: \"+JSON.stringify(hc)+\" — with none, docker compose up --wait has nothing to wait on\")}const tt=hc.test;if(!Array.isArray(tt)||tt.length<2||typeof tt[tt.length-1]!==\"string\"){bad(\"app-db healthcheck test resolves to \"+JSON.stringify(tt)+\" — this guard reads the probe arguments out of the last element\")}if(tt[0]!==\"CMD-SHELL\"){bad(\"app-db healthcheck test resolves to \"+JSON.stringify(tt)+\" — its first element must be CMD-SHELL. The exec form [CMD, pg_isready, ...] is valid Compose, but it puts every argument in its own element, and this guard reads the whole probe out of the LAST one — against that form it would report a perfectly correct healthcheck as probing role undefined. Keep the CMD-SHELL form, or teach this arm to read the other one\")}const Q=String.fromCharCode(34);const SQ=String.fromCharCode(39);const unq=x=>{let y=String(x);if(y.slice(0,1)===Q||y.slice(0,1)===SQ){y=y.slice(1)}if(y.slice(-1)===Q||y.slice(-1)===SQ){y=y.slice(0,-1)}return y};const w=tt[tt.length-1].split(/[ \t]+/).filter(Boolean);const arg=fl=>{const k=w.indexOf(fl);return k===-1?undefined:unq(w[k+1])};const hu=arg(\"-U\");const hd=arg(\"-d\");const hh=arg(\"-h\");const hp=arg(\"-p\");if(hh!==\"127.0.0.1\"||hp!==\"5432\"){bad(\"the app-db healthcheck probes host \"+JSON.stringify(hh)+\" port \"+JSON.stringify(hp)+\" — it must probe -h 127.0.0.1 -p 5432, over TCP. While initdb runs on a fresh volume the entrypoint brings up a temporary SOCKET-ONLY server, so a probe that drops the host and port answers on the Unix socket and reports healthy before 5432 is listening at all — docker compose up --wait then returns success on a database nothing outside the container can reach\")}const ne=x=>typeof x===\"string\"&&x!==\"\";if(!ne(hu)||!ne(env.POSTGRES_USER)){bad(\"the app-db healthcheck probes role \"+JSON.stringify(hu)+\" and the service resolves POSTGRES_USER to \"+JSON.stringify(env.POSTGRES_USER)+\" — both must be non-empty strings. Dropping -U from the probe AND POSTGRES_USER from environment: makes the two sides agree by both being absent, which is the comparison passing rather than the invariant holding\")}if(hu!==env.POSTGRES_USER){bad(\"the app-db healthcheck probes role \"+JSON.stringify(hu)+\" but the service resolves POSTGRES_USER to \"+JSON.stringify(env.POSTGRES_USER)+\" — the probe would report unhealthy forever against a database that started correctly, and docker compose up --wait would give up on a container that is fine\")}if(hd!==env.POSTGRES_DB){bad(\"the app-db healthcheck probes database \"+JSON.stringify(hd)+\" but the service resolves POSTGRES_DB to \"+JSON.stringify(env.POSTGRES_DB)+\" — the probe would report unhealthy forever against a database that started correctly, and docker compose up --wait would give up on a container that is fine\")}if(!ne(hd)||!ne(env.POSTGRES_DB)){bad(\"the app-db healthcheck probes database \"+JSON.stringify(hd)+\" and the service resolves POSTGRES_DB to \"+JSON.stringify(env.POSTGRES_DB)+\" — both must be non-empty strings. Dropping -d from the probe AND POSTGRES_DB from environment: makes the two sides agree by both being absent, which is the comparison passing rather than the invariant holding\")}if(!ne(env.POSTGRES_PASSWORD)){bad(\"the app-db service resolves POSTGRES_PASSWORD to \"+JSON.stringify(env.POSTGRES_PASSWORD)+\" — it must be a non-empty string. Guard 49 asserts the :? REQUIRED interpolation is still spelled in the file text, but it never asks which key that interpolation is ASSIGNED to: renaming the mapping key beside it, to PGPASSWORD say, leaves guard 49 green and this service resolving no POSTGRES_PASSWORD at all, and the postgres entrypoint then refuses to initialise with superuser password is not specified. An existing volume hides it completely; it surfaces on the first clean deployment, which is the one with no data to fall back on\")}const dur=x=>{if(typeof x===\"number\"){return x}if(typeof x!==\"string\"){return NaN}const F={\"\":1,ns:1e-9,us:1e-6,ms:0.001,s:1,m:60,h:3600};let k=0;let tot=0;let any=false;while(k<x.length){let n=\"\";while(k<x.length&&((x.charAt(k)>=\"0\"&&x.charAt(k)<=\"9\")||(x.charAt(k)===\".\"&&n!==\"\"&&n.indexOf(\".\")===-1))){n+=x.charAt(k);k++}if(n===\"\"||n.slice(-1)===\".\"){return NaN}let u=\"\";while(k<x.length&&!(x.charAt(k)>=\"0\"&&x.charAt(k)<=\"9\")){u+=x.charAt(k);k++}const f=F[u];if(f===undefined){return NaN}tot+=Number(n)*f;any=true}return any?tot:NaN};const sp=hc.start_period===undefined?0:dur(hc.start_period);const iv=dur(hc.interval);const to=hc.timeout===undefined?0:dur(hc.timeout);const rt=hc.retries;if(!(sp>=0)||!(iv>0)||!(to>=0)||typeof rt!==\"number\"||!(rt>0)){bad(\"the app-db healthcheck states no floor this guard can derive: start_period \"+JSON.stringify(hc.start_period)+\", interval \"+JSON.stringify(hc.interval)+\", timeout \"+JSON.stringify(hc.timeout)+\", retries \"+JSON.stringify(hc.retries))}const floor=sp+rt*(iv+to);let p;try{p=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"))}catch(e){bad(\"package.json unreadable or not valid JSON: \"+e.message)}if(p===null||typeof p!==\"object\"||Array.isArray(p)){bad(\"package.json parsed but is not a JSON object: \"+JSON.stringify(p))}const scr=p.scripts;const up=(scr===null||typeof scr!==\"object\"||Array.isArray(scr))?undefined:scr[\"db:up\"];if(typeof up!==\"string\"){bad(\"package.json scripts[db:up] is \"+JSON.stringify(up)+\" — this guard compares its --wait-timeout against the healthcheck floor\")}const tk=up.split(/[ \t]+/).filter(Boolean);const ix=tk.indexOf(\"--wait-timeout\");let raw;if(ix!==-1){raw=tk[ix+1]}else{const e2=tk.filter(x=>x.indexOf(\"--wait-timeout=\")===0)[0];if(e2!==undefined){raw=e2.slice(15)}}if(!(Number(raw)>floor)){bad(\"package.json scripts[db:up] waits at most \"+JSON.stringify(raw)+\" seconds, but the app-db healthcheck cannot deliver a verdict before start_period \"+JSON.stringify(hc.start_period)+\" plus retries \"+JSON.stringify(hc.retries)+\" times the sum of interval \"+JSON.stringify(hc.interval)+\" and timeout \"+JSON.stringify(hc.timeout)+\", a floor of \"+floor+\" seconds. A timeout at or below that floor pre-empts the healthcheck and reports a slow but healthy first initdb as a failure. The floor is derived from the resolved healthcheck, never hard-coded, so lowering interval, timeout, retries or start_period lowers it too\")}})" || exit 1; exit 0' ''',
 ]
 stream_capture_kb = 256      # per-stream cap (KiB) on the verifier stdout/stderr retained under the run's verify/ directory; the TAIL is kept and the journal records the full byte count plus a truncation flag. 0 = capture nothing (records still land, with null pointers)
 

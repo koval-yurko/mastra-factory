@@ -167,7 +167,9 @@ forwarding has never been observed here. If this checkpoint fails while checkpoi
 bound in the guest but not reaching the host: change the `ports` entry in `docker-compose.yml` to
 `'54329:5432'` and re-run `npm run db:up`. Treat that as provisional and report the result — the bare
 form publishes on every interface inside the VM and gives up the loopback-only guarantee
-`docker-compose.yml` calls mandatory, so it is a diagnostic, not a change to adopt permanently.
+`docker-compose.yml` calls mandatory, so it is a diagnostic, not a change to adopt permanently. The
+verify gate fails for as long as that edit is in the tree: it names `'54329:5432'` specifically as one
+of the drifts it exists to catch. Revert the `ports` entry before running the gate.
 
 ### 4 — the database exists
 
@@ -179,18 +181,36 @@ Expected: a connection line naming database `mastracode_web`. Substitute the rol
 put in `.env` if you did not keep the defaults — and see `README.md` before changing any of the three
 values after this point.
 
-### If `npm run db:up` never returns
+### If `npm run db:up` exits non-zero
 
-`db:up` is `docker compose up -d --wait` with no timeout, and the service carries
-`restart: unless-stopped`. A container that fails to initialize — a `POSTGRES_USER` or `POSTGRES_DB`
-value `initdb` rejects, for instance — is restarted rather than left exited, so the wait has nothing to
-end on: the command produces no output and hangs instead of failing. If that happens, interrupt it and
-look at the logs; also record that it hung, since this behavior has been predicted but never observed.
+`db:up` is `docker compose up -d --wait --wait-timeout 120`. The bound matters for one case only: a
+container Docker still reports as `health: starting` has returned no verdict yet, so without a timeout
+the wait has nothing to end on. A crash-looping container is a different case and needs no timeout —
+Docker classifies it unhealthy, which ends the wait in about a second with a non-zero exit and
+`container mastracode-web-db is unhealthy` on stderr.
+
+The two cases need opposite responses, so read the state before doing anything:
 
 ```bash
 docker compose ps
 docker compose logs app-db
 ```
+
+- `Up … (health: starting)` — the first `initdb` is still running and outran the bound. Nothing is
+  wrong and nothing needs stopping: re-run `npm run db:up`, which waits on the container already there.
+- `Restarting` — the container is failing to initialize, typically a `POSTGRES_USER` or `POSTGRES_DB`
+  value `initdb` rejects, and `restart: unless-stopped` keeps bringing it back while it holds port
+  `54329`. The logs name the rejected value. Stop it deliberately before retrying: `npm run db:down`,
+  or `docker stop mastracode-web-db && docker rm mastracode-web-db` if a missing `POSTGRES_PASSWORD`
+  is blocking the compose commands themselves.
+- Neither state, and the command still has not returned — the bound covers the health wait only, not
+  an image pull or an engine that has stopped answering. Interrupt it and check `colima status` and
+  `docker ps`; if the pull never started, nothing was created and there is nothing to stop.
+
+**Record it if you ever hit the first case.** The 120-second bound sits above this service's own
+healthcheck floor — `start_period: 30s` plus `retries: 5` × (`interval: 5s` + `timeout: 5s`), about 80
+seconds, since a probe can burn its whole timeout before the next interval starts — so an `initdb` that
+outruns it has been allowed for but never observed here.
 
 ## Teardown
 
@@ -198,6 +218,12 @@ docker compose logs app-db
 npm run db:down        # stops the container; the data volume survives
 colima stop
 ```
+
+`docker-compose.yml` pins `name: mastra-factory`, so every `docker compose` command addresses that one
+project no matter which directory it is run from — the main checkout and every story worktree under
+`.bmad-loop/runs/` included. `npm run db:down` from a worktree stops the live container, and
+`docker compose down -v` from a worktree deletes the live data volume. Neither is scoped to the
+checkout you are standing in; run teardown deliberately, from a shell you know the location of.
 
 Nothing starts Colima at login until the supervision agents below are installed and bootstrapped, so
 for now the operator must run `colima start` after a host reboot before the container's
