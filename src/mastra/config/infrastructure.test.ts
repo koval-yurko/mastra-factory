@@ -196,24 +196,33 @@ describe('pubsub', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('treats a whitespace-only REDIS_URL as configured, so a padded .env line dials a bus', async () => {
-    // Pins today's behaviour rather than endorsing it. `pubsub.ts` is the one
-    // module here whose untrimmed read is an oversight rather than a decision:
-    // the other raw reads in this directory (`public-url.ts`, the Slack and
-    // GitHub secrets and the channels URL in `integrations.ts`, the previous-keys
-    // blob in `auth.ts`) each say in place why the value is passed on as given,
-    // and this one does not. So `REDIS_URL="   "` is truthy, constructs a
-    // RedisStreamsPubSub against an unparseable target and logs the generic
-    // name, where the same padding on `DATABASE_URL` reads as absent. Story 5.4
-    // moves this code without changing it, so the asymmetry moves with it and is
-    // recorded as deferred work; the test makes adding the trim a visible edit
-    // here rather than a silent behaviour change.
+  it('reads a whitespace-only REDIS_URL as unset, so a padded .env line dials nothing', async () => {
+    // Why the read is trimmed: without it `REDIS_URL="   "` is truthy, and a
+    // padded `.env` line builds a RedisStreamsPubSub against an unparseable
+    // target — dialling a Redis that need not exist and logging the generic
+    // name — where the same padding on `DATABASE_URL` has always read as absent.
+    // The trim makes every connection string in this directory agree, and
+    // `.env.schema`'s "unset keeps the in-process bus" true of a blank value too.
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const { RedisStreamsPubSub, pubsub } = await loadPubsub('   ');
+    const { pubsub } = await loadPubsub('   ');
+
+    expect(pubsub).toBeUndefined();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('trims a padded REDIS_URL before it reaches the bus', async () => {
+    // The other half of the trim: padding must be removed rather than carried
+    // into the connection string, where it would make an otherwise valid URL
+    // unparseable and leave the log unable to name the target it redacts.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { RedisStreamsPubSub, pubsub } = await loadPubsub('  redis://someone:secret@127.0.0.1:6399  ');
 
     expect(pubsub).toBeInstanceOf(RedisStreamsPubSub);
-    expect(optionsOf(pubsub)).toEqual({ url: '   ' });
-    expect(String(log.mock.calls[0]?.[0])).toContain('Redis Streams (redis)');
+    expect(optionsOf(pubsub)).toEqual({ url: 'redis://someone:secret@127.0.0.1:6399' });
+    const message = String(log.mock.calls[0]?.[0]);
+    expect(message).toContain('redis://127.0.0.1:6399');
+    expect(message).not.toContain('secret');
   });
 });

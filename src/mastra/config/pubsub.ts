@@ -8,13 +8,13 @@
  */
 import { RedisStreamsPubSub } from '@mastra/redis-streams';
 
-// Distributed pub/sub: when `REDIS_URL` is set, events (streams, workflows,
-// signals) ride Redis Streams so multiple web server processes can share one
-// event bus. RedisStreamsPubSub also implements LeaseProvider, so the factory
-// marks it cross-process and the controller drops its file-based thread locks
-// in favor of pubsub-coordinated leases. Without `REDIS_URL` (bare local dev)
-// the in-process default applies.
-const redisUrl = process.env.REDIS_URL;
+// Distributed pub/sub: when `REDIS_URL` is set to something non-blank, events
+// (streams, workflows, signals) ride Redis Streams so multiple web server
+// processes can share one event bus. RedisStreamsPubSub also implements
+// LeaseProvider, so the factory marks it cross-process and the controller drops
+// its file-based thread locks in favor of pubsub-coordinated leases. Unset, or
+// blank once trimmed (bare local dev), → the in-process default applies.
+const redisUrl = process.env.REDIS_URL?.trim();
 export const pubsub = redisUrl ? new RedisStreamsPubSub({ url: redisUrl }) : undefined;
 if (redisUrl) {
   // Redact credentials before logging (REDIS_URL may embed a password).

@@ -236,7 +236,14 @@ describe('dockerSandboxOptions', () => {
   });
 
   it('falls back to the documented defaults for malformed or non-positive ceilings', () => {
-    for (const bad of ['abc', '0', '-2', '2.5', '']) {
+    // '0x10' through ' 3 ' are the spellings bare `Number` would turn into a
+    // different valid number (16, 3, 1000, 5, 3) rather than into "use the
+    // default", which is why the parser demands a run of digits:
+    // `FACTORY_SANDBOX_MEMORY_GIB=1e3` must be a 10 GiB container, not a 1000 GiB
+    // one. The last one is a run of digits past the safe-integer range, and it
+    // FALLS BACK rather than being refused by the bound below — the parser sees
+    // it first and returns undefined, so the bound never sees a number at all.
+    for (const bad of ['abc', '0', '-2', '2.5', '', '0x10', '0b11', '1e3', '+5', ' 3 ', '99999999999999999999']) {
       vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
       vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', bad);
       vi.stubEnv('FACTORY_SANDBOX_CPUS', bad);
@@ -257,6 +264,53 @@ describe('dockerSandboxOptions', () => {
 
     expect(options.memory).toBe(16 * 1024 * 1024 * 1024);
     expect(options.cpuQuota).toBe(800_000);
+  });
+
+  it('accepts a ceiling equal to the whole sandbox budget of this host', () => {
+    // The bound is inclusive, and these are its two numbers written out: 10 GiB
+    // and 4 cores per container times the 3 concurrent sessions the host is
+    // sized for. Literals rather than arithmetic against the module's constants,
+    // which catches exactly one direction: LOWERING either default, or the
+    // concurrency count, lowers the bound and turns this case into a refusal.
+    // Raising one lifts the bound and leaves the stubbed 30 and 12 accepted with
+    // the same expected numbers, so this is not a pin on the bound's value — the
+    // two refusal cases below are.
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '30');
+    vi.stubEnv('FACTORY_SANDBOX_CPUS', '12');
+
+    const options = dockerSandboxOptions('session-abc');
+
+    expect(options.memory).toBe(30 * 1024 * 1024 * 1024);
+    expect(options.memorySwap).toBe(30 * 1024 * 1024 * 1024);
+    expect(options.cpuQuota).toBe(1_200_000);
+  });
+
+  it('refuses a memory ceiling above what this host can serve, rather than handing Docker the number', () => {
+    // `HostConfig.Memory` takes any integer, so an oversized knob becomes a
+    // container the daemon fails to create — a failure that names no key. The
+    // refusal happens here instead, and by throwing rather than returning, so it
+    // cannot fall through to the Platform or E2B arms of `selectSandbox`.
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '31');
+
+    // Key, offending value, the bound, and where the bound is documented: an
+    // operator reading only the error has to be able to act on it. One regex
+    // across all four rather than a match each, because the value and the bound
+    // are both small integers — asserted separately, a message that had swapped
+    // them ("is 30, which is more than the 31 GiB") would satisfy every match.
+    expect(() => dockerSandboxOptions('session-abc')).toThrow(
+      /FACTORY_SANDBOX_MEMORY_GIB is 31, which is more than the 30 GiB[\s\S]*sandbox\/README\.md/,
+    );
+  });
+
+  it('refuses a CPU ceiling above what this host can serve', () => {
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    vi.stubEnv('FACTORY_SANDBOX_CPUS', '13');
+
+    expect(() => dockerSandboxOptions('session-abc')).toThrow(
+      /FACTORY_SANDBOX_CPUS is 13, which is more than the 12 cores[\s\S]*sandbox\/README\.md/,
+    );
   });
 
   it('falls back to /workspace for a blank or unset workdir, and trims a set one', () => {
@@ -345,6 +399,24 @@ describe('selectSandbox', () => {
     vi.stubEnv('E2B_API_KEY', 'stray-key');
 
     expect(() => selectSandbox(ctx, true)).toThrow(/FACTORY_SANDBOX_IMAGE/);
+  });
+
+  it('refuses the session rather than falling through when a knob is above its bound', () => {
+    // Same shape and same reason as the image case above: `sandbox/README.md`
+    // promises an over-bound knob relocates nothing, and that claim is about THIS
+    // function, not about `dockerSandboxOptions` in isolation. With the platform
+    // and E2B variables set, a bound check that returned — or that was caught —
+    // instead of throwing would hand the session to a cloud VM and leave every
+    // other test green.
+    vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '31');
+    vi.stubEnv('MASTRA_PLATFORM_ACCESS_TOKEN', 'stray-token');
+    vi.stubEnv('MASTRA_PROJECT_ID', 'stray-project');
+    vi.stubEnv('MASTRA_ENVIRONMENT_ID', 'stray-environment');
+    vi.stubEnv('E2B_API_KEY', 'stray-key');
+
+    expect(() => selectSandbox(ctx, true)).toThrow(/FACTORY_SANDBOX_MEMORY_GIB/);
   });
 
   it('trims the provider value, so a padded .env line still selects Docker', () => {

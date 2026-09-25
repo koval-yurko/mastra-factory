@@ -391,12 +391,13 @@ Approve it and the browser should return through that callback.
   truthy (`@mastra/factory/dist/integrations/slack/integration.js:69-82`, the ternary at `:75`), so:
   an empty or missing `SLACK_APP_CLIENT_ID` or `SLACK_APP_CLIENT_SECRET` disables them outright;
   `MASTRACODE_CHANNELS_PUBLIC_URL` disables them only when it is **present and empty** — which yields
-  `""` — or when it and `MASTRACODE_PUBLIC_URL` are both unset. Merely *unset* is not enough, because
-  `src/mastra/config/integrations.ts:102` uses `??` and falls back to `MASTRACODE_PUBLIC_URL`, which
-  this deployment always sets; that fallback leaves the routes enabled and pointing at the wrong
-  origin instead, which is the `bad_redirect_uri` below rather than this bullet. The signing secret
-  being present is what makes the route exist at all, so this is a *different* failure from checkpoint
-  2's `404`.
+  `""` — or when it is unset *and* `MASTRACODE_PUBLIC_URL` is unset or blank (whitespace-only counts:
+  `src/mastra/config/public-url.ts` trims that key and reads an empty result as unset). Merely leaving
+  the channels key *unset* is not enough, because `src/mastra/config/integrations.ts:105` uses `??`
+  and falls back to `MASTRACODE_PUBLIC_URL`, which this deployment always sets; that fallback leaves
+  the routes enabled and pointing at the wrong origin instead, which is the `bad_redirect_uri` below
+  rather than this bullet. The signing secret being present is what makes the route exist at all, so
+  this is a *different* failure from checkpoint 2's `404`.
 - **A redirect to `/auth/login?returnTo=…`** — the browser carries no session. Sign in first; this is
   a GET you can land on directly, and doing so signed out is the usual cause.
 - **Slack answering `bad_redirect_uri`** — the `redirect_uri` the start route built does not match

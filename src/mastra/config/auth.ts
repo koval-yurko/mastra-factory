@@ -24,17 +24,69 @@ import { createFactorySecretEncryption } from '@mastra/factory';
 import type { IMastraAuthProvider } from '@mastra/core/server';
 
 /**
+ * The exact shape of a base64-encoded 32-byte key: 43 characters of the
+ * STANDARD base64 alphabet followed by one `=` of padding — what
+ * `openssl rand -base64 32` emits, which is the command `README.md:34` tells
+ * operators to run. The base64url alphabet (`-`, `_`) and unpadded base64 are
+ * not accepted, because no documented way of producing this key emits them.
+ */
+const BASE64_32_BYTE_KEY = /^[A-Za-z0-9+/]{43}=$/;
+
+/**
  * Decode a base64 32-byte credential-encryption key. `name` is the environment
  * variable the value came from and is carried into the failure message, so a
  * boot failure points at the key rather than at the decoder.
  *
+ * The value must match `BASE64_32_BYTE_KEY` exactly. Checking the shape and not
+ * only the decoded length is the whole point: `Buffer.from(value, 'base64')`
+ * silently SKIPS characters outside the alphabet, so a typo-corrupted key such
+ * as `'!!!!' + 'A'.repeat(43)` still yields 32 bytes and would be accepted —
+ * and then every stored credential decrypts to garbage, at runtime, far from
+ * the boot that let it through.
+ *
+ * This helper does NOT trim; call sites do, so that a padded `.env` line is
+ * tolerated in one place while whitespace inside a value stays an error.
+ *
  * Exported for `auth.test.ts` only — nothing else imports it.
  */
 export function decodeCredentialEncryptionKey(name: string, encodedKey: string): Buffer {
+  // One sentence for both rejections, and it states the accepted SPELLING
+  // rather than "base64-encoded 32-byte" — because the values this gate newly
+  // rejects are base64-encoded and are 32 bytes. Node's decoder maps `-`→62 and
+  // `_`→63, so a base64url or unpadded key decodes to byte-identical 32 bytes
+  // and booted fine before this gate existed; an operator holding ciphertext
+  // under that key cannot regenerate it, so the message has to tell them the
+  // respelling that will be accepted instead of denying what they can see.
+  // Named for what it RETURNS. `throw keyShapeError()` is the only correct use;
+  // a name in the imperative (`reject()`) reads like a statement that acts on
+  // its own, and `reject();` compiles, does nothing, and lets the malformed key
+  // straight through — the exact failure this gate exists to close.
+  const keyShapeError = () =>
+    new Error(
+      `${name} must be 43 standard-base64 characters followed by "=", as \`openssl rand -base64 32\` emits (see README.md). ` +
+        'A base64url (`-`, `_`) or unpadded spelling is rejected even though it decodes to 32 bytes.',
+    );
+  if (!BASE64_32_BYTE_KEY.test(encodedKey)) throw keyShapeError();
+
   const key = Buffer.from(encodedKey, 'base64');
-  if (key.byteLength !== 32) throw new Error(`${name} must contain base64-encoded 32-byte keys.`);
+  // Unreachable for anything the shape test admits — 43 standard-base64
+  // characters plus one `=` always decode to exactly 32 bytes. It stays anyway:
+  // it costs nothing, and it keeps "43 + `=` means 32 bytes" a property of the
+  // code rather than only of this comment. Do not delete either check as
+  // redundant without checking which cases in `auth.test.ts` each one carries —
+  // the shape test is what rejects lenient garbage, the length test is what
+  // would catch a shape pattern edited into something wider.
+  if (key.byteLength !== 32) throw keyShapeError();
   return key;
 }
+
+/**
+ * Hoisted because two arms throw it — an unparseable blob and a parsed value
+ * that is not an object — and `auth.test.ts` compares the whole sentence rather
+ * than a substring, so the two must not drift apart.
+ */
+const PREVIOUS_KEYS_SHAPE_ERROR =
+  'FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS must be a JSON object of key ids to base64 keys.';
 
 function credentialEncryption() {
   const encodedKey = process.env.FACTORY_CREDENTIAL_ENCRYPTION_KEY?.trim();
@@ -52,9 +104,20 @@ function credentialEncryption() {
   // anything to parse and once to parse it — which is the duplication AD-7
   // exists to forbid.
   const encodedPreviousKeys = process.env.FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS;
-  const previousKeys: Record<string, unknown> = encodedPreviousKeys ? JSON.parse(encodedPreviousKeys) : {};
+  // Unset or empty still means "no rotation in progress" — `''` is falsy, so it
+  // never reaches the parser. Only a non-empty, unparseable value throws, and it
+  // throws the SAME sentence the not-an-object arm below does rather than the
+  // `SyntaxError`: the operator's next action is identical either way (fix the
+  // blob), and the parser's position offsets describe a value this deployment
+  // masks in every log it writes.
+  let previousKeys: Record<string, unknown>;
+  try {
+    previousKeys = encodedPreviousKeys ? JSON.parse(encodedPreviousKeys) : {};
+  } catch {
+    throw new Error(PREVIOUS_KEYS_SHAPE_ERROR);
+  }
   if (!previousKeys || Array.isArray(previousKeys) || typeof previousKeys !== 'object') {
-    throw new Error('FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS must be a JSON object of key ids to base64 keys.');
+    throw new Error(PREVIOUS_KEYS_SHAPE_ERROR);
   }
 
   return createFactorySecretEncryption({
@@ -66,7 +129,26 @@ function credentialEncryption() {
       if (typeof value !== 'string') {
         throw new Error('FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS values must be base64 strings.');
       }
-      return { id, key: decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS', value) };
+      // The VALUE is trimmed, exactly as the primary key is above, so a
+      // rotation blob pasted with a trailing newline still boots. The ID is
+      // NOT: an id is a JSON object key an operator authored deliberately and
+      // it must match what was recorded alongside the existing ciphertext, so
+      // silently rewriting it here would point the decryptor at a key id that
+      // no stored secret carries.
+      //
+      // The name handed to the decoder carries the ID, not just the variable.
+      // The decoder's sentence describes ONE key's spelling, which is false of
+      // this variable as a whole — `PREVIOUS_KEYS_SHAPE_ERROR` above says what
+      // it must be, a JSON object, and throws that under this very same name.
+      // Naming the entry keeps both sentences true, and tells an operator
+      // whose blob holds several old keys which one of them to respell.
+      return {
+        id,
+        key: decodeCredentialEncryptionKey(
+          `FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS[${JSON.stringify(id)}]`,
+          value.trim(),
+        ),
+      };
     }),
   });
 }

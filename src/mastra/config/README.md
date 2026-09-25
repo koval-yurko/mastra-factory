@@ -50,12 +50,12 @@ now moved, and so has the assembly itself: the entry imports `factory.ts` and no
 | `database-url.ts` | Resolves the database connection string once, and refuses to boot without one outside development and tests. The single first-party read site for `DATABASE_URL`, `APP_DATABASE_URL` and `NODE_ENV`. |
 | `storage.ts` | The `FactoryStorage` backend — Postgres when a connection string is configured, local libSQL otherwise. |
 | `vector.ts` | The recall-search vector store, which rides the same database as storage, or nothing when there is no connection string. |
-| `pubsub.ts` | The event bus — Redis Streams when configured, the in-process default otherwise. The single read site for `REDIS_URL`. |
+| `pubsub.ts` | The event bus — Redis Streams when configured, the in-process default otherwise, with a blank value reading as unset. The single read site for `REDIS_URL`. |
 | `auth.ts` | The identity provider — self-managed Better Auth, a deliberate platform deferral, an explicit opt-out, or the factory default — and the credential encryption that decision gates. Owns the `signUpEnabled: false` literal, the `BETTER_AUTH_SECRET`/`MASTRA_SHARED_API_URL`/`MASTRACODE_AUTH_DISABLED` precedence chain and the three `FACTORY_CREDENTIAL_ENCRYPTION_*` keys. |
 | `integrations.ts` | The three direct integrations (GitHub, Linear, Slack), the app slug the factory's `platform` slot takes, and the OAuth/link `state` signer secret. The single read site for every `GITHUB_APP_*`, `LINEAR_*` and `SLACK_APP_*` key, plus `MASTRACODE_GITHUB_AUTHORIZED_BOTS`, `WORKOS_COOKIE_PASSWORD` and `MASTRACODE_CHANNELS_PUBLIC_URL`. The public URL it hands the Slack integration comes from `public-url.ts`, not from a read of its own. |
 | `sandbox.ts` | The `sandbox:` slot: the Docker branch that keeps agent work on this host, its container ceilings, its concurrent-session cap, and the Platform → E2B → local chain behind it. The single read site for every `FACTORY_SANDBOX_*` key, the three `MASTRACODE_*` sandbox knobs, `E2B_API_KEY` and the four `MASTRA_*` Platform keys. |
 | `positive-int.ts` | The positive-integer parser every capacity knob is read through. Reads no environment of its own. |
-| `public-url.ts` | The browser-facing origin, raw and untrimmed. The single read site for `MASTRACODE_PUBLIC_URL`, which has consumers in two different concerns. |
+| `public-url.ts` | The browser-facing origin, trimmed, with a blank value reading as unset so the `??` fallbacks downstream fire. The single read site for `MASTRACODE_PUBLIC_URL`, which has consumers in two different concerns. |
 | `factory.ts` | The assembly: the `new MastraFactory({ … })` call that puts the six concerns together, the `configVersion` literal, and the single read site for `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` — the two keys only that call takes. |
 
 `database-url.ts` exists so that neither consumer of the connection string has to import the other
@@ -129,7 +129,8 @@ tested while it sat in the entry. It mocks `@mastra/factory` with an `importOrig
 capturing `MastraFactory` — so `createFactorySecretEncryption` stays real for `auth.ts` — and reads
 back the slots `tsc` types as optional and a typo empties silently: the `configVersion` literal,
 `publicUrl` reaching both the factory and the Slack integration from the one read — which is the
-only cover `public-url.ts` has, including that it passes a whitespace-only value through raw —
+only cover `public-url.ts` has, including that it trims a padded value and reads a whitespace-only
+one as unset, leaving the factory's own default to apply —
 `allowedOrigins` split/trimmed/filtered, `dispatcher.maxInFlight` for the values `positiveInt`
 accepts and rejects, and `githubAppSlug` nested inside `platform: { … }` rather than at the top
 level. The Slack half of the public-URL case is observed only as "the OIDC fallback arm fired":

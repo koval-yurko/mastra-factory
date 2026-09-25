@@ -60,7 +60,8 @@ export const factory = new MastraFactory({
   // Agent state (threads, messages, memory, OM, recall vectors) lives in the
   // single app Postgres alongside the github/app tables — one shared DB (and
   // pg pool) for all users, separated by `resourceId` scoping. Unset (bare
-  // local dev) → default storage resolution applies (local libSQL file).
+  // local dev) → `./storage` constructs the libSQL backend itself; that module
+  // owns the branch and describes it.
   storage,
   vector,
   pubsub,

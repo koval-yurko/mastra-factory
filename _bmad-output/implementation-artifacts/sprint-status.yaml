@@ -29,20 +29,20 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-22-2026 00:00
-last_updated: 2026-09-23
+last_updated: 2026-09-26
 project: mastra-factory
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
 development_status:
-  epic-1: backlog
+  epic-1: done
   1-1-pin-the-package-manager-so-a-fresh-worktree-resolves-identic: done
   1-2-tests-for-the-entry-s-pure-helpers-running-inside-the-verify: done
   1-3-one-datastore-drop-redis-and-harden-the-compose-file: done
   1-4-operator-a-working-container-engine-and-a-healthy-postgres: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
+  epic-2: done
   2-1-operator-a-sandbox-image-that-carries-git-and-gh: done
   2-2-select-the-docker-sandbox-ahead-of-every-cloud-provider: done
   2-3-identity-this-machine-owns-with-organizations: done
@@ -51,7 +51,7 @@ development_status:
   2-6-operator-close-registration-before-anything-is-public: done
   epic-2-retrospective: optional
 
-  epic-3: backlog
+  epic-3: done
   3-1-every-callback-url-recorded-where-its-subject-owns-it: done
   3-2-operator-a-public-origin-with-no-inbound-ports: done
   3-3-operator-a-github-app-that-belongs-to-yurii: done
@@ -59,13 +59,13 @@ development_status:
   3-5-operator-a-slack-app-created-from-a-manifest-this-repo-owns: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
+  epic-4: done
   4-1-the-supervision-artifacts-as-real-files-in-the-repo: done
   4-2-operator-bring-the-agents-up: done
   4-3-operator-prove-it-comes-back-on-its-own: done
   epic-4-retrospective: optional
 
-  epic-5: backlog
+  epic-5: done
   5-1-every-operational-artifact-at-its-seeded-path-and-no-code-ou: done
   5-2-every-subject-owns-its-keys-and-env-schema-is-the-only-key-l: done
   5-3-docs-links-out-and-the-path-loses-its-space: done

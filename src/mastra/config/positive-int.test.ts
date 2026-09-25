@@ -48,16 +48,15 @@ describe('positiveInt', () => {
     expect(positiveInt('1')).toBe(1);
   });
 
-  it('accepts the alternative spellings `Number` understands, so a typo can become a valid knob', () => {
-    // Pins today's behaviour rather than endorsing it. These are the dangerous
-    // malformed inputs: each yields a different valid number instead of
-    // `undefined`, so a typo'd knob silently takes effect rather than falling
-    // back to the default. Changing this is out of the story's scope; the test
-    // makes any such change a visible edit here.
-    expect(positiveInt('0x10')).toBe(16);
-    expect(positiveInt('0b11')).toBe(3);
-    expect(positiveInt('1e3')).toBe(1000);
-    expect(positiveInt('+5')).toBe(5);
-    expect(positiveInt(' 3 ')).toBe(3);
+  it('rejects the alternative spellings `Number` understands, so a typo cannot become a valid knob', () => {
+    // These are the dangerous malformed inputs, and the reason the parser checks
+    // for a run of digits before coercing: bare `Number` turns each of them into
+    // a DIFFERENT valid number (16, 3, 1000, 5, 3), so a typo'd capacity knob
+    // silently takes effect instead of falling back to the default.
+    expect(positiveInt('0x10')).toBeUndefined();
+    expect(positiveInt('0b11')).toBeUndefined();
+    expect(positiveInt('1e3')).toBeUndefined();
+    expect(positiveInt('+5')).toBeUndefined();
+    expect(positiveInt(' 3 ')).toBeUndefined();
   });
 });

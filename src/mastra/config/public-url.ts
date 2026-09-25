@@ -10,10 +10,14 @@
  * read site inside one of its two consumers. This module is the single
  * first-party read site for `MASTRACODE_PUBLIC_URL` (AD-7).
  *
- * Exported RAW, untrimmed, exactly as the environment gave it: both consumers
- * read it that way already, and collapsing the reads is a move, not a cleanup.
+ * Trimmed, and a blank value reads as unset: every consumer downstream reaches
+ * for its own fallback with `??` — `@mastra/factory`'s `publicUrl ?? 'http://localhost:4111'`
+ * and `./integrations`'s `MASTRACODE_CHANNELS_PUBLIC_URL ?? publicUrl` — so an
+ * empty string would still count as a configured origin and a padded `.env` line
+ * would become the deployment's public origin and the base of Slack's OIDC
+ * redirect. `|| undefined` is what makes those fallbacks fire.
  *
  * See `README.md` in this directory for what the entry was forked from and how
  * these modules are reconciled with an upstream template update.
  */
-export const publicUrl = process.env.MASTRACODE_PUBLIC_URL;
+export const publicUrl = process.env.MASTRACODE_PUBLIC_URL?.trim() || undefined;

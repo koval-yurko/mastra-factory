@@ -59,6 +59,23 @@ const { decodeCredentialEncryptionKey, selectAuth } = await import('./auth');
 // `vi.resetModules()`.
 const { MastraAuthBetterAuth } = await import('@mastra/auth-better-auth');
 
+/**
+ * The decoder's rejection sentence, whole, for a given variable name — the only
+ * copy of it in this suite, held here rather than inside one `describe` because
+ * both the helper block and the boot block compare against it.
+ *
+ * It is pinned in full, not by `/NAME/` substring, for the reason
+ * `PREVIOUS_KEYS_SHAPE_ERROR` is: this is the entire migration instruction an
+ * operator gets when a key that booted yesterday — spelled base64url, or
+ * unpadded — stops booting today, and such a key cannot be regenerated without
+ * stranding the ciphertext written under it. `README.md:44` quotes this
+ * sentence verbatim as what the operator will see; if an edit here fails,
+ * update that copy in the same change.
+ */
+const keyShapeError = (name: string) =>
+  `${name} must be 43 standard-base64 characters followed by "=", as \`openssl rand -base64 32\` emits (see README.md). ` +
+  'A base64url (`-`, `_`) or unpadded spelling is rejected even though it decodes to 32 bytes.';
+
 describe('decodeCredentialEncryptionKey', () => {
   const validKey = Buffer.alloc(32, 7).toString('base64');
 
@@ -69,28 +86,105 @@ describe('decodeCredentialEncryptionKey', () => {
     expect(decoded.equals(Buffer.alloc(32, 7))).toBe(true);
   });
 
-  it('names the environment variable when a non-base64 value decodes to the wrong length', () => {
+  it('names the environment variable for a value that is not base64 at all', () => {
     // `Buffer.from` does not reject this; it skips the invalid characters and
-    // yields 10 bytes, so this fails on length — the only check there is.
+    // yields 10 bytes. It is the shape check that rejects it — the length check
+    // would too, which is exactly why the case below exists as well.
     expect(Buffer.from('not-a-real-key', 'base64').byteLength).toBe(10);
     expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', 'not-a-real-key')).toThrow(
       /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
     );
   });
 
-  it('accepts a value containing non-base64 characters when the rest still decodes to 32 bytes', () => {
-    // Pins today's behaviour rather than endorsing it: the helper validates
-    // byte length only, so `Buffer.from`'s lenient decoding lets a value with
-    // garbage in it through. Changing that is out of this story's scope; this
-    // test exists so the change is a visible, deliberate edit here.
+  it('rejects a value containing non-base64 characters even though it decodes to 32 bytes', () => {
+    // The defect this suite used to pin. `Buffer.from` skips the `!` characters
+    // and hands back a full 32 bytes, so a length-only check accepts a
+    // typo-corrupted key and every stored credential then decrypts to garbage.
+    // The measurement stays in the test as the reason the SHAPE check, not the
+    // length check, is what has to do the rejecting here.
     const lenient = `!!!!${'A'.repeat(43)}`;
-    const decoded = decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', lenient);
-    expect(decoded.byteLength).toBe(32);
+    expect(Buffer.from(lenient, 'base64').byteLength).toBe(32);
+    expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', lenient)).toThrow(
+      /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
+    );
   });
 
-  it('names the environment variable when the key is the wrong length', () => {
+  it('rejects the base64url alphabet, which no documented way of making this key emits', () => {
+    // `README.md:34` tells operators to run `openssl rand -base64 32`, which
+    // emits STANDARD padded base64. The rejection is about PROVENANCE, not
+    // bytes: Node maps `-`→62 and `_`→63, so these spellings decode to exactly
+    // the bytes the standard spelling would — measured below as equality with
+    // that spelling, because the rejection message's advice ("respell it")
+    // is only safe advice if it is true. A `-` or `_` means the value did not
+    // come from the documented command, so where it did come from is unknown.
+    const spellings: [url: string, standard: string][] = [
+      [`-${'A'.repeat(42)}=`, `+${'A'.repeat(42)}=`],
+      [`${'A'.repeat(42)}_=`, `${'A'.repeat(42)}/=`],
+    ];
+    for (const [url, standard] of spellings) {
+      expect(url).toHaveLength(44);
+      expect(Buffer.from(url, 'base64').byteLength).toBe(32);
+      expect(Buffer.from(url, 'base64').equals(Buffer.from(standard, 'base64'))).toBe(true);
+      expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', url)).toThrow(
+        /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
+      );
+    }
+  });
+
+  it('rejects an unpadded spelling, which is the half of the rule the `=` carries', () => {
+    // The one input that isolates the trailing `=`: correct alphabet, correct
+    // 43 characters, 32 bytes out, padding removed. Without it the regex can be
+    // relaxed to `/^[A-Za-z0-9+/]{43}=?$/` with every other case still green —
+    // the base64url pair fails on the alphabet, base64 of 31 bytes carries a
+    // second `=` inside the 43-character run, and base64 of 33 bytes is 44
+    // alphabet characters — leaving the code's accepted spelling wider than the
+    // one the message and `README.md:44` publish.
+    const unpadded = validKey.slice(0, 43);
+    expect(unpadded).toHaveLength(43);
+    expect(Buffer.from(unpadded, 'base64').byteLength).toBe(32);
+    expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', unpadded)).toThrow(
+      /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
+    );
+  });
+
+  it('states the accepted spelling in full, because that sentence is the whole migration note', () => {
+    // Caught by hand rather than matched with `/FACTORY_CREDENTIAL_ENCRYPTION_KEY/`,
+    // which every other case above uses: those all stay green if the sentence
+    // is reverted to `${name} must contain base64-encoded 32-byte keys.`, which
+    // tells an operator holding a base64url key — base64-encoded, 32 bytes —
+    // nothing at all. See `keyShapeError` above for the README copy this pins.
+    let thrown: unknown;
+    try {
+      decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', 'not-a-real-key');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(keyShapeError('FACTORY_CREDENTIAL_ENCRYPTION_KEY'));
+  });
+
+  it('does not trim: a padded value reaching the decoder is an error, because call sites trim', () => {
+    // Every call site in `auth.ts` trims before calling, so whitespace arriving
+    // here is not a padded `.env` line — it is a value with a space inside it.
+    expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', `${validKey}\n`)).toThrow(
+      /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
+    );
+    expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', ` ${validKey}`)).toThrow(
+      /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
+    );
+  });
+
+  it('names the environment variable for base64 of 31 or 33 bytes, which is the wrong spelling too', () => {
+    // Neither of these reaches the `byteLength !== 32` branch: base64 of 31
+    // bytes is 44 characters ending `==` and base64 of 33 bytes is 44
+    // characters with no padding at all, so the shape check rejects both. The
+    // wrong length and the wrong spelling arrive together — there is no
+    // encoding of a non-32-byte buffer that matches 43 characters plus one `=`.
     const tooShort = Buffer.alloc(31, 7).toString('base64');
     const tooLong = Buffer.alloc(33, 7).toString('base64');
+    expect(tooShort.endsWith('==')).toBe(true);
+    expect(tooLong.includes('=')).toBe(false);
     expect(() => decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', tooShort)).toThrow(
       /FACTORY_CREDENTIAL_ENCRYPTION_KEY/,
     );
@@ -364,6 +458,41 @@ describe('secretEncryption', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('refuses to load when the primary key is corrupt, naming that key', async () => {
+    // The boot-surface half of the decoder case above. Without it the whole
+    // shape check could be deleted from `credentialEncryption()`'s primary-key
+    // call site — reverting it to a bare `Buffer.from(encodedKey, 'base64')` —
+    // and every case in this block would stay green, because they all pass a
+    // well-formed VALID_KEY. `/FACTORY_CREDENTIAL_ENCRYPTION_KEY/` does not
+    // match `…_PREVIOUS_KEYS`, so it still discriminates between the two paths.
+    let thrown: unknown;
+    try {
+      await load({ FACTORY_CREDENTIAL_ENCRYPTION_KEY: `!!!!${'A'.repeat(43)}` });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    // Whole sentence, not `/FACTORY_CREDENTIAL_ENCRYPTION_KEY/`: the boot is
+    // where an operator actually meets this text, so this is the case that
+    // proves what reaches them, name included.
+    expect((thrown as Error).message).toBe(keyShapeError('FACTORY_CREDENTIAL_ENCRYPTION_KEY'));
+  });
+
+  it('trims the primary key, so a padded .env line still boots', async () => {
+    // The `.trim()` at the read site became load-bearing with the shape check:
+    // `Buffer.from` used to skip a trailing newline silently, so the trim was
+    // belt-and-braces. Now the decoder rejects whitespace — the decoder block
+    // above pins exactly that — so deleting the trim locks out every operator
+    // whose `.env` line carries one, with no other test noticing.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { secretEncryption } = await load({ FACTORY_CREDENTIAL_ENCRYPTION_KEY: `${VALID_KEY}\n` });
+
+    expect(secretEncryption).toBeDefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('refuses to load when the previous-keys blob is not a JSON object, naming the key', async () => {
     // Caught by hand rather than through `rejects.toThrow`, which matches a
     // substring: this sentence is what an operator sees when a key rotation is
@@ -380,6 +509,124 @@ describe('secretEncryption', () => {
 
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe(PREVIOUS_KEYS_SHAPE_ERROR);
+  });
+
+  it('reports unparseable previous-keys blobs with the same sentence, not a SyntaxError', async () => {
+    // An unguarded `JSON.parse` takes the boot down with `SyntaxError: Expected
+    // property name or '}' in JSON at position 1`, which names no environment
+    // variable at all — the operator is left grepping for which of the dozens
+    // of configured values was meant to be JSON. `' '` is the same defect
+    // arriving as an apparently-blank line: it is non-empty, so it is parsed,
+    // and `JSON.parse(' ')` throws `Unexpected end of JSON input`.
+    for (const blob of ['{oops', ' ', 'not json at all', '{"v1": }']) {
+      let thrown: unknown;
+      try {
+        await load({
+          FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+          FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: blob,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(SyntaxError);
+      expect((thrown as Error).message).toBe(PREVIOUS_KEYS_SHAPE_ERROR);
+    }
+  });
+
+  it('reports a previous-keys blob of `null` with the same sentence', async () => {
+    // Parses fine, so it reaches the shape guard rather than the catch — the
+    // pair with `'[]'` above that proves both arms throw the one sentence.
+    let thrown: unknown;
+    try {
+      await load({
+        FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+        FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: 'null',
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(PREVIOUS_KEYS_SHAPE_ERROR);
+  });
+
+  it('treats an empty previous-keys blob as no rotation in progress', async () => {
+    // `''` must stay falsy-and-fine rather than becoming a parse failure: an
+    // operator who left `FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS=` in .env
+    // is not mid-rotation, and refusing to boot on that would be a regression
+    // dressed as stricter validation.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { secretEncryption } = await load({
+      FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+      FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: '',
+    });
+
+    expect(secretEncryption).toBeDefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('trims previous-key values, so a rotation blob with a trailing newline still boots', async () => {
+    // The primary key is trimmed at its read site, so a padded `.env` line has
+    // always worked for it. Before this, the same paste inside a rotation blob
+    // failed — and only during a rotation, which is the worst moment to find
+    // out. The ids are deliberately NOT trimmed: an id must keep matching what
+    // was recorded alongside the existing ciphertext.
+    const { secretEncryption } = await load({
+      FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+      FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID: 'v2',
+      FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({
+        v1: `${Buffer.alloc(32, 3).toString('base64')}\n`,
+      }),
+    });
+
+    expect(secretEncryption).toBeDefined();
+  });
+
+  it('names the previous-keys variable when one of its values is corrupt', async () => {
+    // Decodes to a full 32 bytes through `Buffer.from`'s lenient skipping, so
+    // only the shape check catches it — and the message must accuse the
+    // rotation blob, not FACTORY_CREDENTIAL_ENCRYPTION_KEY, which is fine.
+    //
+    // The name it accuses is the ENTRY, not the bare variable: the sentence
+    // says "must be 43 standard-base64 characters", which is false of a
+    // variable that must be a JSON object — the other sentence thrown about
+    // this same name says exactly that — and a real rotation blob can hold
+    // more than one old key, only one of which is the bad one.
+    let thrown: unknown;
+    try {
+      await load({
+        FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+        FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID: 'v3',
+        FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({
+          v1: Buffer.alloc(32, 3).toString('base64'),
+          v2: `!!!!${'A'.repeat(43)}`,
+        }),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS/);
+    expect((thrown as Error).message).toBe(keyShapeError('FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS["v2"]'));
+  });
+
+  it('names the previous-keys variable when one of its values is not a string', async () => {
+    let thrown: unknown;
+    try {
+      await load({
+        FACTORY_CREDENTIAL_ENCRYPTION_KEY: VALID_KEY,
+        FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS: JSON.stringify({ v1: 1 }),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS values must be base64 strings.');
   });
 
   it('decodes a well-formed previous-keys map', async () => {

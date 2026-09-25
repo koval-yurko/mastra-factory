@@ -29,9 +29,31 @@
  *
  * The real integration classes are used rather than mocked: each constructor is
  * pure, synchronous and dials nothing, and it is the constructors that enforce
- * the required-field rules these cases are about.
+ * the required-field rules these cases are about. `SlackIntegration` is the one
+ * that is wrapped, and only wrapped: the mock is a subclass that calls
+ * `super(options)` — so the real rules still run — and records the options it
+ * was handed, because `diagnostics()` reports booleans and two cases below are
+ * about the VALUE the bot-token read builds, which no public member exposes.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+/** The options the last-constructed `SlackIntegration` was handed. */
+const { slackOptions } = vi.hoisted(() => ({
+  slackOptions: { last: undefined as Record<string, unknown> | undefined },
+}));
+
+vi.mock('@mastra/factory/integrations/slack/integration', async importOriginal => {
+  const actual = await importOriginal<typeof import('@mastra/factory/integrations/slack/integration')>();
+  return {
+    ...actual,
+    SlackIntegration: class RecordingSlackIntegration extends actual.SlackIntegration {
+      constructor(...args: ConstructorParameters<typeof actual.SlackIntegration>) {
+        super(...args);
+        slackOptions.last = args[0] as unknown as Record<string, unknown>;
+      }
+    },
+  };
+});
 
 /** Every key this module reads, so an inherited value cannot configure a case. */
 interface Env {
@@ -74,6 +96,7 @@ const ENV_KEYS: (keyof Env)[] = [
 
 async function load(env: Env) {
   for (const key of ENV_KEYS) vi.stubEnv(key, env[key]);
+  slackOptions.last = undefined;
   vi.resetModules();
   return import('./integrations');
 }
@@ -301,15 +324,40 @@ describe('the Slack group', () => {
   });
 
   it('passes the bot token through to the integration', async () => {
-    // `botToken` is the one Slack option passed through raw, and nothing else
-    // observes that it was passed at all: replacing it with `undefined` leaves
-    // every other case in this file green — the integration is built from the
-    // signing secret alone — while every bot API call fails at runtime.
+    // Nothing else observes that the token was passed at all: replacing it with
+    // `undefined` leaves every other case in this file green — the integration
+    // is built from the signing secret alone — while every bot API call fails at
+    // runtime.
     const { integrations } = await load({ ...SLACK_GROUP, SLACK_APP_BOT_TOKEN: 'slack-bot-token' });
 
     const slack = integrations.find(integration => integration.id === 'slack');
     if (!slack) throw new Error('expected a SlackIntegration');
     expect(slack.diagnostics().botTokenConfigured).toBe(true);
+  });
+
+  it('trims the bot token before it reaches the constructor', async () => {
+    // The token is sent as a bearer credential, so padding carried through would
+    // make Slack reject every call from a deployment whose `.env` line merely had
+    // a stray space. `diagnostics()` only reports whether a token is present, so
+    // the trim is observable on the constructor argument and nowhere else.
+    const { integrations } = await load({ ...SLACK_GROUP, SLACK_APP_BOT_TOKEN: '  slack-bot-token  ' });
+
+    expect(integrations.map(integration => integration.id)).toEqual(['slack']);
+    expect(slackOptions.last?.botToken).toBe('slack-bot-token');
+  });
+
+  it('hands a whitespace-only bot token over as undefined rather than as a token', async () => {
+    // `|| undefined` is what makes a blank value the options object's documented
+    // "absent" shape instead of a configured-but-useless one — asserted on the
+    // constructor argument, since `botTokenConfigured` would also read `false`
+    // for an empty string. The integration is still built: the token is optional
+    // (NFR23).
+    const { integrations } = await load({ ...SLACK_GROUP, SLACK_APP_BOT_TOKEN: '   ' });
+
+    const slack = integrations.find(integration => integration.id === 'slack');
+    if (!slack) throw new Error('expected a SlackIntegration');
+    expect(slackOptions.last?.botToken).toBeUndefined();
+    expect(slack.diagnostics().botTokenConfigured).toBe(false);
   });
 
   it('mounts them on MASTRACODE_CHANNELS_PUBLIC_URL when that is the only origin', async () => {

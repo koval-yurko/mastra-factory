@@ -79,6 +79,20 @@ const DOCKER_SANDBOX_DEFAULT_MEMORY_GIB = 10;
 // this host's whole memory budget. Like them it is a default, not a switch —
 // there is no value meaning "unlimited", and a malformed one falls back here.
 const DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES = 3;
+// The upper bound each per-container knob is held to: this host's whole sandbox
+// budget, written as the product of the per-container default and the
+// concurrency it was sized against so the derivation cannot drift from either.
+// The two products are 30 GiB — the share of the 32 GiB VM that sandboxes get
+// once Postgres has its couple — and 12 cores, which is every core the VM has.
+// Two different derivations landing on two numbers `sandbox/README.md` states,
+// not one whole-VM figure.
+// A knob above its bound cannot be served even as the only live session, and
+// nothing downstream would say so: the value is multiplied into
+// `HostConfig.Memory` / a CFS quota, and Docker takes the number and fails the
+// container inside the daemon instead of at the knob. Inclusive — a value equal
+// to the bound is accepted.
+const DOCKER_SANDBOX_MAX_MEMORY_GIB = DOCKER_SANDBOX_DEFAULT_MEMORY_GIB * DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
+const DOCKER_SANDBOX_MAX_CPUS = DOCKER_SANDBOX_DEFAULT_CPUS * DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
 const BYTES_PER_GIB = 1024 ** 3;
 // `HostConfig.PidsLimit`. An init process (`HostConfig.Init`, pinned below)
 // reaps the zombies an aborted command leaves behind, which is what keeps this
@@ -118,6 +132,31 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
 
   const memoryGib = positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
   const cpus = positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
+
+  // Refuse a knob raised past what this host can serve, before it is multiplied
+  // into a byte count or a CFS quota. Clamping to the bound or falling back to
+  // the default would both hide the mistake — a `.env` asking for 64 GiB would
+  // quietly get 30 or 10 — while Docker accepts any number it is handed and
+  // fails the container inside the daemon, far from the key that caused it. So
+  // this throws and names the key, exactly as the missing image above does, and
+  // for the same reason: leaving the docker branch by throwing is what keeps a
+  // refusal from falling through to the Platform or E2B arms in `selectSandbox`.
+  if (memoryGib > DOCKER_SANDBOX_MAX_MEMORY_GIB) {
+    throw new Error(
+      `FACTORY_SANDBOX_MEMORY_GIB is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
+        'this host can give one session container, so this session was refused before a container was created. ' +
+        'Lower it to that number or below; the bound itself is not a setting — sandbox/README.md says what ' +
+        'raising it takes.',
+    );
+  }
+  if (cpus > DOCKER_SANDBOX_MAX_CPUS) {
+    throw new Error(
+      `FACTORY_SANDBOX_CPUS is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
+        'give one session container, so this session was refused before a container was created. Lower it to ' +
+        'that number or below; the bound itself is not a setting — sandbox/README.md says what raising it takes.',
+    );
+  }
+
   const memoryBytes = memoryGib * BYTES_PER_GIB;
 
   return {

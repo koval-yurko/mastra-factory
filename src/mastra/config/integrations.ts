@@ -94,7 +94,10 @@ const slackSigningSecret = slackSigningSecretRaw?.trim();
 const slack = slackSigningSecret
   ? new SlackIntegration({
       signingSecret: slackSigningSecret,
-      botToken: process.env.SLACK_APP_BOT_TOKEN,
+      // `|| undefined` here and not on the two below: this options object
+      // documents `undefined` as the absent shape for the token, while the
+      // OAuth pair is consumed by truthiness, where `''` is already absent.
+      botToken: process.env.SLACK_APP_BOT_TOKEN?.trim() || undefined,
       clientId: process.env.SLACK_APP_CLIENT_ID?.trim(),
       clientSecret: process.env.SLACK_APP_CLIENT_SECRET?.trim(),
       // Slack requires an HTTPS redirect_uri, which locally is the tunnel

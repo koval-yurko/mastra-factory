@@ -178,17 +178,32 @@ describe('publicUrl', () => {
     expect(config.publicUrl).toBeUndefined();
   });
 
-  it('passes a whitespace-only value through raw, so a padded .env line is a configured origin', async () => {
-    // Pins today's behaviour rather than endorsing it, the way
-    // `infrastructure.test.ts` pins the untrimmed `REDIS_URL`. `./public-url`
-    // exports the value exactly as the environment gave it, and `@mastra/factory`
-    // reaches for its own `http://localhost:4111` default with `??` — so `'   '`
-    // is a configured public origin and the Slack OIDC routes mount against it.
-    // Adding `?.trim()` there flips both halves at once; this case makes that a
-    // visible, deliberate edit rather than a silent behaviour change.
+  it('reads a whitespace-only value as unset in both slots', async () => {
+    // Why `./public-url` trims and collapses a blank value to `undefined`: the
+    // real `@mastra/factory` reaches for its own `http://localhost:4111` default
+    // with `??`, so a raw `'   '` would be the deployment's public origin and
+    // the Slack OIDC routes would mount against it. That default is NOT what
+    // this case sees — `MastraFactory` is mocked here — only the two things
+    // that decide it: the slot the factory would have defaulted from, and the
+    // Slack fallback arm going empty.
     const config = await loadFactoryConfig({ ...SLACK_GROUP, MASTRACODE_PUBLIC_URL: '   ' });
 
-    expect(config.publicUrl).toBe('   ');
+    expect(config.publicUrl).toBeUndefined();
+    const integrations = config.integrations as { id: string; diagnostics(): { oidcConfigured: boolean } }[];
+    const slack = integrations.find(integration => integration.id === 'slack');
+    if (!slack) throw new Error('expected a SlackIntegration');
+    expect(slack.diagnostics().oidcConfigured).toBe(false);
+  });
+
+  it('trims a padded value before it reaches the factory slot', async () => {
+    // The other half of the trim: padding is removed rather than carried into an
+    // origin its consumers concatenate paths onto. Only the factory half is seen
+    // by value; `oidcConfigured` is `Boolean(clientId && clientSecret &&
+    // redirectBase)` and so reads `true` for the padded value either way — it is
+    // asserted here to say the Slack arm stayed enabled, not that it was trimmed.
+    const config = await loadFactoryConfig({ ...SLACK_GROUP, MASTRACODE_PUBLIC_URL: '  https://factory.example  ' });
+
+    expect(config.publicUrl).toBe('https://factory.example');
     const integrations = config.integrations as { id: string; diagnostics(): { oidcConfigured: boolean } }[];
     const slack = integrations.find(integration => integration.id === 'slack');
     if (!slack) throw new Error('expected a SlackIntegration');

@@ -100,7 +100,23 @@ fails once the agent reaches for git.
 
 **What the value must contain.** A whole number of gibibytes — the hard memory ceiling for one
 session's container. It is a cap, not a reservation: exceeding it OOM-kills that container instead of
-the host. Whole gibibytes only — there is no way to express a fraction of one here.
+the host. Whole gibibytes only — there is no way to express a fraction of one here, and anything that
+is not a run of digits — `-1`, `2.5`, `1e3`, `abc` — falls back to the default, `10`, rather than
+being rounded into something plausible. So do `0` and a run of digits too long for the server to hold
+exactly, which is anything past sixteen or so digits: those fall back as well rather than being
+refused, so a number that absurd gets a 10 GiB container and no error.
+
+Within the range the server can hold, the most this key may ask for is **30**: the 10 GiB per container
+below times the three concurrent sessions this host is sized for, which is the entire share of the VM's
+32 GiB that sandboxes get — a container above it could not be served even as the only live session. A
+larger number in that range is not capped or rounded down — the session that would use it is refused
+before any container is created, with an error naming this key, its value and that 30. Nothing is
+relocated: a refused session does not fall back to this host or to a cloud provider.
+
+That 30 is not a setting. It is compiled into `src/mastra/config/sandbox.ts` as the product of the
+default ceiling below and the default concurrency count, so raising it is a code edit there, and a code
+edit alone would only move the number past what the VM can serve: growing the VM and raising the two
+constants are both required, in the same change.
 
 **How to choose it.** `10` on this host. The Colima VM has 32 GiB, Postgres takes roughly 2 GiB, and
 three concurrent sandboxes at 10 GiB each come to 32 exactly — a deliberate full commit, not headroom.
@@ -117,7 +133,18 @@ above rules out. Raise this number only by growing the VM.
 
 **What the value must contain.** A whole number of cores — the hard CPU ceiling for one session's
 container, applied as a CFS quota against the 100 ms period the server pins alongside it. Whole cores
-only — a fraction of a core cannot be expressed here.
+only — a fraction of a core cannot be expressed here, and anything that is not a run of digits — `-1`,
+`2.5`, `1e3`, `abc` — falls back to the default, `4`, rather than being rounded into something
+plausible. So do `0` and a run of digits too long for the server to hold exactly, exactly as for the
+memory ceiling above: those fall back rather than being refused.
+
+Within the range the server can hold, the most this key may ask for is **12**: the 4 cores per container
+below times the three concurrent sessions this host is sized for, which is every core the VM has. A
+larger number in that range is refused the same way the memory ceiling above is — the session is refused
+before any container is created, with an error naming this key, its value and that 12, and nothing is
+relocated. And like that one, the 12 is compiled into `src/mastra/config/sandbox.ts` as the product of
+the default below and the default concurrency count, so raising it means editing those constants and
+growing the VM together, not either on its own.
 
 **How to choose it.** `4` on this host. The Colima VM has 12 cores and Postgres takes roughly one, so
 three sandboxes at 4 cores each is a mild, deliberate overcommit. The three is the same concurrency
