@@ -243,6 +243,14 @@ find src package.json package-lock.json tsconfig.json -newer .mastra/build-manif
 
 Session containers outlive a restart while the in-flight count does not, so restarting with three up admits three more. Remove the finished ones: `docker ps --filter label=mastra.sandbox=true`, then `docker rm -f`.
 
+## Traces, logs and Studio
+
+`src/mastra/observability.ts` and `src/mastra/logger.ts` are picked up by file-system routing, not imported by the entry. Every agent run, model call and tool call is traced with its full input and output: prompts, repository code, tool results. The traces are stored in this machine's own storage, and nothing is exported to Mastra Platform.
+
+The spans are stored only when the Mastra Code app data directory (`~/Library/Application Support/mastracode` on macOS) holds a `settings.json` with `{"observability":{"localTracing":true}}`. That makes the server attach `observability.duckdb` next to it. Without it, the server logs `MastraStorageExporter unavailable` once and records nothing. DuckDB has a single writer, so a Mastra Code CLI using the same directory at the same time locks one of them out.
+
+`mastra factory dev` does not serve Studio, because the Factory UI owns `/`. Run it as its own UI against this server with `npx mastra studio -p 3000 -h 127.0.0.1 -s 4111`, then open `http://127.0.0.1:3000` and use **Observability → Traces / Logs / Metrics**.
+
 ## Scripts
 
 | Script | What it does |
