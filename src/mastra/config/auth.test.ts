@@ -68,9 +68,10 @@ const { MastraAuthBetterAuth } = await import('@mastra/auth-better-auth');
  * `PREVIOUS_KEYS_SHAPE_ERROR` is: this is the entire migration instruction an
  * operator gets when a key that booted yesterday — spelled base64url, or
  * unpadded — stops booting today, and such a key cannot be regenerated without
- * stranding the ciphertext written under it. `README.md:44` quotes this
- * sentence verbatim as what the operator will see; if an edit here fails,
- * update that copy in the same change.
+ * stranding the ciphertext written under it. `README.md` step 1, under
+ * `FACTORY_CREDENTIAL_ENCRYPTION_KEY`, quotes this sentence verbatim as what
+ * the operator will see; if an edit here fails, update that copy in the same
+ * change.
  */
 const keyShapeError = (name: string) =>
   `${name} must be 43 standard-base64 characters followed by "=", as \`openssl rand -base64 32\` emits (see README.md). ` +
@@ -110,7 +111,7 @@ describe('decodeCredentialEncryptionKey', () => {
   });
 
   it('rejects the base64url alphabet, which no documented way of making this key emits', () => {
-    // `README.md:34` tells operators to run `openssl rand -base64 32`, which
+    // `README.md` step 1 tells operators to run `openssl rand -base64 32`, which
     // emits STANDARD padded base64. The rejection is about PROVENANCE, not
     // bytes: Node maps `-`→62 and `_`→63, so these spellings decode to exactly
     // the bytes the standard spelling would — measured below as equality with
@@ -138,7 +139,7 @@ describe('decodeCredentialEncryptionKey', () => {
     // the base64url pair fails on the alphabet, base64 of 31 bytes carries a
     // second `=` inside the 43-character run, and base64 of 33 bytes is 44
     // alphabet characters — leaving the code's accepted spelling wider than the
-    // one the message and `README.md:44` publish.
+    // one the message and `README.md` step 1 publish.
     const unpadded = validKey.slice(0, 43);
     expect(unpadded).toHaveLength(43);
     expect(Buffer.from(unpadded, 'base64').byteLength).toBe(32);

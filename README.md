@@ -1,22 +1,18 @@
 # Mastra Factory
 
-Mastra Factory is an open source environment for building software with coding agents. Connect your repository to turn issues into plans, implementations, and reviewed pull requests.
+An open source environment for building software with coding agents: connect a repository, turn issues into plans, implementations and reviewed pull requests.
 
-Created with [`npm create factory`](https://www.npmjs.com/package/create-factory). This project contains the Factory Server and its configuration. Keep it separate from the repository you want agents to change.
+Created with [`npm create factory`](https://www.npmjs.com/package/create-factory). This project is the Factory Server and its configuration — keep it separate from the repository agents change. [Documentation](https://factory.mastra.ai/) · [overview video](https://youtu.be/iMA-Xkhj7fU).
 
-Read the [documentation](https://factory.mastra.ai/) or [watch the Mastra Factory overview](https://youtu.be/iMA-Xkhj7fU).
+This deployment signs you in itself: `/signin` is served by this same process, and accounts, sessions and organizations are rows in this deployment's own Postgres. Nothing leaves the machine to authenticate, and there are no callback URLs to register. The auth tables are created on the first sign-in request.
 
 ## Start the Factory Server
 
-This deployment signs you in itself. The form lives at `/signin` on this same server — one process serves the Factory UI, the API and sign-in — and the accounts, sessions and organizations behind it are rows in this deployment's own Postgres, the same `DATABASE_URL` the application tables use. No request leaves this machine to authenticate: there is no redirect to Mastra platform or to any other identity provider, and there are no callback URLs to register anywhere. The auth tables are created on the first sign-in request, so there is no migration step to run first.
-
-The six steps below are the first bring-up, in order. Do not move past a step whose checkpoint does not hold.
-
-**Before you start:** a container engine running on this machine, with `DOCKER_HOST` exported in the shell you use for every command here. `ops/README.md` owns that value and the engine bring-up; `docker info` exiting 0 is the precondition for step 2's database and for step 4's `docker exec`.
+Six steps, in order. Do not move past a step whose checkpoint fails. A container engine must be running with `DOCKER_HOST` exported — `ops/README.md` owns both.
 
 ### 1 — Compose `.env`
 
-The first start needs these seven values in `.env` at the repository root. Copy `.env.example` to `.env` if you have not already. Every `<…>` is a placeholder to fill in; none of them has a usable default.
+Copy `.env.example` to `.env` and fill these seven. `.env.schema` declares every key this deployment reads and `.env.example` documents each one; only what is non-obvious is repeated here.
 
 ```dotenv
 MASTRA_HOST=127.0.0.1
@@ -28,71 +24,46 @@ FACTORY_CREDENTIAL_ENCRYPTION_KEY=<openssl rand -base64 32>
 FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID=v1
 ```
 
-Generate the two secrets with separate runs of the same command — they protect different things and must not be the same string:
-
 ```bash
-openssl rand -base64 32
+openssl rand -base64 32    # run twice — the two secrets must differ
 ```
 
-Where each value comes from. The first three are `ops/README.md`'s keys: it is the record for what each must contain, and the values below are only what this loopback bring-up uses. The rest are this file's own, and are described here.
+What will not announce itself:
 
-- `MASTRA_HOST` — `127.0.0.1` here. It is the address the socket binds to, and the one value that keeps this deployment off the network — the authenticated API, the sessions it issues, the credentials it stores, Studio, and step 3's sign-up window for as long as that is open. See `ops/README.md`; step 2 below checks what actually got bound.
-- `PORT` — `4111` here. See `ops/README.md`.
-- `MASTRACODE_PUBLIC_URL` — `http://127.0.0.1:4111` here, and it has to agree with the two above. With the keys below left unset it is the **only** origin sign-in trusts. See `ops/README.md`, whose ingress section is where the value moves to the public origin `https://factory.kovalchuk.win` — later, and only once step 3's sign-up window has been closed again. This value staying on loopback is part of what keeps that window off the network until then.
-- `DATABASE_URL` — the connection string for this deployment's Postgres, agreeing with the three `POSTGRES_*` values described under "Configure your Factory" below, which also covers starting the service with `npm run db:up`; note the constraint on `POSTGRES_PASSWORD` there, because a password containing `/`, `$` or `#` breaks this URL as well as Compose. Two extra requirements apply on this path. The role in it needs table-creation rights on the schema, because the auth tables are created by DDL on the first sign-in request rather than at deploy time. And it is not optional: `npm run dev` defaults the server to `NODE_ENV=production`, so the local-development file-database fallback is unreachable and boot stops with `DATABASE_URL is required outside local development and tests.` Leave `NODE_ENV` out of `.env` for this procedure — `ops/README.md` owns that key and records what a value there costs you.
-- `BETTER_AUTH_SECRET` — 32 or more random characters; it signs this deployment's session cookies. Generate it with the command above. Keep it stable: changing it invalidates every existing session. This key is also the switch for self-managed sign-in, and an unset, blank or **misspelled** one does not fail the boot — the server falls through to the platform-backed default provider, and `/signin` then shows a single **Sign in with Mastra Platform** button with no email/password form. That button is how this mistake announces itself; there is no error to find.
-- `FACTORY_CREDENTIAL_ENCRYPTION_KEY` — base64 of 32 random bytes, from a second run of the command above. It encrypts stored provider credentials at rest. It must be exactly 43 standard-base64 characters followed by `=`, which is what the command above emits; any other value — including a base64url (`-`, `_`) or unpadded spelling that still decodes to 32 bytes — stops the boot with ``FACTORY_CREDENTIAL_ENCRYPTION_KEY must be 43 standard-base64 characters followed by "=", as `openssl rand -base64 32` emits (see README.md). A base64url (`-`, `_`) or unpadded spelling is rejected even though it decodes to 32 bytes.`` If you are carrying a key in one of those spellings from a deployment that booted before this rule existed, **rewrite the spelling, do not generate a new key**: `-`→`+`, `_`→`/`, and pad to 44 characters with `=`. Those substitutions are what the decoder already does, so the 32 bytes are unchanged and everything stored under that key stays readable — whereas a fresh key leaves it unreadable. Read step 5 before you save your first credential.
-- `FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID` — `v1`. The identifier recorded alongside new ciphertext; change it only when rotating the key. `.env.example` already ships this one set, so there is usually nothing to do.
+- **`MASTRA_HOST`** — the literal `127.0.0.1`. Unset binds every interface including the LAN; `localhost` is not equivalent. Step 2 checks what actually bound.
+- **`MASTRACODE_PUBLIC_URL`** — the only origin sign-in trusts. It must agree with the two values above. `ops/README.md` moves it to the public origin behind the tunnel.
+- **`DATABASE_URL`** — not optional: the server runs as `NODE_ENV=production`, so there is no file-database fallback and boot stops with `DATABASE_URL is required outside local development and tests.` The role needs table-creation rights, because the auth tables are DDL'd on the first sign-in request.
+- **`BETTER_AUTH_SECRET`** — unset, blank or **misspelled** does not fail the boot. The server falls back to the platform provider and `/signin` shows a single **Sign in with Mastra Platform** button with no email/password form. That button is the only symptom.
+- **`FACTORY_CREDENTIAL_ENCRYPTION_KEY`** — must be 43 standard-base64 characters followed by `=`, as `openssl rand -base64 32` emits. A base64url (`-`, `_`) or unpadded spelling is rejected even though it decodes to 32 bytes — that sentence is the boot error verbatim. Carrying such a key from an older deployment: **rewrite the spelling, never regenerate** — `-`→`+`, `_`→`/`, pad to 44 with `=` — the bytes are unchanged and stored credentials stay readable. See step 5 before saving any credential.
 
-Four keys must stay **unset**. `MASTRACODE_AUTH_DISABLED`: set to `1` it turns authentication off entirely — and because credential encryption is only configured when authentication is on, it also drops encryption, so every stored credential is written as plaintext no matter what `FACTORY_CREDENTIAL_ENCRYPTION_KEY` says. It is listed in `.env.schema` and in `.env.example` — commented out, with that warning beside it — so that the one list of keys names it rather than leaving it to be discovered; this file is the record for why it stays unset. `MASTRACODE_ALLOWED_ORIGINS`: any non-empty value puts sign-in in cross-site mode, where session cookies are issued `SameSite=None; Secure` and a browser drops them over plain HTTP — sign-in then appears to succeed and keeps no session. `MASTRA_SHARED_API_URL`: set, it takes precedence over `BETTER_AUTH_SECRET` and hands identity back to a platform API, which is exactly what this deployment does not do. `BETTER_AUTH_TRUSTED_ORIGINS`: a comma-separated list appended to the trusted origins above, widening what may post credentials to this server.
+Four keys must stay **unset**: `MASTRACODE_AUTH_DISABLED` (drops authentication *and* credential encryption — every stored secret becomes plaintext), `MASTRACODE_ALLOWED_ORIGINS` (cross-site cookies the browser drops over HTTP — sign-in appears to succeed and keeps no session), `MASTRA_SHARED_API_URL` (hands identity back to the platform, beating `BETTER_AUTH_SECRET`), `BETTER_AUTH_TRUSTED_ORIGINS` (widens what may post credentials here).
 
-How `.env` reaches the server, since three things can defeat the values above without saying so. `npm run dev` loads `.env`, then `.env.local`, then `.env.development`, with later files winning — so a stale `.env.local` silently overrides what you just wrote. A key already exported in your shell beats all three files, and nothing logs that it did. And the files are read once at startup, relative to the directory the command runs in, so every edit needs the dev server stopped and started again.
-
-One thing about the three `ops/README.md` keys belongs here rather than there: `npm run dev`, the path this procedure uses, is bare `mastra factory dev` and never opens `.env.schema`, so all three reach the server exactly as `.env` spelled them, with nothing checking them and nothing supplying a default for one you leave out.
+`npm run dev` loads `.env`, then `.env.local`, then `.env.development`, later winning; an exported shell variable beats all three, silently. Files are read once at startup, relative to the working directory.
 
 ### 2 — Start the database and the server
 
-Run these from the repository root — `.env` is resolved against the directory the command runs in:
-
 ```bash
-npm ci        # whenever the dependency tree has moved since your last install
+npm ci                                                                 # when the dependency tree moved
 npm run db:up
 docker inspect --format '{{.State.Health.Status}}' mastracode-web-db   # expect: healthy
 npm run dev
+lsof -nP -iTCP:4111 -sTCP:LISTEN                                       # expect: 127.0.0.1:4111
 ```
 
-Run `npm ci` first if this checkout has pulled changes since it was last installed — self-managed sign-in and the Docker sandbox each arrived with their own package, and a tree missing them cannot even import the auth provider it is asked to start. Do not start the server until the health check prints `healthy`: everything below needs the database the first sign-in request creates its tables in. `ops/README.md` covers what to do when it does not.
+`*:4111` means `MASTRA_HOST` never reached the server — stop and fix step 1. Do not start the server before the health check passes; `ops/README.md` covers a database that will not come up.
 
-Once the server is up, confirm what the socket actually bound — this is the check that the whole deployment, step 3's sign-up window included, stays on this machine:
-
-```bash
-lsof -nP -iTCP:4111 -sTCP:LISTEN
-```
-
-Expected: `127.0.0.1:4111`. A `*:4111` means `MASTRA_HOST` did not reach the server: this deployment is listening on every interface, this machine's LAN address included, and step 3 would open its sign-up window there too. Stop the server and fix step 1 before going further.
-
-Then open this URL in the browser:
-
-```
-http://127.0.0.1:4111/signin
-```
-
-Type it; do not click the one in the banner. `npm run dev` always prints `http://localhost:4111` regardless of the address it bound, and opening that instead is the trap this section exists for: the page loads, then the sign-in request carries an origin that is not trusted, is refused with `403`, and the only explanation is a server log line reading `Invalid origin: http://localhost:4111`.
+Then open **`http://127.0.0.1:4111/signin`** by typing it. `npm run dev` always prints `http://localhost:4111` whatever it bound, and that origin is refused with `403` and one server log line: `Invalid origin: http://localhost:4111`.
 
 ### 3 — Create the account
 
-`/signin` shows **Welcome back** over an email and password form, and underneath it the line **Account creation is managed by your administrator.** Registration is closed on this deployment: sign-up is disabled in committed code — the literal `signUpEnabled: false` in `src/mastra/config/auth.ts` — not by anything in `.env`, so there is no key to set and no value to change here. Creating the first account means opening that window on purpose and closing it again.
+Registration is closed in committed code — the literal `signUpEnabled: false` in `src/mastra/config/auth.ts`, not a key in `.env`. Creating the first account means opening that window and closing it again. Only ever do this on the loopback `npm run dev` path, never on an instance reachable from the internet.
 
-This procedure belongs to the `npm run dev` path in step 2, where step 1's loopback bind is what keeps the open window on this machine. On a built or deployed instance — `npm run build` and `npm run start`, or `npm run deploy`, both under "Deploy" below — the source edit changes nothing until a rebuild, and there is no loopback bind to protect the window at all. Never open it on a deployment that is reachable from the internet.
+1. Set `signUpEnabled: true` (keep the field — deleting it also reopens registration, since the package default is `true`). **Do not commit or stash while it stands**: `npm test` and the verify gate both go red, and a commit inside this window ships open registration.
+1. Save; `npm run dev` rebundles and prints `[Mastra Dev] - ✅ Restarting server...`. If that line does not appear, restart it yourself.
+1. Reload `/signin`, choose **New here? Sign up**, fill Name / Email / Password (8+ characters), submit. You are signed in and onboarding starts — read step 5 before saving a provider key.
+1. Set the field back to `false` as soon as the account exists, wait for the restart line, then `git diff --exit-code src/mastra/config/auth.ts`.
 
-1. In `src/mastra/config/auth.ts`, find `signUpEnabled: false` in the `MastraAuthBetterAuth` options and change it to `signUpEnabled: true`. Leave the field in place — deleting it reopens registration too, because the package default is `true`, but leaves nothing to put back. Do not commit or stash this edit while it stands: `npm test` goes red on the test named `closes registration: a self-managed provider never allows sign-up`, and the repository's verify gate fails alongside it on the check that `signUpEnabled: false` is still a literal with no environment key behind it — both for exactly as long as the field says `true`, both doing their job, and a commit made inside this window ships open registration in tracked source.
-1. Saving the file is what opens the window — you do not restart anything. `npm run dev` watches the source, rebundles on save and respawns the server itself; watch its output for `[Mastra Dev] - ✅ Restarting server...`. If that line does not appear, stop the dev server and start it again before going on. Registration is open from that restart until you restore the field below, and step 1's loopback bind is the only thing keeping that window off the network.
-1. Reload `/signin`. A **New here? Sign up** toggle now appears where that line was. Choose it — it adds a required **Name** field above **Email** and **Password** — fill in all three, the password at least 8 characters or the request comes back rejected, and submit **Create account**. That creates the account and signs you in, and the browser goes straight on into onboarding, which asks for the repository agents should change and for a model provider — read step 5 before you save that provider's API key.
-1. Close the window as soon as the account exists; do not wait until onboarding is finished. Set the field back to `signUpEnabled: false`, save, and wait for the same restart line. The restart costs you nothing here — the account is a database row and your session is a cookie, so both survive it and onboarding picks up where it left off. Then confirm nothing was left behind: `git diff --exit-code src/mastra/config/auth.ts` must print no output.
-
-Create your account, and only yours.
-
-Checkpoint, with the field back at `false` and the server restarted. `/signin` should again show **Account creation is managed by your administrator.** and no sign-up toggle — but read that as a hint, not as proof. The page hides the toggle only when `/auth/me` answers `signUpDisabled: true`, so a visible toggle can equally mean the page could not read auth state at all. The probe below is the authoritative check:
+Create your account, and only yours. Then prove registration is closed — the missing sign-up toggle is a hint, not proof, because the page also hides it when it cannot read auth state:
 
 ```bash
 curl -s -w '\n%{http_code}\n' -X POST http://127.0.0.1:4111/auth/api/sign-up/email \
@@ -100,56 +71,39 @@ curl -s -w '\n%{http_code}\n' -X POST http://127.0.0.1:4111/auth/api/sign-up/ema
   -d '{"name":"probe","email":"probe@example.invalid","password":"<any 8+ characters>"}'
 ```
 
-Exactly one outcome passes: **`400` carrying `EMAIL_PASSWORD_SIGN_UP_DISABLED` in the body.** Every other result is inconclusive — it has not shown registration is closed — so do not move on from one:
-
-- `000` — nothing answered at that address; `-s` hides the connection error. The server is not running, or not on this port. Back to step 2.
-- `404` — the path is wrong, or self-managed sign-in was never selected, so `/auth/api` is not mounted at all. See `BETTER_AUTH_SECRET` in step 1.
-- `503` with `auth_unavailable` — the auth schema migrations failed; step 4 below diagnoses it. Nothing about sign-up has been tested yet.
-- `200` — registration is still open, and the probe has just created a real second account. The field is still `true`, or the file was saved and the rebuild never ran. Delete that account, then restore the field, wait for the restart line, and probe again:
+Only **`400` with `EMAIL_PASSWORD_SIGN_UP_DISABLED`** passes. Everything else is inconclusive: `000` nothing is listening (back to step 2); `404` self-managed sign-in was never selected (see `BETTER_AUTH_SECRET`); `503 auth_unavailable` the auth migrations failed (step 4); `200` registration is still open **and the probe just created a real account** — delete it, restore the field, probe again:
 
 ```bash
 docker exec mastracode-web-db psql -U factory -d mastracode_web -c \
   "DELETE FROM \"user\" WHERE email = 'probe@example.invalid';"
 ```
 
-`"user"` is double-quoted for the same reason as in step 4 — unquoted it means the session user, not the table — and the role and database names come from your `.env` if you did not keep the defaults. If a foreign key refuses the delete, remove that account's rows in `"session"` and `"account"` first, matched on its `"userId"`.
+If a foreign key refuses, delete that user's `"session"` and `"account"` rows first.
 
 ### 4 — Checkpoint: the organization
 
-Every signed-in user needs a personal organization — the org-scoped features (GitHub connect, projects) have nothing to attach to without one. It is created on the first authenticated request the browser makes, not by the sign-up itself, so an account created with `curl` alone has rows in `"user"` and none in `"organization"`: that is not yet a failure, it just means no browser has loaded the app under that account.
-
-`psql` is not installed on this host; it exists only inside the database container:
+Org-scoped features (GitHub connect, projects) need a personal organization, created on the first authenticated request a browser makes — not by sign-up. `psql` exists only inside the container:
 
 ```bash
 docker exec mastracode-web-db psql -U factory -d mastracode_web -c \
   'SELECT o.slug, o.name, m.role, u.email FROM "member" m JOIN "organization" o ON o.id = m."organizationId" JOIN "user" u ON u.id = m."userId";'
 ```
 
-Expected: exactly one row — slug `personal-<your user id>`, name `<your email>'s org`, role `owner`, and your email address. Substitute the role and database names from your `.env` if you did not keep the defaults.
+Expect one row: `personal-<user id>`, `<email>'s org`, `owner`. Every identifier is double-quoted deliberately — the auth tables are camelCase and case-sensitive, and `user` unquoted means the session user.
 
-Every identifier in that statement is double-quoted on purpose. The auth tables are created with camelCase, case-sensitive names, so `"organizationId"` unquoted would be folded to `organizationid` and not found — and `user` is a reserved word in PostgreSQL, where unquoted it means the session user rather than the table.
+Empty **after** loading the app in a browser is a failed bootstrap: it swallows its error, so the only record is `[BetterAuth] Failed to bootstrap personal organization for user` in the server log, and the app shows `organization_required`.
 
-An empty result **after** you have loaded the app in the browser is a failed bootstrap to investigate, never expected state. The bootstrap is best-effort: it swallows its error and leaves you without an organization rather than refusing the sign-in, so the only record is a server log line. Grep the server output for:
-
-```
-[BetterAuth] Failed to bootstrap personal organization for user
-```
-
-You will see `organization_required` in the app until it succeeds.
-
-One failure nearby looks like a different problem than it is: sign-in requests answered with `503 {"error":"auth_unavailable"}` read like a bad `BETTER_AUTH_SECRET`, but mean the auth schema migrations could not run. The server log says `[BetterAuth] Failed to run auth schema migrations; auth stays unavailable until this succeeds.` — and that one line covers every reason the migration failed. Check first that the database is running and reachable at the address in `DATABASE_URL` (step 2's health check); only then suspect the role's right to create tables.
+`503 {"error":"auth_unavailable"}` on sign-in reads like a bad secret but means the auth migrations could not run — `[BetterAuth] Failed to run auth schema migrations; auth stays unavailable until this succeeds.` Check the database is reachable at `DATABASE_URL` before suspecting table-creation rights.
 
 ### 5 — The credential-encryption rule
 
-`FACTORY_CREDENTIAL_ENCRYPTION_KEY` has to be in `.env` and in force **before** the first credential is stored — the first model-provider API key saved from Settings, and equally any custom-provider key, GitHub token or integration OAuth token. Nothing refuses the write when the key is missing: the server warns twice at boot and then persists those secrets as readable plaintext in the database.
+`FACTORY_CREDENTIAL_ENCRYPTION_KEY` must be in force **before the first credential is stored** — any provider key, GitHub token or OAuth token. Nothing refuses the write without it: the server warns twice at boot and persists the secret as readable plaintext.
 
-Setting the key afterwards does not repair what is already there, and what it does instead is worse than doing nothing. The next boot does sweep the stored credentials and encrypt every row that is not already encrypted — but the plaintext writer stored the value in a form that sweep re-encodes a second time, so the row comes back as an unusable string and the credential stops working. Either way the secret sat on disk in the clear until then. If a credential was saved before the key was in place, treat it as exposed — rotate it at the provider, delete the stored copy, and save the new one with the key in force. Encrypted values are recognizable by the literal prefix `mastra:factory-secret:v1:`; a plaintext row is readable JSON.
+Setting the key later is worse than doing nothing. The next boot sweeps and encrypts unencrypted rows, but re-encodes what the plaintext writer stored, leaving an unusable string — and the secret was on disk in the clear until then. Treat any credential saved before the key as exposed: rotate at the provider, delete the stored copy, save again. Encrypted values start with `mastra:factory-secret:v1:`; plaintext rows are readable JSON.
 
-Copy the key somewhere off this machine before you use it — a password manager, never this repository. `.env` is gitignored and is the only copy on disk, so losing this machine loses the key and every credential encrypted with it at the same time, and the stored credentials are unreadable without it. Preserve it across restarts and deployments.
+Copy the key to a password manager before using it. `.env` is gitignored and is the only copy on disk; losing it loses every credential encrypted under it.
 
 ### 6 — Where agent sessions run
-
-Add these three to `.env` before opening the first session, then restart the server:
 
 ```dotenv
 FACTORY_SANDBOX_PROVIDER=docker
@@ -157,178 +111,161 @@ FACTORY_SANDBOX_IMAGE=factory-sandbox:<YYYY-MM-DD>
 MASTRACODE_MAX_SANDBOXES=3
 ```
 
-These can equally go into step 1's block, alongside the seven values there, which saves the restart — they are a separate step only because they are the first ones that need an image to exist, and nothing before this point uses them.
+`sandbox/README.md` owns all three — building the image, the tag history, and sizing the cap against this host. Set them before the first session (they can go in step 1's block).
 
-`sandbox/README.md` is where each of these values comes from — it covers building the image the second line names, the tag history the date comes from, and how the third number is chosen against this host's memory. It is not restated here; the point of this step is that the keys have to be set at all.
+With `FACTORY_SANDBOX_PROVIDER` unset nothing stops or warns: sessions run as the server process on **this host**, and a stray `MASTRA_PROJECT_ID` or `E2B_API_KEY` sends them to someone else's VM instead. `docker` is checked ahead of both. `FACTORY_SANDBOX_IMAGE` has no default — blank refuses the first session, and a tag that is not `factory-sandbox:<date>` refuses the *boot*, naming the key.
 
-With `FACTORY_SANDBOX_PROVIDER` unset the server does not stop, warn, or ask. It falls through to running sessions as the server process on **this host**, which means the agent's checkout, its `node_modules` and every command it runs land on this machine's filesystem rather than inside a container — and with a stray `MASTRA_PROJECT_ID` or `E2B_API_KEY` in `.env` it goes further and runs them on someone else's VM instead. Set to `docker`, it is checked ahead of both, so this is structural rather than a matter of keeping `.env` tidy.
+```bash
+grep -E '^(FACTORY_SANDBOX_PROVIDER|FACTORY_SANDBOX_IMAGE|MASTRACODE_MAX_SANDBOXES)=' .env
+docker images factory-sandbox
+docker ps --filter label=mastra.sandbox=true    # once the first session is open
+```
 
-`FACTORY_SANDBOX_IMAGE` has no default: with the provider set to `docker` and this blank, the first session refuses to start and the error names the key. A value that is neither blank nor a date-stamped `factory-sandbox:` tag does not get that far — `npm start` itself refuses to come up, with an error naming the key — so a tag of the wrong shape shows up as a server that will not start rather than as a session that will not open. A tag of the right shape naming an image this engine does not hold is a different case and is not caught here; it still fails at the first session, which `sandbox/README.md` covers. `MASTRACODE_MAX_SANDBOXES` caps how many session containers this server process runs at once; the session past it is refused with an error naming the key, which is the intended behaviour on a host sized for three and not a fault to work around.
-
-Checkpoint: `grep -E '^(FACTORY_SANDBOX_PROVIDER|FACTORY_SANDBOX_IMAGE|MASTRACODE_MAX_SANDBOXES)=' .env` prints all three lines with values filled in, `docker images factory-sandbox` lists the tag the second one names, and the server has been started again since you wrote them — `.env` is read once at startup, so a server still running from step 2 does not have them.
-
-The first session is what proves this end to end, and that happens in "Run your first issue" below: once one is open, `docker ps --filter label=mastra.sandbox=true` should list a container for it, with the repository checkout inside that container rather than anywhere on this host.
+Restart the server after writing them — `.env` is read once at startup.
 
 ## Run your first issue
 
-1. Open **Settings → Work Intake → GitHub issues**. Enable **Sync GitHub issues** and select your repository. Each teammate chooses their own issue sources.
-1. Create a small GitHub issue, such as adding contribution guidance to the repository's README.
-1. Find the issue in **Work → Intake**, select **Investigate**, and open its session to follow the agent's work.
+1. **Settings → Work Intake → GitHub issues**: enable **Sync GitHub issues** and select your repository. Each teammate chooses their own sources.
+1. Create a small issue in that repository.
+1. Find it in **Work → Intake**, select **Investigate**, and open the session.
 
-Continue with the [issue-to-pull-request walkthrough](https://factory.mastra.ai/#create-your-first-pull-request) to review a plan and take the change through implementation and pull request review.
+Continue with the [issue-to-pull-request walkthrough](https://factory.mastra.ai/#create-your-first-pull-request).
 
 ## Configure your Factory
 
-Choose authentication, storage, and sandboxes independently. Model providers and issue sources are configured through the Factory UI. Server settings live in `.env`; restart the server after changing them.
+Model providers and issue sources are configured in the UI; server settings live in `.env` and need a restart.
 
-| Configuration                                              | What you can change                                                           |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [Models](https://factory.mastra.ai/configure/models)       | Provider access, personal or organization credentials, and the default model. |
-| [GitHub](https://factory.mastra.ai/configure/github)       | Repository access and personal issue intake.                                  |
-| [Linear](https://factory.mastra.ai/configure/linear)       | Workspace connection, project selection, and routing issues to a Factory.     |
-| [Slack](https://factory.mastra.ai/configure/slack)         | App setup, account linking, and starting sessions from Slack.                 |
-| [Auth](https://factory.mastra.ai/configure/auth)           | This deployment's own sign-in — see "Start the Factory Server" above.         |
-| [Storage](https://factory.mastra.ai/configure/storage)     | The database connection or Factory storage adapter.                           |
-| [Sandboxes](https://factory.mastra.ai/configure/sandboxes) | Mastra platform, local execution, or another Mastra sandbox provider.         |
+| Configuration | What you can change |
+| --- | --- |
+| [Models](https://factory.mastra.ai/configure/models) | Provider access, credentials, default model |
+| [GitHub](https://factory.mastra.ai/configure/github) | Repository access and personal issue intake |
+| [Linear](https://factory.mastra.ai/configure/linear) | Workspace connection, project selection, routing |
+| [Slack](https://factory.mastra.ai/configure/slack) | App setup, account linking, starting sessions |
+| [Storage](https://factory.mastra.ai/configure/storage) | The database connection or storage adapter |
+| [Sandboxes](https://factory.mastra.ai/configure/sandboxes) | Platform, local execution, or another provider |
 
-The generated server uses `DATABASE_URL` for PostgreSQL with pgvector. To use the included local PostgreSQL service, start from `.env` — copy `.env.example` to `.env` if you have not already — and set the three values `docker-compose.yml` reads from it:
+The bundled Postgres (pgvector, published on `127.0.0.1:54329` only) reads three values from `.env`: `POSTGRES_PASSWORD` — no default, every `docker compose` command fails until it is set; generate it with `openssl rand -hex 32`, because `/`, `$` and `#` break both the connection URL and Compose interpolation. `POSTGRES_USER` (`factory`) and `POSTGRES_DB` (`mastracode_web`) keep their defaults here. All three apply **only** when the data volume is first initialized; changing one later renames nothing.
 
-- `POSTGRES_PASSWORD` — the database role's password. There is no default, and Compose reads `docker-compose.yml` for every command, so `npm run db:up`, `npm run db:down` and any other `docker compose` call stop with an error naming the variable until you set it. Generate a long random value with `openssl rand -hex 32` rather than choosing a memorable one; hex output stays safe in the connection URL below, in `.env`, and in Compose's own interpolation, which characters like `/`, `$` and `#` do not. Keep it only in `.env`.
-- `POSTGRES_USER` — the role the database is created with. Defaults to `factory`. Keep it to letters, digits and underscores: Compose expands a `$` while reading `.env`, and a `"` breaks the health check command the value is interpolated into.
-- `POSTGRES_DB` — the database name. Defaults to `mastracode_web`.
-
-Then run `npm run db:up` and set `DATABASE_URL` in the same `.env` to match the three values in use, for example `postgres://factory:<password>@127.0.0.1:54329/mastracode_web`. The service publishes port `54329` on loopback only, so nothing else on the network can reach it. `npm run db:up` waits up to 120 seconds for the container to report healthy and then exits non-zero rather than waiting indefinitely; a first start on an empty volume normally reports well inside that, and `ops/README.md` covers what to do if it does not.
-
-The container applies all three values only when it initializes an empty data volume, so they fix the role, password, and database name at the first `npm run db:up` and are ignored on every later start. Changing one afterwards does not rename or re-password anything. To start over, run `docker compose down -v` — this deletes the database's contents — then `npm run db:up` again. `docker-compose.yml` pins `name: mastra-factory`, so that command addresses the project by name rather than by the directory you run it from: it deletes the same volume from any checkout or worktree of this repo, not a local copy of one.
-
-`docker-compose.yml` pins the Compose project name to `mastra-factory`, so **every checkout of this repo — including every git worktree — addresses the same stack and the same data volume.** `docker compose down -v` is therefore never local to the directory you run it in: from any checkout it destroys the one copy of projects, work items, sessions, memory and tokens. Before the project name was pinned, each checkout got its own `<directory-basename>_mastracode-web-pgdata` volume; the first `npm run db:up` after the pin lands on a new, empty `mastra-factory_mastracode-web-pgdata` and collides with any container still running under the fixed name `mastracode-web-db`, so check `docker volume ls` for an older volume before concluding the data is gone.
-
-If `POSTGRES_PASSWORD` goes missing from `.env` after the first start, no `docker compose` command runs — `npm run db:down` included — while the container keeps restarting and holding port `54329`. Put any value back in `.env` to regain control of it (the running database keeps the password it was created with, so `DATABASE_URL` still needs the original), or stop it directly with `docker stop mastracode-web-db && docker rm mastracode-web-db`.
-
-Mastra platform sandboxes use `MASTRA_PLATFORM_ACCESS_TOKEN` or `MASTRA_PLATFORM_SECRET_KEY`, together with `MASTRA_PROJECT_ID` and `MASTRA_ENVIRONMENT_ID`. Two overrides in `.env` keep sessions on the Factory Server's machine instead, and either one wins over the platform variables above:
-
-```dotenv
-FACTORY_SANDBOX_PROVIDER=docker
+```bash
+npm run db:up      # waits up to 120s for healthy, then exits non-zero
+npm run db:down
 ```
 
-runs each session in its own container on the Docker engine that machine talks to — the isolated option, and the one this deployment is built for. It needs a container image to run; `sandbox/README.md` covers building one and the values that configure it.
+**`docker compose down -v` deletes the database.** `docker-compose.yml` pins `name: mastra-factory`, so every checkout and worktree addresses the same stack and the same volume — from any directory that command destroys the one copy of projects, work items, sessions, memory and tokens. If `POSTGRES_PASSWORD` goes missing after the first start, no Compose command runs at all while the container keeps holding the port; put any value back, or `docker stop mastracode-web-db && docker rm mastracode-web-db`.
 
-```dotenv
-FACTORY_SANDBOX_PROVIDER=local
-```
+Sandboxes: `FACTORY_SANDBOX_PROVIDER=docker` runs each session in its own container (what this deployment uses — step 6 above); `local` runs commands as the server process with no isolation. Either beats the Mastra platform sandbox variables. Neither affects sign-in.
 
-runs commands directly as the server process instead, with no isolation between sessions. Install Git and your repository's build tools on that machine.
+### Environment keys
 
-For this deployment the procedure is step 6 of "Start the Factory Server" above, not a choice between these two: `docker` is the value it sets, an unset key puts the agent's checkout on this host rather than in a container, and a third key — `MASTRACODE_MAX_SANDBOXES` — caps how many session containers run at once. `sandbox/README.md` owns all three values.
-
-Neither affects sign-in: this deployment authenticates against its own database, as "Start the Factory Server" describes, and storage is the `DATABASE_URL` Postgres. The separate `SANDBOX_PROVIDER` setting selects the backend used by Mastra platform sandboxes.
-
-## Keys this file owns
-
-`.env.schema` is the list of every environment key this deployment reads, and each of those keys has exactly one README that says what its value must contain and how to obtain it. Five of them live with their subject — `apps/github/README.md`, `apps/linear/README.md`, `apps/slack/README.md`, `sandbox/README.md` and `ops/README.md`, each carrying a `## Keys this subject owns` table. This file is the residual owner: it claims every declared key with no operator-plane subject directory of its own, which is most of them. Between the six tables, every key `.env.schema` declares is claimed exactly once.
-
-| Key | What the value must contain | Full record |
-|---|---|---|
-| `DATABASE_URL` | the connection string for this deployment's Postgres | "Start the Factory Server" step 1 |
-| `BETTER_AUTH_SECRET` | 32 or more random characters, stable across deploys | "Start the Factory Server" step 1 |
-| `FACTORY_CREDENTIAL_ENCRYPTION_KEY` | base64 of 32 random bytes, in force before the first credential | "Start the Factory Server" steps 1 and 5 |
-| `FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID` | `v1`, changed only when rotating the key | "Start the Factory Server" step 1 |
-| `POSTGRES_USER` | the role the database is created with | "Configure your Factory" above |
-| `POSTGRES_PASSWORD` | a long random value with no `/`, `$` or `#` in it | "Configure your Factory" above |
-| `POSTGRES_DB` | the database name | "Configure your Factory" above |
-| `MASTRACODE_AUTH_DISABLED` | must stay unset | "Start the Factory Server" step 1 |
-| `MASTRACODE_ALLOWED_ORIGINS` | must stay unset | "Start the Factory Server" step 1 |
-| `MASTRA_SHARED_API_URL` | must stay unset | "Start the Factory Server" step 1 |
-| `BETTER_AUTH_TRUSTED_ORIGINS` | must stay unset | "Start the Factory Server" step 1 |
-| `FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS` | old key ids mapped to their keys, during a rotation only | "Declared, and not set here" below |
-| `APP_DATABASE_URL` | nothing — the deprecated spelling of `DATABASE_URL` | "Declared, and not set here" below |
-| `MASTRA_DB_PATH` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRACODE_UI_DIST` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_ORGANIZATION_ID` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_COOKIE_DOMAIN` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PLATFORM_ACCESS_TOKEN` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PLATFORM_SECRET_KEY` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PROJECT_ID` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_ENVIRONMENT_ID` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_WORKSPACE_PROXY_URL` | nothing on this deployment | "Declared, and not set here" below |
-| `SANDBOX_PROVIDER` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PLATFORM_GITHUB_POLLING_ENABLED` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PLATFORM_GITHUB_POLLING_INTERVAL_MS` | nothing on this deployment | "Declared, and not set here" below |
-| `MASTRA_PLATFORM_GITHUB_RECONCILE_ENABLED` | nothing on this deployment | "Declared, and not set here" below |
-| `WORKOS_API_KEY` | nothing — legacy, and read by nothing | "Declared, and not set here" below |
-| `WORKOS_CLIENT_ID` | nothing — legacy, and read by nothing | "Declared, and not set here" below |
-| `WORKOS_REDIRECT_URI` | nothing — legacy, and read by nothing | "Declared, and not set here" below |
-| `WORKOS_COOKIE_PASSWORD` | nothing — the middle link of the state-signer chain | "Declared, and not set here" below |
-| `ANTHROPIC_API_KEY` | nothing — provider keys are added from the UI instead | "Declared, and not set here" below |
-| `OPENAI_API_KEY` | nothing — provider keys are added from the UI instead | "Declared, and not set here" below |
-| `MASTRACODE_DISTRIBUTED_LOCK` | nothing, which leaves the lock layer on | "Declared, and not set here" below |
-| `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` | nothing, which keeps the dispatcher's own default | "Declared, and not set here" below |
-| `VITE_REACT_GRAB` | nothing outside a local UI debugging session | "Declared, and not set here" below |
-
-`.env.schema` declares and validates every key in that table and is the only list of key names; this file never restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here by path and never copied.
-
-### Declared, and not set here
-
-These are declared so that the list of keys is complete and so that a value found in somebody's `.env` can be identified, not because this deployment sets them. Leaving each one blank is the correct state.
-
-- `FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS` — a JSON object mapping previous key ids to their base64 keys. It exists for a rotation: put the old key here, change `FACTORY_CREDENTIAL_ENCRYPTION_KEY` and its id, and stored rows are re-encrypted as they are read. Remove it once nothing is left on the old id. Each **value** here must be spelled exactly as `FACTORY_CREDENTIAL_ENCRYPTION_KEY` must be — 43 standard-base64 characters followed by `=` — and a value that is not stops the boot, naming the entry that failed rather than the whole object (``FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS["v1"] must be 43 standard-base64 characters followed by "=" …``). An old key in a base64url or unpadded spelling gets the same treatment as the primary key above: rewrite the spelling, which preserves the bytes, rather than substituting a different key — the whole point of the entry is that it decrypts rows written under it. Surrounding whitespace in a value is trimmed; the **ids** are not, so an id must be written exactly as it was recorded with the ciphertext.
-- `APP_DATABASE_URL` — the old name for `DATABASE_URL`, still honored as a fallback. Setting both is how a checkout ends up pointed at two databases; set `DATABASE_URL` only.
-- `MASTRA_DB_PATH` — the libSQL file used when no database URL is set, which on this deployment never happens.
-- `MASTRACODE_UI_DIST` — an explicit path to the built SPA. The server finds it beside its own bundle; set this only if you have moved that output.
-- `MASTRA_SHARED_API_URL`, `MASTRA_ORGANIZATION_ID`, `MASTRA_COOKIE_DOMAIN` — the platform-deferred sign-in path. The first is one of the four keys step 1 requires to stay unset, and the other two mean nothing until it is set.
-- `MASTRA_PLATFORM_ACCESS_TOKEN`, `MASTRA_PLATFORM_SECRET_KEY`, `MASTRA_PROJECT_ID`, `MASTRA_ENVIRONMENT_ID`, `MASTRA_WORKSPACE_PROXY_URL`, `SANDBOX_PROVIDER` — Mastra Platform credentials and the cloud sandbox they select. This deployment runs its sandboxes in containers on this host; `sandbox/README.md` is where that is configured, and `FACTORY_SANDBOX_PROVIDER=docker` is what keeps a stray value here from relocating a session.
-- `MASTRA_PLATFORM_GITHUB_POLLING_ENABLED`, `MASTRA_PLATFORM_GITHUB_POLLING_INTERVAL_MS`, `MASTRA_PLATFORM_GITHUB_RECONCILE_ENABLED` — the Platform GitHub integration's own polling and sweep. They are not the sweep this deployment runs; `apps/github/README.md` owns that one, and the two sets of names are easy to confuse.
-- `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_REDIRECT_URI` — legacy. None of them selects or changes anything now.
-- `WORKOS_COOKIE_PASSWORD` — legacy too, with one live use: it is the middle link of the chain that signs OAuth and install state, after `GITHUB_APP_WEBHOOK_SECRET` and before `SLACK_APP_SIGNING_SECRET`. This deployment sets the first of the three, so this one stays unset; `apps/github/README.md` is the record for that chain.
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` — model-provider keys are read from `.env` at boot if present, but this deployment adds them from **Settings → Models** instead, where they are encrypted at rest with the key from step 5. A key in `.env` is a plaintext copy on disk that nothing rotates.
-- `MASTRACODE_DISTRIBUTED_LOCK` — the Postgres advisory-lock layer that serialises per-project git writes across replicas. It is on by default and wants `DATABASE_URL`, both of which hold here, so leave it alone. `0` is for a single process with no database.
-- `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` — a cap on how many Factory background dispatches one server process runs at once. Unset keeps the dispatcher's own default, which is what this host runs; a positive whole number lowers it, for a host doing too much at a time. Anything that is not a run of digits is ignored rather than refused — `1e3` and `+5` read as whole numbers to a person but are not runs of digits, and neither takes effect — as are `0` and a run of digits too long for the server to hold exactly, so confirm the effect rather than trusting that the line took. The cap is per server process and is unrelated to `MASTRACODE_MAX_SANDBOXES`, which `sandbox/README.md` owns.
-- `VITE_REACT_GRAB` — loads react-grab in the Vite development server when set to exactly `true`. It touches nothing the Factory Server serves.
+`.env.schema` is the only list of keys and is what validates them; `.env.example` carries a comment per key. Two things live here because `.env.example` defers to this file for them: the exact format of `FACTORY_CREDENTIAL_ENCRYPTION_KEY` and the command that generates it (step 1), and the rule about when it must be in force (step 5). Keys owned elsewhere: `apps/github/README.md`, `apps/linear/README.md`, `apps/slack/README.md`, `sandbox/README.md`, `ops/README.md`. Non-obvious runtime behaviour is in `docs/self-hosting-research.md` §11.
 
 ## Deploy
 
-### Mastra platform
-
-Deploy the Factory Server to your Mastra platform project:
-
 ```bash
-npm run deploy
+npm run deploy                    # to your Mastra platform project
+npm run build && npm run start    # self-hosted, as a persistent service
 ```
 
-The CLI reports the deployed Factory URL. See [Deployment](https://factory.mastra.ai/deployment) for environment configuration and deployment options.
+Self-hosting needs persistent storage, `MASTRACODE_PUBLIC_URL` on the public HTTPS origin, and provider credentials in the deployment environment. See [Deployment](https://factory.mastra.ai/deployment). On this host those two commands are run by `launchd` — see below.
 
-### Self-host
+## Production mode on this host
 
-Run Factory as a persistent Node.js service on a virtual machine or in a container. Configure persistent storage and set `MASTRACODE_PUBLIC_URL` to the public HTTPS origin. Supply your provider credentials through the deployment environment, then build and start the server:
+Two LaunchAgents own the deployment: `ai.mastra.colima` runs the container engine, and `ai.mastra.factory` runs `ops/factory-start.sh`, which waits for the Docker socket then execs `npm run start` (`varlock run -- mastra start`), serving the build in `.mastra/output`. `ops/README.md` owns those files and the first bootstrap. Every command below names the **Factory** agent only — restarting Colima would take the database and every session container with it.
+
+`launchctl list` reports the pid of `npm run start`; the process on `4111` is a `node index.mjs` further down the chain (`caffeinate` → `factory-start.sh` → `npm` → `varlock` → `mastra start` → `node`). Both are correct and never the same number.
+
+### Logs
+
+`launchd` writes to four files and nowhere else. `out.log` is the wrapper's `[factory] …` lines plus server stdout; `err.log` is its stderr; `colima.log` and `colima.err.log` are the engine's — and a `--foreground` Colima puts most output in the `.err` one.
 
 ```bash
-npm run build
-npm run start
+tail -f ~/Library/Logs/mastra-factory/out.log
+tail -n 200 ~/Library/Logs/mastra-factory/err.log
+bzgrep -h 'pattern' ~/Library/Logs/mastra-factory/out.log.*.bz2   # rotated: 7 × 10 MB, bzip2'd
+launchctl list | grep ai.mastra                                   # live pid + 0 = running
+launchctl print gui/$(id -u)/ai.mastra.factory                    # state, runs, last exit code
 ```
 
-Keep the generated project's CLI dependencies installed for these commands. You can use Mastra platform services while hosting the Factory Server elsewhere. See [self-hosting](https://factory.mastra.ai/deployment#self-host) for runtime requirements and setup steps.
+- **`out.log` at zero bytes while the server is plainly serving** is the rotation trap, not a quiet server: `newsyslog` renames, `launchd` keeps the old descriptor. Fix with `launchctl kickstart -k` on the job that owns the file — the Factory one does not reopen Colima's two.
+- **Nothing in any of the four files** means launchd never spawned the job; ask launchd itself. `-` pid with `78` is `EX_CONFIG`, a refused plist. A pid that changes each time is a crash loop on the 30-second throttle.
+- **`Command failed with exit code 1` / `command [mastra start] failed` at the end of `out.log`** is what a `bootout` leaves behind — varlock reporting the terminated child. Not a start failure.
+
+### Rebuild: stop, build, start
+
+The bundler empties `.mastra/` unconditionally, and its only guard reads `mastra dev`'s lock file — it knows nothing about a `mastra start` server. Building against the live server deletes the SPA it serves from under it, and any exit inside that window puts `KeepAlive` into an `Output directory … does not exist` loop. `npm run start` never builds, so building first and restarting later is the same outage moved.
+
+```bash
+docker ps --filter label=mastra.sandbox=true            # 0 — stopping abandons live sessions
+
+launchctl bootout gui/$(id -u)/ai.mastra.factory        # 1 — engine, database and tunnel stay up
+
+npm ci                                                  # 2 — only when package-lock.json moved
+npm run build                                           #     this is the outage; tunnel answers 502
+
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.factory.plist   # 3
+launchctl kickstart gui/$(id -u)/ai.mastra.factory      #     bootstrap does not always spawn it
+```
+
+**`bootout`, not `stop` or `kill`** — the agent is `KeepAlive`, so anything that merely ends the process gets it restarted within the throttle. On a job already out it prints `No such process` and changes nothing.
+
+**`bootstrap` registers; it does not reliably start.** `RunAtLoad` can be deferred, and when it is, the job never runs to write a log line — the only record is the system log:
+
+```bash
+log show --last 10m --predicate 'process == "launchd" AND eventMessage CONTAINS "mastra"' --info --style compact
+# launchd: [gui/501 [100017]:] pending spawn, domain in on-demand-only mode: ai.mastra.factory
+```
+
+The signature is a job that has **never run**: `-` pid with `0` beside it, and `runs = 0`, `last exit code = (never exited)` in `launchctl print`. The plist, the build and `.env` are all fine in this state — `npm run start` by hand works, which is what makes it confusing. `kickstart` is an explicit demand and starts it; it is harmless on a job that did spawn.
+
+Nothing else needs re-placing: the plists are symlinks into `ops/launchagents/`. Re-run `ops/install.sh` only after changing a supervision artifact — and `ops/newsyslog/ai.mastra.factory.conf` is picked up *only* that way, being copied rather than linked.
+
+### A `.env` change needs no build
+
+Nothing from `.env` is baked into `.mastra/output`; the values are read at startup.
+
+```bash
+launchctl kickstart -k gui/$(id -u)/ai.mastra.factory
+```
+
+That covers a credential, a sandbox key, anything `.env` owns. It is **not** enough for `src/mastra/`, `package.json`, `package-lock.json` or `tsconfig.json` — a server restarted without a rebuild serves the old code and reports nothing.
+
+### Checkpoints
+
+```bash
+launchctl list | grep ai.mastra.factory             # a live pid, and 0
+lsof -nP -iTCP:4111 -sTCP:LISTEN                    # 127.0.0.1:4111
+cat .mastra/build-manifest.json                     # buildTime is from this rebuild
+tail -n 40 ~/Library/Logs/mastra-factory/err.log    # nothing repeating every 30 seconds
+find src package.json package-lock.json tsconfig.json -newer .mastra/build-manifest.json
+```
+
+`buildTime` is the only record that separates a restart from a rebuild — `mastra start` checks nothing about a build's age. The `find` is the other direction, source left unbuilt; no output is the pass. It reads mtimes, so a `git checkout` or `npm ci` makes it over-report, never under-report.
+
+Session containers outlive a restart while the in-flight count does not, so restarting with three up admits three more. Remove the finished ones: `docker ps --filter label=mastra.sandbox=true`, then `docker rm -f`.
 
 ## Scripts
 
-| Script                              | What it does                                         |
-| ----------------------------------- | ---------------------------------------------------- |
-| `npm run dev`                       | Start the local Factory Server with its UI and API.  |
-| `npm run check`                     | Typecheck the Factory Server.                        |
-| `npm run build`                     | Build the server and Factory UI in `.mastra/output`. |
-| `npm run start`                     | Run the production build.                            |
-| `npm run deploy`                    | Build and deploy to Mastra platform.                 |
-| `npm run db:up` / `npm run db:down` | Start or stop the optional local PostgreSQL service. |
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Start the local Factory Server with its UI and API |
+| `npm run check` | Typecheck |
+| `npm test` | `vitest run --dir src` |
+| `npm run build` | Build server and UI into `.mastra/output` |
+| `npm run start` | Run the production build (never builds) |
+| `npm run deploy` | Build and deploy to Mastra platform |
+| `npm run db:up` / `db:down` | Start or stop the local PostgreSQL service |
 
 ## Troubleshooting
 
-- **Runtime:** Use a Node.js version that matches `engines.node` in this project's `package.json`.
-- **Sign-in:** A `403` with `Invalid origin` in the log, a `503 {"error":"auth_unavailable"}`, `organization_required` in the app, a **Sign in with Mastra Platform** button where the email/password form should be, or a boot warning about credentials being stored as plaintext — each is diagnosed in the numbered steps under "Start the Factory Server" above.
-- **No way to create an account:** **Account creation is managed by your administrator.** on `/signin` with no sign-up toggle, or a `400` `EMAIL_PASSWORD_SIGN_UP_DISABLED` from `/auth/api/sign-up/email`, is registration working as intended — it is closed in committed code, not by anything in `.env`. Step 3 above is the procedure for opening it deliberately and closing it again.
-- **Sessions:** A session that will not start with an error naming `FACTORY_SANDBOX_IMAGE` or `MASTRACODE_MAX_SANDBOXES`, a pull failure against Docker Hub for a `factory-sandbox:` tag, or a checkout appearing on this host instead of in a container — each is diagnosed in `sandbox/README.md`, and step 6 above is the configuration all of them depend on.
-- **Port changes:** Set `PORT` and update `MASTRACODE_PUBLIC_URL` to match. Update callback URLs for any auth or integration apps you manage.
-- **Missing issues:** Check repository access and your **Work Intake** selections. See [intake troubleshooting](https://factory.mastra.ai/troubleshooting#intake-is-empty).
+- **Runtime:** match `engines.node` in `package.json`.
+- **Sign-in:** `403 Invalid origin`, `503 auth_unavailable`, `organization_required`, a **Sign in with Mastra Platform** button, or a plaintext-credential warning at boot — all diagnosed in steps 1–5 above.
+- **No way to create an account:** that is registration working as intended; step 3 opens and closes it deliberately.
+- **Sessions:** errors naming `FACTORY_SANDBOX_IMAGE` or `MASTRACODE_MAX_SANDBOXES`, a Docker Hub pull failure, or a checkout on this host instead of in a container — `sandbox/README.md`, with step 6 as the configuration behind them.
+- **Production logs / `bootstrap` left nothing running / a change that did not take effect:** "Production mode on this host" above.
+- **Port changes:** set `PORT`, update `MASTRACODE_PUBLIC_URL`, and update callback URLs for apps you manage.
+- **Missing issues:** check repository access and **Work Intake** selections.
 
-See [Troubleshooting](https://factory.mastra.ai/troubleshooting) for sign-in, provider access, and sandbox errors, or [Environment variables](https://factory.mastra.ai/reference/configuration) for server settings.
+See [Troubleshooting](https://factory.mastra.ai/troubleshooting) or [Environment variables](https://factory.mastra.ai/reference/configuration).
 
 ## License
 
