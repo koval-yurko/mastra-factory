@@ -1,0 +1,40 @@
+diff --git a/node_modules/@mastra/server/dist/server/handlers/auth.js b/node_modules/@mastra/server/dist/server/handlers/auth.js
+index 150da8b..427529b 100644
+--- a/node_modules/@mastra/server/dist/server/handlers/auth.js
++++ b/node_modules/@mastra/server/dist/server/handlers/auth.js
+@@ -8,7 +8,34 @@ import { z } from "zod/v4";
+ //#region src/server/handlers/auth.ts
+ let _buildCapabilitiesPromise;
+ function loadBuildCapabilities() {
+-	if (!_buildCapabilitiesPromise) _buildCapabilitiesPromise = import("@mastra/core/auth/ee").then((m) => m.buildCapabilities).catch(() => {
++	if (!_buildCapabilitiesPromise) _buildCapabilitiesPromise = import("@mastra/core/auth/ee").then((m) => {
++		const buildCapabilities = function() {
++			return Promise.resolve({
++				"enabled": true,
++				"login": {
++					"type": "credentials",
++					"signUpEnabled": false
++				},
++				"user": {
++					"id": process.env.MASTRA_STUDIO_USER_ID ?? "local-user",
++					"email": process.env.MASTRA_STUDIO_USER_EMAIL ?? "local@localhost",
++					"name": process.env.MASTRA_STUDIO_USER_NAME ?? "Local User"
++				},
++				"capabilities": {
++					"user": true,
++					"session": false,
++					"sso": false,
++					"rbac": false,
++					"acl": false,
++					"fga": false
++				},
++				"access": null
++			})
++		}
++		return buildCapabilities;
++		//return m.buildCapabilities;
++	}
++	).catch(() => {
+ 		console.error("[@mastra/server] EE auth features require @mastra/core >= 1.6.0. Please upgrade: npm install @mastra/core@latest");
+ 	});
+ 	return _buildCapabilitiesPromise;
