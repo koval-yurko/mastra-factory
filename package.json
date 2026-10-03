@@ -8,6 +8,7 @@
   "scripts": {
     "postinstall": "patch-package",
     "dev": "mastra factory dev --dir src/mastra",
+    "studio": "mastra studio -p 3000 -h 127.0.0.1 -s 4111",
     "db:up": "docker compose up -d --wait --wait-timeout 120",
     "db:down": "docker compose down",
     "check": "tsc --noEmit",

@@ -7,7 +7,7 @@
 import { MastraStorageExporter, SensitiveDataFilter } from '@mastra/observability';
 import { PinoLogger } from '@mastra/loggers';
 import { describe, expect, it } from 'vitest';
-import observability, { requestContextKeys, serializationOptions } from './observability';
+import observability, { isStudioNoSessionProbe, requestContextKeys, serializationOptions } from './observability';
 import logger from './logger';
 
 describe('observability.ts', () => {
@@ -40,6 +40,40 @@ describe('observability.ts', () => {
       serializationOptions,
       requestContextKeys,
     });
+  });
+});
+
+describe('isStudioNoSessionProbe', () => {
+  const noSession = { message: 'No model available: this run started without a controller session context, so no model selection could be resolved.' };
+  const log = (level: 'warn' | 'error', message: string, data: Record<string, unknown>) =>
+    ({ logId: 'l', timestamp: new Date(), level, message, data }) as const;
+  const agentList = (message: string, error: unknown, level: 'warn' | 'error' = 'warn') =>
+    log(level, message, { agentName: 'Code Agent', error });
+  const route = (method: string, path: string, error: unknown = noSession) =>
+    log('error', 'Error calling handler', { error, path, method });
+
+  it('drops both agent-list warnings caused by the missing session', () => {
+    expect(isStudioNoSessionProbe(agentList('Error getting LLM for agent', noSession))).toBe(true);
+    expect(isStudioNoSessionProbe(agentList('Error getting model list for agent', new Error(noSession.message)))).toBe(true);
+  });
+
+  it('drops the voice probes an agent page makes', () => {
+    expect(isStudioNoSessionProbe(route('GET', '/agents/:agentId/voice/speakers'))).toBe(true);
+    expect(isStudioNoSessionProbe(route('GET', '/agents/:agentId/speakers'))).toBe(true);
+    expect(isStudioNoSessionProbe(route('GET', '/agents/:agentId/voice/listener'))).toBe(true);
+  });
+
+  it('keeps the no-session error on any other route', () => {
+    expect(isStudioNoSessionProbe(route('POST', '/agents/:agentId/generate'))).toBe(false);
+    expect(isStudioNoSessionProbe(route('POST', '/agents/:agentId/voice/speak'))).toBe(false);
+  });
+
+  it('keeps the same messages with any other cause, level or message', () => {
+    expect(isStudioNoSessionProbe(agentList('Error getting LLM for agent', { message: 'No usable google credential' }))).toBe(false);
+    expect(isStudioNoSessionProbe(agentList('Error getting LLM for agent', undefined))).toBe(false);
+    expect(isStudioNoSessionProbe(agentList('Error getting LLM for agent', noSession, 'error'))).toBe(false);
+    expect(isStudioNoSessionProbe(agentList('Error generating title', noSession))).toBe(false);
+    expect(isStudioNoSessionProbe(route('GET', '/agents/:agentId/voice/speakers', { message: 'boom' }))).toBe(false);
   });
 });
 

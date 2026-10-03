@@ -20,6 +20,7 @@
  *
  * Reads no environment key.
  */
+import type { LogEvent } from '@mastra/core/observability';
 import { MastraStorageExporter, Observability, SensitiveDataFilter } from '@mastra/observability';
 
 // Full payloads are the point: a Factory session's spans carry the prompts,
@@ -47,6 +48,42 @@ export const requestContextKeys = [
   'controller.state.subagentModelId',
 ];
 
+// Studio probes every agent for its model — the agent list (`GET /api/agents`)
+// and the voice lookups an agent page makes — and a Factory agent's model comes
+// from the controller session behind the request, which a Studio request never
+// has. The code SDK throws, and the server logs it once per agent per page load,
+// so these entries are expected noise. Only those read-only probes with that
+// exact cause are dropped: the same messages with any other cause, and the
+// no-session error on any other route (a generate or stream call), still reach
+// storage.
+const NO_SESSION_MODEL_ERROR = 'No model available: this run started without a controller session context';
+// Caught by the agent-list route itself and logged at warn.
+const AGENT_LIST_WARNINGS = new Set(['Error getting LLM for agent', 'Error getting model list for agent']);
+// Thrown out of the route and logged by the server's generic handler, at error.
+const VOICE_PROBE_ROUTES = new Set([
+  'GET /agents/:agentId/voice/speakers',
+  'GET /agents/:agentId/speakers',
+  'GET /agents/:agentId/voice/listener',
+]);
+
+export function isStudioNoSessionProbe(log: LogEvent['log']): boolean {
+  const error = log.data?.error as { message?: unknown } | undefined;
+  if (typeof error?.message !== 'string' || !error.message.startsWith(NO_SESSION_MODEL_ERROR)) return false;
+  if (log.level === 'warn' && AGENT_LIST_WARNINGS.has(log.message)) return true;
+  return (
+    log.level === 'error' &&
+    log.message === 'Error calling handler' &&
+    VOICE_PROBE_ROUTES.has(`${log.data?.method} ${log.data?.path}`)
+  );
+}
+
+class FactoryStorageExporter extends MastraStorageExporter {
+  override async onLogEvent(event: LogEvent): Promise<void> {
+    if (isStudioNoSessionProbe(event.log)) return;
+    return super.onLogEvent(event);
+  }
+}
+
 export default new Observability({
   configs: {
     default: {
@@ -54,7 +91,7 @@ export default new Observability({
       requestContextKeys,
       serializationOptions,
       // `event-sourced` is the strategy the code SDK pairs with the DuckDB domain.
-      exporters: [new MastraStorageExporter({ strategy: 'event-sourced' })],
+      exporters: [new FactoryStorageExporter({ strategy: 'event-sourced' })],
       // Redacts only values under credential-shaped keys (exact match on
       // `token`, `apikey`, `authorization`, …) — prompts and code pass through.
       spanOutputProcessors: [new SensitiveDataFilter()],

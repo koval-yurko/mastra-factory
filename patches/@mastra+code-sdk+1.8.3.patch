@@ -1,0 +1,13 @@
+diff --git a/node_modules/@mastra/code-sdk/dist/agents/model.js b/node_modules/@mastra/code-sdk/dist/agents/model.js
+index c81d21e..1380604 100644
+--- a/node_modules/@mastra/code-sdk/dist/agents/model.js
++++ b/node_modules/@mastra/code-sdk/dist/agents/model.js
+@@ -176,7 +176,7 @@ function getDynamicModel({ requestContext }, settingsPath) {
+ 	const controllerState = agentControllerContext?.getState?.();
+ 	const pendingState = controllerState?.mastracodePendingPackFallback;
+ 	const pendingFallback = pendingState && (pendingState.threadId === void 0 || typeof pendingState.threadId === "string" && pendingState.threadId === agentControllerContext?.threadId) ? pendingState : void 0;
+-	const modelId = (pendingFallback && typeof pendingFallback.toModelId === "string" && pendingFallback.toModelId.length > 0 ? pendingFallback.toModelId : void 0) ?? agentControllerContext?.session?.modelId;
++	const modelId = (pendingFallback && typeof pendingFallback.toModelId === "string" && pendingFallback.toModelId.length > 0 ? pendingFallback.toModelId : void 0) ?? agentControllerContext?.session?.modelId ?? (agentControllerContext ? void 0 : process.env.MASTRA_STUDIO_FALLBACK_MODEL?.trim() || void 0);
+ 	if (!modelId) {
+ 		if (!agentControllerContext) throw new Error("No model available: this run started without a controller session context, so no model selection could be resolved.");
+ 		throw new Error("No model selected. Use /models to select a model first.");

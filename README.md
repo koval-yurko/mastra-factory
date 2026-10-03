@@ -261,13 +261,16 @@ ls "$D" | grep observability.duckdb
 
 DuckDB has a single writer, so a Mastra Code CLI using the same directory at the same time locks one of them out.
 
-`mastra factory dev` does not serve Studio, because the Factory UI owns `/`. Run it as its own UI against this server with `npx mastra studio -p 3000 -h 127.0.0.1 -s 4111`, then open `http://127.0.0.1:3000` and use **Observability → Traces / Logs / Metrics**.
+`mastra factory dev` does not serve Studio, because the Factory UI owns `/`. Run it as its own UI against this server with `npm run studio`, then open `http://127.0.0.1:3000` and use **Observability → Traces / Logs / Metrics**.
+
+A Factory agent takes its model from the Factory session behind a request, and a Studio request has none, so Studio's agent pages fail to resolve one. `patches/@mastra+code-sdk+1.8.3.patch` lets such a request fall back to `MASTRA_STUDIO_FALLBACK_MODEL` (a `provider/model` id, resolved with the signed-in user's provider credentials); `.env.schema` records the key. It gives the request a model, not a project: a Studio chat that reaches the agent's workspace still fails with `Project path is required`, so run agents from the Factory UI.
 
 ## Scripts
 
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | Start the local Factory Server with its UI and API |
+| `npm run studio` | Serve Studio at `http://127.0.0.1:3000` against the server on port 4111 |
 | `npm run check` | Typecheck |
 | `npm test` | `vitest run --dir src` |
 | `npm run build` | Build server and UI into `.mastra/output` |
