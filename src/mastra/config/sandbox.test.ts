@@ -27,7 +27,7 @@ import type { MastraSandbox } from '@mastra/core/workspace';
 // space keeps an inherited value from configuring a case; PATH/HOME and the rest
 // of the shell are untouched, because `localSandboxEnv` below is about exactly
 // those and stubs them itself.
-const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_'];
+const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_', 'EXPO_'];
 // DOCKER_HOST is swept even though this module never reads it: the docker tests
 // below construct a real `DockerSandbox`, whose `new Docker()` makes
 // docker-modem read DOCKER_HOST itself and throw on a value it cannot parse.
@@ -49,8 +49,14 @@ for (const key of Object.keys(process.env)) {
 // `vi.resetModules()`. The last block has to: it exercises the exported slot,
 // whose platform-env check is resolved at module LOAD, so each of its cases
 // needs a generation of its own. It runs last for exactly that reason.
-const { LOCAL_SANDBOX_ENV_KEYS, dockerSandboxOptions, liveDockerSandboxes, localSandboxEnv, selectSandbox } =
-  await import('./sandbox');
+const {
+  LOCAL_SANDBOX_ENV_KEYS,
+  dockerSandboxEnv,
+  dockerSandboxOptions,
+  liveDockerSandboxes,
+  localSandboxEnv,
+  selectSandbox,
+} = await import('./sandbox');
 // Deferred for the same reason as the module under test: a static import runs
 // before the sweep above, and constructing a Docker client reads DOCKER_HOST.
 const { DockerSandbox } = await import('@mastra/docker');
@@ -217,6 +223,25 @@ describe('dockerSandboxOptions', () => {
     // Not 4 — HostConfig.Memory is in bytes, and 4 bytes is not a memory limit
     // any container can start under.
     expect(dockerSandboxOptions('session-abc').memory).toBe(4294967296);
+  });
+
+  it('forwards EXPO_TOKEN into the container, trimmed, and nothing else from the host', () => {
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    vi.stubEnv('EXPO_TOKEN', '  expo-token-value  ');
+    vi.stubEnv('DATABASE_URL', 'postgres://secret');
+    vi.stubEnv('GITHUB_APP_PRIVATE_KEY', 'secret');
+
+    expect(dockerSandboxEnv()).toEqual({ EXPO_TOKEN: 'expo-token-value' });
+    expect(dockerSandboxOptions('session-abc').env).toEqual({ EXPO_TOKEN: 'expo-token-value' });
+  });
+
+  it('omits `env` entirely when EXPO_TOKEN is unset or blank', () => {
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    for (const value of [undefined, '', '   ']) {
+      vi.stubEnv('EXPO_TOKEN', value);
+      expect(dockerSandboxEnv()).toEqual({});
+      expect(dockerSandboxOptions('session-abc')).not.toHaveProperty('env');
+    }
   });
 
   it('trims the image, so a padded .env value still names a real tag', () => {

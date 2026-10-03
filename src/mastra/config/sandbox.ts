@@ -59,6 +59,25 @@ export function localSandboxEnv(): Record<string, string> {
   return env;
 }
 
+/**
+ * Host env forwarded into every Docker session container. Unlike the local
+ * allow-list above, which keeps a host-run sandbox working, each entry here is
+ * a credential deliberately handed to the agent: anything in the container —
+ * the agent, or a repo it has cloned — can read it, so only keys scoped for
+ * that belong here. `sandbox/README.md` is the record.
+ *
+ * Docker applies it when the container is CREATED, so a session reattaching to
+ * an existing container keeps the environment it was created with.
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export function dockerSandboxEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  const expoToken = process.env.EXPO_TOKEN?.trim();
+  if (expoToken) env.EXPO_TOKEN = expoToken;
+  return env;
+}
+
 // Hard ceilings for one Docker-sandbox session container. They are ceilings,
 // not reservations: `sandbox/README.md` explains why the numbers for this host
 // are what they are. That sizing assumes a concurrent-session count, and
@@ -158,6 +177,7 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
   }
 
   const memoryBytes = memoryGib * BYTES_PER_GIB;
+  const env = dockerSandboxEnv();
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -182,6 +202,9 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     // The base-class option, NOT the package's deprecated same-named alias
     // (`sandbox.test.ts` pins that the alias is absent).
     workingDirectory: process.env.MASTRACODE_SANDBOX_WORKDIR?.trim() || DEFAULT_SANDBOX_WORKDIR,
+    // Omitted rather than `{}` when nothing is forwarded, so an unset key
+    // leaves the options exactly as they were before forwarding existed.
+    ...(Object.keys(env).length > 0 ? { env } : {}),
     // No `dockerOptions`: dockerode reads DOCKER_HOST itself, and ops/README.md
     // owns that key — re-reading it here would be a second source of truth.
   };

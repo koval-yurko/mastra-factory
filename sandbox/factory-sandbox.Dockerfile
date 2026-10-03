@@ -15,5 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
+# EAS CLI (https://docs.expo.dev/eas/cli/) — pinned; bump the version and rebuild to upgrade
+RUN npm install -g eas-cli@24.10.0 && npm cache clean --force && eas --version
+
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

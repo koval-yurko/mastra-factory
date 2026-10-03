@@ -29,6 +29,7 @@ the rest; between the six tables every key `.env.schema` declares is claimed exa
 | `MASTRACODE_SANDBOX_WORKDIR` | the checkout base inside a docker-provider container | the `MASTRACODE_SANDBOX_WORKDIR` section below |
 | `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
+| `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
 
 `.env.schema` declares and validates every key in that table and is the only list of key names;
 this file never
@@ -50,7 +51,10 @@ by path and never copied.
 `signed-by` keyring), and in a second layer a generic toolchain: `build-essential`, `python3`,
 `python3-pip`, `python3-venv`, `ripgrep`, `jq`, `unzip` — note that on bookworm `python3-pip` is an
 externally-managed environment (PEP 668), so a plain `pip install` refuses and `python3 -m venv` is the
-path a session must take. `corepack enable` runs last, so `npm`, `pnpm` and `yarn` all resolve. The
+path a session must take. `corepack enable` runs next, so `npm`, `pnpm` and `yarn` all resolve. The
+last layer installs the EAS CLI (`eas-cli`, https://docs.expo.dev/eas/cli/) globally from npm at a
+pinned version; to upgrade, change the version in that `RUN` line and rebuild. The `eas-cli` skill
+under `src/mastra/public/factory-skills/` is what tells the agent it is there. The
 working directory is `/workspace`, the image defines no user so session commands run as root, and the
 container's command is `sleep infinity`, because a session's container is long-lived and driven by
 `docker exec`.
@@ -225,6 +229,22 @@ machine. That is the off-host relocation this whole subject exists to replace. W
 move work off this host — a structural guarantee rather than a matter of keeping `.env` tidy, and the
 reason the key is listed at all rather than left out and forgotten.
 
+## `EXPO_TOKEN`
+
+**What the value must contain.** An Expo access token, or nothing. When set, it is forwarded into every
+docker-provider session container as `EXPO_TOKEN`, which is how the EAS CLI in the image authenticates
+— `eas whoami` then prints the account instead of `Not logged in`. Blank forwards nothing. No other
+host variable reaches a session container; this is the only one.
+
+**How to obtain it.** expo.dev → account settings → Access tokens → create a token. Prefer a robot
+user's token or one from an account that only this deployment uses: the token is readable by
+anything running in the container, which includes the agent and any script in a repository it
+clones, so treat it as handed to the agent rather than kept from it.
+
+Like the ceilings below, it is applied when a session's container is **created**. Setting, changing
+or revoking it and restarting the server reaches only sessions whose containers are created after the
+restart; an existing session keeps the value it started with until its container is removed.
+
 ## Ceilings with no key
 
 Two more limits apply to every session container and neither is settable from `.env` — the server fixes
@@ -289,6 +309,11 @@ Run from the repository root, in a shell where `DOCKER_HOST` is exported.
 TAG=$(date +%F)                      # e.g. 2026-09-23 — the form is factory-sandbox:YYYY-MM-DD
 docker build --platform linux/arm64 -f sandbox/factory-sandbox.Dockerfile -t "factory-sandbox:$TAG" .
 ```
+
+`npm run sandbox:build` runs that build, the smoke test below and the `arm64` check in one go. If they
+all pass, it sets `FACTORY_SANDBOX_IMAGE` in `.env` to the new tag. The line must already exist there.
+Rebuilding on the same date replaces that day's tag. Afterwards, record the tag in the table below
+and restart the server.
 
 `--platform linux/arm64` matches the Apple-silicon VM; an image built for another architecture runs
 under emulation and is slow enough to look like a hang.
@@ -374,4 +399,6 @@ is normally the one `FACTORY_SANDBOX_IMAGE` points at, and the rows under it are
 
 | Tag                        | Built                | Change        |
 |----------------------------|----------------------|---------------|
+| factory-sandbox:2026-10-03c | 2026-10-03 | Replace rtk with eas-cli 24.10.0 |
+| factory-sandbox:2026-10-03b | 2026-10-03 | Add rtk 0.51.0 |
 | factory-sandbox:2026-09-23 | 2026-09-23T12:34:56Z | Initial build |
