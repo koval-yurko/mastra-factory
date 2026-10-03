@@ -136,12 +136,12 @@ function silenceAndWatchConsole() {
 }
 
 describe('the integrations array', () => {
-  it('is empty when nothing is configured, and boots anyway', async () => {
+  it('carries only the custom-tools carrier when nothing is configured, and boots anyway', async () => {
     const spies = silenceAndWatchConsole();
 
     const { integrations, githubAppSlug, stateSecret } = await load({});
 
-    expect(integrations).toEqual([]);
+    expect(integrations.map(integration => integration.id)).toEqual(['custom-tools']);
     expect(githubAppSlug).toBeUndefined();
     expect(stateSecret).toBeUndefined();
     expect(spies.log).not.toHaveBeenCalled();
@@ -149,18 +149,18 @@ describe('the integrations array', () => {
     expect(spies.error).not.toHaveBeenCalled();
   });
 
-  it('carries the configured integrations in GitHub, Linear, Slack order', async () => {
+  it('carries the configured integrations in GitHub, Linear, Slack order, then custom-tools', async () => {
     // The order is the construction order, and construction order is what fixes
     // which integration a failure is attributed to when one of them throws.
     const { integrations } = await load({ ...GITHUB_GROUP, ...LINEAR_GROUP, ...SLACK_GROUP });
 
-    expect(integrations.map(integration => integration.id)).toEqual(['github', 'linear', 'slack']);
+    expect(integrations.map(integration => integration.id)).toEqual(['github', 'linear', 'slack', 'custom-tools']);
   });
 
   it('includes only what is configured', async () => {
     const { integrations } = await load({ ...LINEAR_GROUP });
 
-    expect(integrations.map(integration => integration.id)).toEqual(['linear']);
+    expect(integrations.map(integration => integration.id)).toEqual(['linear', 'custom-tools']);
   });
 });
 
@@ -251,7 +251,7 @@ describe('the Linear group', () => {
   it('wires an integration from a complete pair', async () => {
     const { integrations } = await load(LINEAR_GROUP);
 
-    expect(integrations.map(integration => integration.id)).toEqual(['linear']);
+    expect(integrations.map(integration => integration.id)).toEqual(['linear', 'custom-tools']);
   });
 
   it('leaves the integration undefined when either half is missing, without logging or throwing', async () => {
@@ -284,7 +284,7 @@ describe('the Slack group', () => {
   it('wires an integration from the signing secret alone', async () => {
     const { integrations } = await load(SLACK_GROUP);
 
-    expect(integrations.map(integration => integration.id)).toEqual(['slack']);
+    expect(integrations.map(integration => integration.id)).toEqual(['slack', 'custom-tools']);
   });
 
   it('leaves the integration undefined when the signing secret is unset, empty or whitespace, without logging or throwing', async () => {
@@ -296,7 +296,7 @@ describe('the Slack group', () => {
 
       const { integrations } = await load({ SLACK_APP_SIGNING_SECRET: value, SLACK_APP_BOT_TOKEN: 'slack-bot-token' });
 
-      expect(integrations).toEqual([]);
+      expect(integrations.map(integration => integration.id)).toEqual(['custom-tools']);
       expect(spies.log).not.toHaveBeenCalled();
       expect(spies.warn).not.toHaveBeenCalled();
       expect(spies.error).not.toHaveBeenCalled();
@@ -314,7 +314,7 @@ describe('the Slack group', () => {
       MASTRACODE_CHANNELS_PUBLIC_URL: 'https://tunnel.example',
     });
 
-    expect(integrations.map(integration => integration.id)).toEqual(['slack']);
+    expect(integrations.map(integration => integration.id)).toEqual(['slack', 'custom-tools']);
 
     // This case omits the bot token on purpose, so it is also the negative half
     // of the assertion below: an absent token leaves the integration built.
@@ -342,7 +342,7 @@ describe('the Slack group', () => {
     // the trim is observable on the constructor argument and nowhere else.
     const { integrations } = await load({ ...SLACK_GROUP, SLACK_APP_BOT_TOKEN: '  slack-bot-token  ' });
 
-    expect(integrations.map(integration => integration.id)).toEqual(['slack']);
+    expect(integrations.map(integration => integration.id)).toEqual(['slack', 'custom-tools']);
     expect(slackOptions.last?.botToken).toBe('slack-bot-token');
   });
 
@@ -497,6 +497,6 @@ describe('stateSecret', () => {
     const { integrations, stateSecret } = await load({ SLACK_APP_SIGNING_SECRET: '   ' });
 
     expect(stateSecret).toBe('   ');
-    expect(integrations).toEqual([]);
+    expect(integrations.map(integration => integration.id)).toEqual(['custom-tools']);
   });
 });

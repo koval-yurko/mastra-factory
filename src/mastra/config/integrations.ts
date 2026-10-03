@@ -27,6 +27,7 @@ import { parseAuthorizedBotsEnv } from '@mastra/factory/integrations/github/webh
 import { LinearIntegration } from '@mastra/factory/integrations/linear/integration';
 import { SlackIntegration } from '@mastra/factory/integrations/slack/integration';
 import { publicUrl } from './public-url';
+import { customTools } from '../tools';
 
 // Read RAW and ONCE: the GitHub integration below wants this trimmed (a
 // whitespace-only secret is no secret), while the `stateSecret` chain further
@@ -107,4 +108,11 @@ const slack = slackSigningSecret
     })
   : undefined;
 
-export const integrations = [...(github ? [github] : []), ...(linear ? [linear] : []), ...(slack ? [slack] : [])];
+// `customTools` is not a provider: it carries this deployment's own agent tools
+// (Factory has no tools slot, see `src/mastra/tools/`), so it is always present and last.
+export const integrations = [
+  ...(github ? [github] : []),
+  ...(linear ? [linear] : []),
+  ...(slack ? [slack] : []),
+  customTools,
+];
