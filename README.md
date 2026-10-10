@@ -108,7 +108,7 @@ Copy the key to a password manager before using it. `.env` is gitignored and is 
 ```dotenv
 FACTORY_SANDBOX_PROVIDER=docker
 FACTORY_SANDBOX_IMAGE=factory-sandbox:<YYYY-MM-DD>
-MASTRACODE_MAX_SANDBOXES=3
+MASTRACODE_MAX_SANDBOXES=10
 ```
 
 `sandbox/README.md` owns all three — building the image, the tag history, and sizing the cap against this host. Set them before the first session (they can go in step 1's block).
@@ -263,7 +263,7 @@ DuckDB has a single writer, so a Mastra Code CLI using the same directory at the
 
 `mastra factory dev` does not serve Studio, because the Factory UI owns `/`. Run it as its own UI against this server with `npm run studio`, then open `http://127.0.0.1:3000` and use **Observability → Traces / Logs / Metrics**.
 
-A Factory agent takes its model from the Factory session behind a request, and a Studio request has none, so Studio's agent pages fail to resolve one. `patches/@mastra+code-sdk+1.8.3.patch` lets such a request fall back to `MASTRA_STUDIO_FALLBACK_MODEL` (a `provider/model` id, resolved with the signed-in user's provider credentials); `.env.schema` records the key. It gives the request a model, not a project: a Studio chat that reaches the agent's workspace still fails with `Project path is required`, so run agents from the Factory UI.
+A Factory agent takes its model from the Factory session behind a request, and a Studio request has none, so Studio's agent pages fail to resolve one. `patches/@mastra+code-sdk+1.11.0.patch` lets such a request fall back to `MASTRA_STUDIO_FALLBACK_MODEL` (a `provider/model` id, resolved with the signed-in user's provider credentials); `.env.schema` records the key. It gives the request a model, not a project: a Studio chat that reaches the agent's workspace still fails with `Project path is required`, so run agents from the Factory UI.
 
 ## Scripts
 

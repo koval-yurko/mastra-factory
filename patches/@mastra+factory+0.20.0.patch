@@ -1,0 +1,46 @@
+diff --git a/node_modules/@mastra/factory/dist/integrations/slack/slack.js b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
+index ab558c5..440760a 100644
+--- a/node_modules/@mastra/factory/dist/integrations/slack/slack.js
++++ b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
+@@ -344,7 +344,13 @@ function createChannelSessionStartHook(deps) {
+ 			}) : Promise.resolve(),
+ 			threadId: activeThreadId ?? void 0
+ 		});
+-		if (persistedModelId) {
++		// Provenance marker: the id THIS hook last derived (sender's default, else the
++		// factory default). A pin equal to it, or a legacy pin with no marker, was
++		// nobody's choice and re-resolves so a changed default reaches the thread; a
++		// pin that diverges from it is a deliberate switch and is never overwritten.
++		const derivedModelId = await session.thread.getSetting({ key: DERIVED_MODEL_KEY });
++		const userPickedModel = Boolean(persistedModelId) && typeof derivedModelId === "string" && persistedModelId !== derivedModelId;
++		if (persistedModelId && userPickedModel) {
+ 			await hydrateFactorySession(session, {
+ 				orgId: owner.orgId,
+ 				factoryProjectId: owner.factoryProjectId,
+@@ -401,6 +407,18 @@ function createChannelSessionStartHook(deps) {
+ 					value: modelId
+ 				});
+ 			}
++			const appliedModelId = session.model.get();
++			if (appliedModelId) try {
++				await session.thread.setSetting({
++					key: DERIVED_MODEL_KEY,
++					value: appliedModelId
++				});
++			} catch (error) {
++				console.warn("[slack] Failed to record derived model provenance", {
++					modelId: appliedModelId,
++					error: error instanceof Error ? error.message : String(error)
++				});
++			}
+ 		}
+ 		await applyPersonalMemorySettings(session, {
+ 			memorySettings,
+@@ -409,6 +427,7 @@ function createChannelSessionStartHook(deps) {
+ 		});
+ 	};
+ }
++const DERIVED_MODEL_KEY = "slackDerivedModelId";
+ const SUBAGENT_TYPES = [
+ 	"explore",
+ 	"plan",

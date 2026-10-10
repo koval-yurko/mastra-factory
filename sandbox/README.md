@@ -166,8 +166,12 @@ fall back to the default, `3`. There is no value meaning "unlimited" and no way 
 The key only applies to `FACTORY_SANDBOX_PROVIDER=docker`; `local` and the cloud providers are
 uncapped, because the number is sized against this host's memory, which they do not consume.
 
-**How to choose it.** `3` on this host, from the same arithmetic as `FACTORY_SANDBOX_MEMORY_GIB` above:
-32 GiB in the VM, roughly 2 for Postgres, 10 per session container. Change it only together with that
+**How to choose it.** `10` on this host, a deliberate oversubscription chosen on 2026-10-11 for
+Slack-driven parallel sessions. The sizing arithmetic from `FACTORY_SANDBOX_MEMORY_GIB` above still
+says three: 32 GiB in the VM, roughly 2 for Postgres, 10 GiB ceiling per session container. Ten
+containers at that ceiling are 100 GiB against a 32 GiB VM, so it holds only while most sessions sit
+well under their ceiling. Several busy sessions at once get OOM-killed, and a container the VM kills
+loses its session state. Go back to `3` if that starts happening, or grow the VM. Change it only together with that
 ceiling — the pair has to keep multiplying out to what the VM has. Raising it is the supported move
 when the host has memory for another container; there is nothing to lower on the per-container side
 that buys concurrency for free, because those are ceilings a busy session will actually reach.
@@ -399,6 +403,7 @@ is normally the one `FACTORY_SANDBOX_IMAGE` points at, and the rows under it are
 
 | Tag                        | Built                | Change        |
 |----------------------------|----------------------|---------------|
+| factory-sandbox:2026-10-11 | 2026-10-11 | Rebuild with `--pull --no-cache` after the @mastra/factory 0.20.0 upgrade; no Dockerfile change |
 | factory-sandbox:2026-10-03c | 2026-10-03 | Replace rtk with eas-cli 24.10.0 |
 | factory-sandbox:2026-10-03b | 2026-10-03 | Add rtk 0.51.0 |
 | factory-sandbox:2026-09-23 | 2026-09-23T12:34:56Z | Initial build |
