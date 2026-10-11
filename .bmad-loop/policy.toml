@@ -3270,7 +3270,7 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #      an invalid host env name and a slug component containing a space each
 #      exit 1 naming the offending file and field; the shipped tree and an
 #      owner-qualified host name exit 0.
-#      TWO FALSE RESULTS CORRECTD while shaping it. A draft asserted that no path
+#      TWO FALSE RESULTS CORRECTED while shaping it. A draft asserted that no path
 #      component is `.` or `..`, but a `readdirSync` walk never yields either, so
 #      the arm was unreachable and was deleted rather than left as decoration.
 #      And a draft of the ceiling message spelled its quoted-number example as an
@@ -3331,7 +3331,7 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #      (both forms) or in `ARG` each exit 1; a digest-pinned public base, an
 #      `ENTRYPOINT` in place of `CMD`, a single named-file `COPY`, a non-secret
 #      `ENV`, an `ARG` with no default and a commented-out `COPY .` exit 0.
-#      THREE FALSE RESULTS CORRECTD while shaping it. The family check first
+#      THREE FALSE RESULTS CORRECTED while shaping it. The family check first
 #      compared the whole `FROM` reference tag included, so a tagged shared base
 #      sailed through; it now strips tag and digest before comparing. A mutation
 #      changing `WORKDIR /workspace` to `WORKDIR /app` first reported a pass
