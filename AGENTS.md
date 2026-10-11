@@ -40,6 +40,11 @@ names in `companions:` — there is no PRD.
   reconcile it: `src/mastra/config/` (`README.md` there; storage, vector, pubsub, auth, the three
   integrations and the sandbox branch are all constructed in that directory, not in the entry, and
   so is the `new MastraFactory({…})` call that assembles them — `config/factory.ts`)
+- Per-project sandbox exceptions: `sandbox/projects/<owner>/<name>/`, holding one `Dockerfile` and one
+  `sandbox.json` for each repository that needs a toolchain, a ceiling or a credential the shared image
+  should not carry. Both are committed and reviewed like code, the directory name is the address a
+  session looks up, and `config/sandbox.ts` is the only code that reads them. `sandbox/README.md` owns
+  the layout and the fields.
 - Architecture decisions AD-1…AD-13, cited by ID throughout the stories:
   `_bmad-output/planning-artifacts/architecture/architecture-mastra-factory-2026-09-22/ARCHITECTURE-SPINE.md`
 - Epics and stories: `_bmad-output/planning-artifacts/epics.md`

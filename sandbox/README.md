@@ -12,6 +12,12 @@ engine. Neither is restated here.
 file to edit and build. `docs/self-hosting-research.md` §2.1 says why the image carries `git` and `gh`
 and references this directory by path rather than reproducing the Dockerfile.
 
+`projects/<owner>/<name>/` under this directory holds the exceptions: one Dockerfile and one
+`sandbox.json` for each repository that needs a toolchain, a ceiling or a credential the others should
+not carry. The base image stays canonical for everything shared, and a project Dockerfile extends an
+already-built base tag instead of restating it. The `Per-project sandboxes` section below is the record
+for that directory; it owns no environment key of its own.
+
 ## Keys this subject owns
 
 The table below is the closed list of the keys this file owns, and this file is the only record
@@ -25,22 +31,21 @@ the rest; between the six tables every key `.env.schema` declares is claimed exa
 | `FACTORY_SANDBOX_IMAGE` | a date-stamped image tag that exists on this engine | the `FACTORY_SANDBOX_IMAGE` section below |
 | `FACTORY_SANDBOX_MEMORY_GIB` | the per-session memory ceiling, in whole gibibytes | the `FACTORY_SANDBOX_MEMORY_GIB` section below |
 | `FACTORY_SANDBOX_CPUS` | the per-session CPU ceiling, in whole cores | the `FACTORY_SANDBOX_CPUS` section below |
-| `FACTORY_SANDBOX_PROJECT_IMAGE` | per-repository overrides of the image, or blank | the `FACTORY_SANDBOX_PROJECT_IMAGE` section below |
-| `FACTORY_SANDBOX_PROJECT_MEMORY_GIB` | per-repository overrides of the memory ceiling, or blank | the `FACTORY_SANDBOX_PROJECT_MEMORY_GIB` section below |
-| `FACTORY_SANDBOX_PROJECT_CPUS` | per-repository overrides of the CPU ceiling, or blank | the `FACTORY_SANDBOX_PROJECT_CPUS` section below |
-| `FACTORY_SANDBOX_PROJECT_ENV` | which host variables reach which repository's container | the `FACTORY_SANDBOX_PROJECT_ENV` section below |
 | `MASTRACODE_MAX_SANDBOXES` | how many session containers this process runs at once | the `MASTRACODE_MAX_SANDBOXES` section below |
 | `MASTRACODE_SANDBOX_WORKDIR` | the checkout base inside a docker-provider container | the `MASTRACODE_SANDBOX_WORKDIR` section below |
 | `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
 | `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
-| `VERCEL_TOKEN` | a Vercel API token for the repositories that are allowed it, or blank | the `VERCEL_TOKEN` section below |
-| `VERCEL_ORG_ID` | the Vercel team that token belongs to, or blank | the `VERCEL_ORG_ID` section below |
-| `VERCEL_PROJECT_ID` | the Vercel project inside that team, or blank | the `VERCEL_PROJECT_ID` section below |
+| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN` | a Vercel API token for that one repository, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN` section below |
+| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID` | the Vercel team that token belongs to, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID` section below |
+| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID` | the Vercel project inside that team, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID` section below |
 
 `.env.schema` declares and validates every key in that table and is the only list of key names;
 this file never
-restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
+restates what it declares. Per-project sandboxes are not keys: a project is a directory under
+`sandbox/projects/`, committed beside its Dockerfile, and the `Per-project sandboxes` section below is
+its record. The host-side names that directory's `env` map points at are keys, and every one of them
+appears in the table above. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
 by path and never copied.
 
@@ -163,83 +168,138 @@ three sandboxes at 4 cores each is a mild, deliberate overcommit. The three is t
 contending containers are throttled rather than killed, and the memory number is the one that actually
 binds — which is why the concurrency count is chosen against memory and not against cores.
 
-## `FACTORY_SANDBOX_PROJECT_IMAGE`
+## Per-project sandboxes
 
-**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_IMAGE`: a list of
-`owner/name=factory-sandbox:YYYY-MM-DD` entries separated by semicolons. Blank, or no entry naming the
-session's repository, leaves the global key in charge. This key only ever narrows the choice for the
-repositories it names — it is not an alternative to the global one, and a deployment that sets only this
-key has no image for anything else.
+**What this is.** One directory per repository that needs something the shared image should not carry:
+`sandbox/projects/<owner>/<name>/`, holding a `Dockerfile` and a `sandbox.json`. Both are committed, and
+both are reviewed like code — adding a project is a pull request, not a deployment edit. The directory
+name is the address: a session bound to `koval-yurko/eleven-labs-english-agent` reads
+`sandbox/projects/koval-yurko/eleven-labs-english-agent/sandbox.json`, and nothing else selects it.
 
-The repository is the `owner/name` slug Factory reports for the session, matched exactly after trimming.
-A session that is not bound to a repository has no slug to match, so it always takes the global image.
-An entry with no `=`, a slug that is not `owner/name`, or the same repository named twice is unreadable,
-and an unreadable override is refused rather than guessed at: the session does not start and the error
-names this key. Nothing is relocated — like the ceilings above, the docker branch throws instead of
-falling through to another provider.
+**How a session finds its config.** Factory reports the repository a session is bound to as an
+`owner/name` slug, and that slug addresses the directory, matched exactly after trimming. A session with
+no repository has no slug, and a repository with no directory has no config; both take the global image
+and the global ceilings, and neither is an error. Matching is case-sensitive, so a slug that differs only
+in case finds nothing and runs on the global settings — the safe direction, since the alternative would
+be handing one project's credentials to another.
 
-Each tag is date-stamped for the reason the `FACTORY_SANDBOX_IMAGE` section above gives, and the whole
-value is checked at the same place the global one is: a value of the wrong shape stops the **server** at
-startup under `npm start` before any session exists, and `npm run dev` does not apply that check either,
-so a wrong-shaped entry can survive a development run.
+**What `sandbox.json` holds.** Four optional fields, and an absent field means the global setting
+decides that one:
 
-**How to choose it.** Leave it blank. Reach for it only when one repository needs an image the others
-should not carry — a toolchain that is dead weight, or actively wrong, everywhere else. The tag history
-table at the bottom of this file records which images exist, and an override must name one that is
-already in this engine's store: the container is created from it here, not pulled from a registry.
+| Field | What it decides |
+|---|---|
+| `image` | the image this project's containers are created from, instead of `FACTORY_SANDBOX_IMAGE` |
+| `memoryGib` | this project's memory ceiling, instead of `FACTORY_SANDBOX_MEMORY_GIB` |
+| `cpus` | this project's CPU ceiling, instead of `FACTORY_SANDBOX_CPUS` |
+| `env` | which host variables reach this project's containers, and under what names |
 
-## `FACTORY_SANDBOX_PROJECT_MEMORY_GIB`
+`image` is a date-stamped tag in this project's own family —
+`factory-sandbox-eleven-labs-english-agent:2026-10-11` — date-stamped for the reason the
+`FACTORY_SANDBOX_IMAGE` section above gives, and it must already be in this engine's store, because the
+container is created from it here rather than pulled from a registry.
+`npm run sandbox:build -- <owner>/<name>` builds that image and writes the tag it built into this field,
+so the file and the store cannot drift.
 
-**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_MEMORY_GIB`, as
-`owner/name=<whole gibibytes>` entries separated by semicolons, matched and refused exactly as the image
-override above.
+`memoryGib` and `cpus` are whole numbers, written as JSON numbers and not as strings. The host bounds the
+sections above derive still bind: 30 GiB and 12 cores. A project value above them refuses that project's
+session before any container is created, with an error naming this file and this field rather than the
+global key — this file supplied the number, and pointing at the global one would send you to fix a line
+that is not wrong.
 
-A value that is not a run of digits is **ignored** rather than refused, and the global key decides that
-repository's ceiling — the same fallback the global key applies, so a typo here degrades to the behaviour
-you already have instead of taking a session down.
+**What `env` holds.** A map from the name a variable has **inside the container** to the name it has **on
+this host**:
 
-The bound is unchanged and still binds. The most a resolved ceiling may ask for is the same 30 GiB the
-`FACTORY_SANDBOX_MEMORY_GIB` section derives, and a repository entry above it refuses that repository's
-session before any container is created, with an error naming **this** key rather than the global one —
-this key is what supplied the number, and pointing at the global one would send you to fix a line that
-is not wrong.
+```json
+{ "env": { "VERCEL_TOKEN": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN" } }
+```
 
-**How to choose it.** Leave it blank. A repository that needs more than the global ceiling is asking to
-oversubscribe the host in the way that section's arithmetic rules out; growing the VM and raising the
-global ceiling is the fix, not a per-repository exception to it.
+The direction is the point. Two Vercel projects each need their own token, and the Vercel CLI in each
+checkout looks for it as `VERCEL_TOKEN`; keeping one distinct host secret per project and letting each
+`env` map present its own under that shared container-side name is what makes both work without either
+credential reaching the other's sandbox. A host name this map does not mention never reaches the
+container, and a container-side name may appear in another project's map too, because each container
+receives only its own.
 
-## `FACTORY_SANDBOX_PROJECT_CPUS`
+It lists **names** only. The values stay in this host's environment and are read when a container is
+created, so committing this file publishes no secret. A host name that is unset or blank forwards
+nothing, so a project can be committed before its credentials are provisioned and the session simply runs
+without them until they are. Every host name an `env` map uses is declared in `.env.schema`, which is why
+a new project's host keys are added there rather than invented in this file.
 
-**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_CPUS`, as
-`owner/name=<whole cores>` entries separated by semicolons, matched and validated as the memory override
-above: a value that is not a run of digits falls back to the global key, and a resolved ceiling above
-the 12 cores that section derives refuses the session with an error naming this key.
+An `env` entry whose container-side name is `EXPO_TOKEN` overrides the global forward for that project,
+which is how two projects build against two Expo accounts.
 
-**How to choose it.** Leave it blank, or lower it. CPU is the benign ceiling — contending containers are
-throttled rather than killed — so the useful direction here is taking cores away from a repository whose
-builds starve its neighbours, not granting one more.
+**What several projects look like together.** The point of the container-side name being free while the
+host-side name is unique is that unrelated projects can share a convention inside their own sandboxes
+without sharing anything else. Four directories, four different credential sets, no overlap:
 
-## `FACTORY_SANDBOX_PROJECT_ENV`
+```
+sandbox/projects/
+  koval-yurko/eleven-labs-english-agent/   # Vercel deploy status and logs
+  acme/marketing-site/                      # a different Vercel account entirely
+  acme/mobile-app/                          # Expo, plus a database the web projects do not touch
+  acme/data-pipeline/                       # no credentials at all, just a bigger machine
+```
 
-**What the value must contain.** Which host variables reach which repository's session container, as
-`owner/name=KEY,KEY` entries separated by semicolons. It lists **names** only. The values stay in this
-host's environment and are read when a container is created, so this key is an allow-list and not a
-second copy of any secret — nothing credential-shaped is written into `.env` for it to work.
+```json
+{ "image": "factory-sandbox-eleven-labs-english-agent:2026-10-11",
+  "env": { "VERCEL_TOKEN": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN",
+           "VERCEL_ORG_ID": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID",
+           "VERCEL_PROJECT_ID": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID" } }
+```
 
-A listed name that is unset or blank on the host forwards nothing, so a repository can be listed before
-its credentials are provisioned and the session simply runs without them until they are. A session whose
-repository no entry names gets nothing beyond what every session gets. As above, an entry that is not
-`owner/name=KEY,KEY`, or the same repository named twice, refuses the session with an error naming this
-key: a malformed allow-list cannot be read safely, and guessing at one would mean deciding which
-credentials to forward on the strength of a typo.
+```json
+{ "image": "factory-sandbox-marketing-site:2026-10-11",
+  "env": { "VERCEL_TOKEN": "VERCEL_ACME_MARKETING_SITE_TOKEN",
+           "VERCEL_ORG_ID": "VERCEL_ACME_MARKETING_SITE_ORG_ID",
+           "VERCEL_PROJECT_ID": "VERCEL_ACME_MARKETING_SITE_PROJECT_ID" } }
+```
 
-**How to choose it.** Name the narrowest set of host variables the repository's own tooling needs, and
-scope them to the repositories that need them. The alternative — forwarding a credential to every
-session — hands it to every repository any session clones, which is the exposure the `EXPO_TOKEN`
-section below warns about.
+Both of those hand their checkout a `VERCEL_TOKEN`, which is what the Vercel CLI looks for, and neither
+can see the other's — the tokens are different host variables, provisioned separately, and each is
+forwarded only into the one directory that names it.
 
-Like every other key on this page it is applied when a container is **created**, so changing it and
-restarting the server reaches only sessions whose containers are created after the restart.
+```json
+{ "image": "factory-sandbox-mobile-app:2026-10-11",
+  "memoryGib": 16,
+  "env": { "EXPO_TOKEN": "EXPO_ACME_MOBILE_APP_TOKEN",
+           "SUPABASE_DB_URL": "SUPABASE_ACME_MOBILE_APP_DB_URL" } }
+```
+
+That one takes the global Expo forward away and replaces it, so it builds against its own Expo account;
+`memoryGib` is there because a mobile build is not the same shape as a docs site. Note the absence of
+`cpus` — it stays on the global ceiling, which is the whole reason the fields are independent.
+
+```json
+{ "memoryGib": 24, "cpus": 8 }
+```
+
+And that one forwards nothing, so its containers get `EXPO_TOKEN` like every other session and no secret
+of their own; it exists only to give one repository more machine. It has no `image` either, so it runs on
+the global tag and needs no Dockerfile of its own — a directory with a `sandbox.json` and no
+`Dockerfile` is a valid project, and the build command has nothing to do there.
+
+Only the first of those four is real; the rest are here to show the shape. Adding them would mean
+declaring `VERCEL_ACME_MARKETING_SITE_TOKEN` and the others in `.env.schema` first, since a host name an
+`env` map uses has to exist there before it can be forwarded.
+
+**What goes wrong, and what you see.** This file is read, not parsed leniently. One that cannot be read,
+is not valid JSON, holds a JSON value that is not an object, carries a field the table above does not
+list, or holds a value of the wrong shape refuses the session and names this file. A malformed config is
+not guessed at, because guessing would mean deciding which credentials to forward on the strength of a
+typo. Nothing is relocated — as with the ceilings above, the docker branch throws instead of falling
+through to another provider.
+
+**Two things that are not errors.** A missing directory means global settings, as above. And the lookup
+runs from the working directory, so a server process that is not running with the repository root as its
+working directory finds no project directory at all and runs every session on the global settings; it
+logs one warning saying so rather than refusing to start. `npm run start` and the launch agent both set
+that directory, so this reaches only a server started by hand from somewhere else.
+
+**When it applies.** Like every other setting on this page, when a container is **created**. Editing a
+`sandbox.json` and restarting the server reaches only sessions whose containers are created after the
+restart; an existing session keeps the image, ceilings and credentials it started with until its
+container is removed.
 
 ## `MASTRACODE_MAX_SANDBOXES`
 
@@ -320,8 +380,9 @@ reason the key is listed at all rather than left out and forgotten.
 docker-provider session container as `EXPO_TOKEN`, which is how the EAS CLI in the image authenticates
 — `eas whoami` then prints the account instead of `Not logged in`. Blank forwards nothing. This is the
 one host variable that reaches **every** session container regardless of which repository the session is
-bound to; `FACTORY_SANDBOX_PROJECT_ENV` above is how anything else reaches one, and only the containers
-it names.
+bound to; a project's `sandbox.json` `env` map is how anything else reaches one, and only the containers
+it names. A project `env` entry whose container-side name is `EXPO_TOKEN` overrides this forward for that
+project, which is how two projects build against two Expo accounts.
 
 **How to obtain it.** expo.dev → account settings → Access tokens → create a token. Prefer a robot
 user's token or one from an account that only this deployment uses: the token is readable by
@@ -332,37 +393,43 @@ Like the ceilings below, it is applied when a session's container is **created**
 or revoking it and restarting the server reaches only sessions whose containers are created after the
 restart; an existing session keeps the value it started with until its container is removed.
 
-## `VERCEL_TOKEN`
+## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN`
 
-**What the value must contain.** A Vercel API token, or nothing. It is not forwarded to every session:
-`FACTORY_SANDBOX_PROJECT_ENV` above names the repositories whose containers receive it, and no other
-session container sees it. Inside one, it is what lets the Vercel CLI in a checked-out repository read
-deployment status, build failures and recent runtime logs without an interactive login step.
+**What the value must contain.** A Vercel API token for the Vercel project that
+`koval-yurko/eleven-labs-english-agent` deploys to, or nothing. It is not forwarded to every session:
+that project's `sandbox.json` `env` map names it, and it reaches that project's container as
+`VERCEL_TOKEN`. No other session container sees it. Inside that container it is what lets the Vercel CLI
+in the checked-out repository read deployment status, build failures and recent runtime logs without an
+interactive login step.
 
 **How to obtain it.** vercel.com → account settings → Tokens → create a token. The deployment this
 serves accepts a full-access classic token, so scope it as narrowly as the account allows and prefer one
 from an account that only this deployment uses. Treat it as handed to the agent rather than kept from
 it: anything running in that container can read it, including any script in a repository it clones.
 
+The host-side name carries the project because a second Vercel project needs a second token, and both
+present theirs to their own sandbox as `VERCEL_TOKEN` — the `Per-project sandboxes` section above is why
+that is the map's direction and not an accident.
+
 Applied when a container is **created**, like `EXPO_TOKEN` above, so rotating it reaches only the
 containers created after the restart.
 
-## `VERCEL_ORG_ID`
+## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID`
 
-**What the value must contain.** The identifier of the Vercel team the token above belongs to, or
-nothing. It names an account and is not a credential. It is forwarded to exactly the repositories the
-same `FACTORY_SANDBOX_PROJECT_ENV` entries name — the CLI needs both to address a project without an
-interactive link step, and a token with no team identifier makes it ask.
+**What the value must contain.** The identifier of the Vercel team that token belongs to, or nothing. It
+names an account and is not a credential. The same `env` map forwards it, and it reaches that container
+as `VERCEL_ORG_ID` — the CLI needs both to address a project without an interactive link step, and a
+token with no team identifier makes it ask.
 
-**How to obtain it.** From a checkout of the repository, `vercel link` writes both this and the project
+**How to obtain it.** From a checkout of that repository, `vercel link` writes both this and the project
 identifier below into `.vercel/project.json`; the project's settings page in the dashboard shows the same
 two strings. Either way it is stable for the life of the project, so it is set once.
 
-## `VERCEL_PROJECT_ID`
+## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID`
 
-**What the value must contain.** The identifier of the Vercel project the deployment belongs to, or
+**What the value must contain.** The identifier of the Vercel project that repository deploys to, or
 nothing. It names a project inside the team above and is not a credential. Forwarded alongside the other
-two by the same entries.
+two by the same `env` map, and reaching that container as `VERCEL_PROJECT_ID`.
 
 **How to obtain it.** The same `vercel link` run or the same settings page. Take both identifiers from
 one place and set them together: a project identifier from a different team reads like a permissions
@@ -402,6 +469,15 @@ resize.
   tag never reaches this point — it stops the server at startup instead — so a session reaching this
   error means the key is blank. A tag of the right shape that this engine does not hold is not caught
   at startup either, and surfaces as the registry error below rather than as this one.
+- **The error names a `sandbox/projects/<owner>/<name>/sandbox.json` path.** That project's config is
+  the cause and nothing else is: it could not be read, is not valid JSON, holds a value that is not a
+  JSON object, carries a field the `Per-project sandboxes` section does not list, or holds a value of
+  the wrong shape — an image tag outside this project's family, a ceiling that is not a whole number
+  written as a JSON number, or an `env` name that is not a valid variable name on one side or the
+  other. The error says which. A ceiling **above** the host bound arrives the same way and names the
+  file and the field, because that file supplied the number; fix it there and not in the global key.
+  This config is read rather than parsed leniently, so a session for that repository will not start
+  until the file does — other repositories are unaffected.
 - **The error names `MASTRACODE_MAX_SANDBOXES`.** This server process is already holding sandboxes for
   as many sessions as that key allows, so this one was refused before a container was created —
   nothing is wrong with the image or the engine. Free a slot by letting a running session's work item
@@ -418,7 +494,10 @@ resize.
   reported against Docker Hub and names no local cause. It means the tag is missing locally — usually
   pruned, or never built on this engine, or built against a different `DOCKER_HOST` than the server is
   using. Confirm with `docker images factory-sandbox`, then either rebuild that tag or point
-  `FACTORY_SANDBOX_IMAGE` at one the list actually shows.
+  `FACTORY_SANDBOX_IMAGE` at one the list actually shows. The same failure arrives for a project image,
+  where the missing tag is the one in that project's `sandbox.json` `image` field — list it with
+  `docker images factory-sandbox-<name>` and rebuild it with
+  `npm run sandbox:build -- <owner>/<name>`, which also rewrites the field to the tag it built.
 - **A connection error reaching the daemon.** The engine is not running, or the server process does not
   have `DOCKER_HOST` in its environment — note that the server is a different process from your shell,
   so exporting it in a terminal does not give it to a `launchd`-started server. `ops/README.md` owns
@@ -447,6 +526,38 @@ consequence of the `-f` path. The image copies nothing out of it. There is no `.
 whole tree — `node_modules/` and `.env` included — is still transferred to the engine before the first
 instruction runs, which is why the first build spends a visible stretch on "transferring context".
 
+## Build a project image
+
+```bash
+npm run sandbox:build -- koval-yurko/eleven-labs-english-agent
+```
+
+The argument is the project's `owner/name` slug — the same two directory levels under
+`sandbox/projects/`. One slug builds one project; there is no "build every project" form, because a
+project image is only needed where that project's sessions run.
+
+It builds `sandbox/projects/<owner>/<name>/Dockerfile`, tags the result
+`factory-sandbox-<name>:YYYY-MM-DD` with today's date, runs the same smoke test and `arm64` check the
+base build runs, and then writes the tag it built into the `image` field of that project's
+`sandbox.json`. The write is why the command exists rather than a bare `docker build`: the file that
+decides which image a session uses is updated by the same run that produced the image, so the two cannot
+drift. Nothing is written to `.env` — a project image is not the global one.
+
+Two things it needs first. The base tag that project's Dockerfile extends must already be in this
+engine's store, so build the base image after any change to it and before rebuilding the projects on top
+of it. And the slug must exist: a name with no `sandbox/projects/<owner>/<name>/Dockerfile` exits 1
+naming the path it looked for, rather than building nothing quietly.
+
+Run it once per host before that project's sessions are expected to work. The `sandbox.json` is
+committed, the image is not — it lives in this engine's store and nowhere else — so a freshly cloned
+tree names a project image no one has built yet. Until it is built, sessions bound to that repository
+fail the way a missing global image does, and the fix is this command rather than anything in the
+configuration.
+
+Rebuilding on the same date replaces that day's tag, exactly as the base build does, and the
+`sandbox.json` field is rewritten to the same string — so a second build on one day leaves no trace in
+the diff and the first image dangling. Suffix the tag by hand if both have to survive.
+
 ## Smoke test
 
 ```bash
@@ -459,6 +570,13 @@ architecture line is the half the version checks cannot catch: an image built fo
 `git --version` perfectly well and only then runs every session under emulation. The equivalent pinned
 form is `docker run --rm factory-sandbox:<YYYY-MM-DD> sh -c 'git --version && gh --version'`, the same
 command with the date written out.
+
+A project image is checked the same way with its own tag, and the `gh` half still has to pass —
+it is inherited from the base image, so it catches a base the project was rebuilt against that no
+longer has it. Add the tool that Dockerfile installs to the check: for
+`factory-sandbox-eleven-labs-english-agent:2026-10-11` that is `vercel --version`, which is also the
+check that the version it pins is the one that got installed. `npm run sandbox:build -- <owner>/<name>`
+runs the inherited half only, so the project-specific half is a manual step.
 
 Record the tag in the table below once this passes, then point `FACTORY_SANDBOX_IMAGE` at it and
 restart the server. Sessions started after the restart are created from that tag.
@@ -477,6 +595,15 @@ restart the server. Sessions started after the restart are created from that tag
 - **The build is killed part-way, or `apt-get` fails writing.** The VM is out of disk. Reclaim with
   `docker image prune` and `docker system df`, or grow the VM — checkouts plus `node_modules` in
   long-lived session containers are what fill it over months.
+- **A project build fails at its `FROM` line.** The base tag that Dockerfile extends is not in this
+  engine's store — pruned, never built here, or a date written into the Dockerfile that no build ever
+  produced. `docker images factory-sandbox` shows what exists; build that base tag first, or move the
+  `FROM` line to one that is there and rebuild. The base and the project are separate builds with no
+  ordering enforced between them, so this is the one way a base change quietly breaks the projects on
+  top of it.
+- **A project build exits 1 before building anything.** The slug names no
+  `sandbox/projects/<owner>/<name>/Dockerfile`. The error prints the path it looked for; the argument is
+  the `owner/name` slug and not a project name on its own.
 
 ## Retag and rollback
 
@@ -509,6 +636,12 @@ known-good rollback target. Never prune the tag in use or the last known-good on
 known-good tag; existing session containers keep running on the image they were created from, so a
 rollback takes effect for sessions started after it.
 
+A project image rolls back the same way with one difference: the tag that decides is the `image` field
+in that project's `sandbox.json`, not `FACTORY_SANDBOX_IMAGE`. Edit the field to the older tag and
+restart — or rebuild on a new date, which rewrites it. Only that one repository is affected; every
+other session keeps using the global tag. The same prune hazard applies, and a project tag has fewer
+containers referencing it, so it is the easier of the two to lose.
+
 List what the engine actually holds with:
 
 ```bash
@@ -519,6 +652,10 @@ docker images factory-sandbox
 
 Newest first. A tag earns a row once its build has passed the smoke test above; the tag in the top row
 is normally the one `FACTORY_SANDBOX_IMAGE` points at, and the rows under it are the rollback targets.
+
+This table is for base images only. A project image's live tag is the `image` field in that project's
+`sandbox.json`, which the build command rewrites, so its history is in that file's git log rather than
+here; a row here would go stale the next time anyone rebuilt the project.
 
 | Tag                        | Built                | Change        |
 |----------------------------|----------------------|---------------|

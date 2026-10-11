@@ -17,6 +17,9 @@
  * name appears here as a literal `process.env` read, which the verify gate
  * counts.
  */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // Type-only, so it is erased before the sweep below matters: a static VALUE
 // import would run ahead of it and let an inherited variable configure the
@@ -26,10 +29,10 @@ import type { MastraSandbox } from '@mastra/core/workspace';
 // Every env var this module reads BY NAME starts with one of these. Sweeping the
 // whole space keeps an inherited value from configuring a case; PATH/HOME and the
 // rest of the shell are untouched, because `localSandboxEnv` below is about
-// exactly those and stubs them itself. `VERCEL_` is swept too because a
-// per-project allow-list forwards a host variable whose name is read from the
-// mapping rather than written in this module — so the families the cases below
-// name are swept, and each case still stubs every name it asserts on.
+// exactly those and stubs them itself. `VERCEL_` is swept too because a project's
+// `sandbox.json` forwards host variables it names, not ones this module spells —
+// so the families the cases below name are swept, and each case still stubs every
+// name it asserts on.
 const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_', 'EXPO_', 'VERCEL_'];
 // DOCKER_HOST is swept even though this module never reads it: the docker tests
 // below construct a real `DockerSandbox`, whose `new Docker()` makes
@@ -58,6 +61,7 @@ const {
   dockerSandboxOptions,
   liveDockerSandboxes,
   localSandboxEnv,
+  projectSandboxConfig,
   selectSandbox,
 } = await import('./sandbox');
 // Deferred for the same reason as the module under test: a static import runs
@@ -365,266 +369,487 @@ describe('dockerSandboxOptions', () => {
   });
 });
 
+/** Throwaway repository roots a case wrote, removed after it. */
+const writtenRoots: string[] = [];
+
 /**
- * The per-project half of the same knobs. Each `FACTORY_SANDBOX_PROJECT_*` key
- * is an `owner/name=value` mapping keyed by the repository Factory binds a
- * session to, so what these cases pin is WHICH session an override reaches —
- * the block above pins what an override says. Nothing else in this repository
- * can see the scoping: a matched entry is multiplied into the very same
- * `DockerSandboxOptions`, and no container is created in the verify gate.
- *
- * The repository slugs are written out rather than shared with the block below,
- * because the claim under test is that a slug is matched EXACTLY: two blocks
- * reading one constant would keep agreeing with each other through a change to
- * the matching rule.
+ * Write one project's `sandbox.json` under a throwaway repository root and
+ * return that root, so a case controls the config the module reads instead of
+ * depending on the one this repository ships. A string `config` is written
+ * verbatim, which is how a case writes the malformed JSON the read has to
+ * refuse; anything else is serialized.
  */
-describe('dockerSandboxOptions per-project mappings', () => {
+function writeProjectConfig(repo: string, config: unknown): string {
+  const root = mkdtempSync(join(tmpdir(), 'factory-sandbox-'));
+  writtenRoots.push(root);
+  const dir = join(root, 'sandbox', 'projects', repo);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sandbox.json'), typeof config === 'string' ? config : JSON.stringify(config));
+  return root;
+}
+
+function cleanWrittenRoots(): void {
+  for (const root of writtenRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+}
+
+/**
+ * The per-project half of the same knobs, read from a file rather than from an
+ * environment mapping: `sandbox/projects/<owner>/<name>/sandbox.json`, committed
+ * beside the Dockerfile that builds the image it names. What these cases pin is
+ * WHICH session a config reaches, and that a config which cannot be honoured
+ * refuses the session instead of being quietly ignored — the block above pins
+ * what a resolved value says. Nothing else in this repository can see either: a
+ * matched config is multiplied into the very same `DockerSandboxOptions`, and no
+ * container is created in the verify gate.
+ */
+describe('projectSandboxConfig', () => {
   const REPO = 'koval-yurko/eleven-labs-english-agent';
   const OTHER_REPO = 'acme/widgets';
-  const GLOBAL_IMAGE = 'factory-sandbox:2026-09-23';
-  const PROJECT_IMAGE = 'factory-sandbox:2026-10-11';
+  const IMAGE = 'factory-sandbox-eleven-labs-english-agent:2026-10-11';
+  const CONFIG_PATH = 'sandbox/projects/koval-yurko/eleven-labs-english-agent/sandbox.json';
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    cleanWrittenRoots();
+  });
+
+  it('reads the config a project committed, and reports none for a project that has not', () => {
+    const config = {
+      image: IMAGE,
+      memoryGib: 8,
+      cpus: 6,
+      env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' },
+    };
+    const root = writeProjectConfig(REPO, config);
+
+    expect(projectSandboxConfig(REPO, root)).toEqual(config);
+    // Another project's directory is not this one's config, and an uncustomized
+    // project has no file at all — the state every project starts in, and the one
+    // that must keep working rather than being an error.
+    expect(projectSandboxConfig(OTHER_REPO, root)).toBeUndefined();
+    // A session Factory bound to no repository has no slug to address a directory
+    // with, so it runs on the global configuration.
+    expect(projectSandboxConfig(undefined, root)).toBeUndefined();
+    expect(projectSandboxConfig('   ', root)).toBeUndefined();
+  });
+
+  it('treats a slug this layout cannot address as no config rather than a refusal', () => {
+    // The slug is data Factory supplied, not something an operator wrote, so a
+    // shape this layout cannot read means "unconfigured". Refusing the session
+    // over it would blame a file nobody wrote.
+    const root = writeProjectConfig(REPO, { image: IMAGE });
+    const unaddressable = [
+      'eleven-labs-english-agent', // one component: no owner directory above it
+      `${REPO}/extra`, // three: one level deeper than the layout has
+      'KOVAL-YURKO/eleven-labs-english-agent', // a different string, so a different project
+      'koval-yurko/eleven labs', // a space names no directory this can build
+      'koval-yurko/', // an empty name half
+      'other-owner/eleven-labs-english-agent',
+    ];
+    for (const slug of unaddressable) expect(projectSandboxConfig(slug, root)).toBeUndefined();
+
+    // Padded on the SESSION side: Factory reports the slug, but padding around it
+    // must not silently miss the config that is there.
+    expect(projectSandboxConfig(`  ${REPO}  `, root)).toEqual({ image: IMAGE });
+  });
+
+  it('reads no config outside the projects tree, whatever a slug component says', () => {
+    // `.` and `..` satisfy the character class a component is checked against, so
+    // they are refused separately: the slug is the one part of a path this module
+    // builds out of a value it did not author, and a component that walks up would
+    // read a config from outside the tree it has to come from.
+    const root = mkdtempSync(join(tmpdir(), 'factory-sandbox-'));
+    writtenRoots.push(root);
+    // Each file sits exactly where a walking component would resolve to, and
+    // neither is a project's config.
+    mkdirSync(join(root, 'sandbox', 'projects'), { recursive: true });
+    writeFileSync(join(root, 'sandbox', 'projects', 'sandbox.json'), JSON.stringify({ image: IMAGE }));
+    mkdirSync(join(root, 'sandbox', 'koval-yurko'), { recursive: true });
+    writeFileSync(join(root, 'sandbox', 'koval-yurko', 'sandbox.json'), JSON.stringify({ image: IMAGE }));
+
+    expect(projectSandboxConfig('koval-yurko/..', root)).toBeUndefined();
+    expect(projectSandboxConfig('../koval-yurko', root)).toBeUndefined();
+    expect(projectSandboxConfig('koval-yurko/.', root)).toBeUndefined();
+  });
+
+  it('refuses a config it cannot parse, naming the file rather than overriding nothing', () => {
+    // Skipping an unreadable config would leave a session without the image,
+    // ceiling or credential its operator wrote, surfacing later as a missing tool
+    // or an unauthenticated CLI — far from the file that caused it. Nothing else in
+    // the sandbox branch can tell a malformed config from an unconfigured project,
+    // which is why this throws and an absent file does not.
+    const root = writeProjectConfig(REPO, '{ "image": ');
+
+    expect(() => projectSandboxConfig(REPO, root)).toThrow(`${CONFIG_PATH} is not valid JSON`);
+  });
+
+  it('refuses a config that is not an object of settings', () => {
+    for (const notAnObject of ['[]', '"factory-sandbox-eleven-labs-english-agent:2026-10-11"', '8', 'null']) {
+      const root = writeProjectConfig(REPO, notAnObject);
+
+      expect(() => projectSandboxConfig(REPO, root)).toThrow(`${CONFIG_PATH} must hold a JSON object`);
+    }
+  });
+
+  it('refuses a field it does not read, so a typo cannot look like a configuration', () => {
+    const root = writeProjectConfig(REPO, { image: IMAGE, memoryGiB: 8 });
+
+    expect(() => projectSandboxConfig(REPO, root)).toThrow(
+      `${CONFIG_PATH} carries "memoryGiB", which is not one of the fields read from it — image, memoryGib, cpus, env`,
+    );
+  });
+
+  it("refuses an image outside this repository's own date-stamped sandbox family", () => {
+    // The family prefix is what keeps a project image from being an arbitrary one:
+    // the refusal in `dockerSandboxOptions` exists because the package default
+    // carries neither git nor gh, and any image an operator can name here carries
+    // the same hazard. The date stamp is the rollback property `.env.schema` pins
+    // for the global image — two builds of one Dockerfile stay two tags.
+    const refused: unknown[] = [
+      'factory-sandbox:2026-10-11', // the base image is not a project build
+      'factory-sandbox-eleven-labs-english-agent:latest',
+      'factory-sandbox-eleven-labs-english-agent', // untagged
+      'factory-sandbox-eleven-labs-english-agent:26-10-11', // not a four-digit year
+      'node:22-slim',
+      'eleven-labs-english-agent:2026-10-11', // no family prefix
+      42,
+    ];
+    for (const image of refused) {
+      const root = writeProjectConfig(REPO, { image });
+
+      expect(() => projectSandboxConfig(REPO, root)).toThrow(`${CONFIG_PATH} sets image to`);
+    }
+
+    expect(projectSandboxConfig(REPO, writeProjectConfig(REPO, { image: IMAGE }))).toEqual({ image: IMAGE });
+  });
+
+  it('refuses a ceiling that is not a whole positive number, naming the field', () => {
+    // Typed here rather than parsed from a string, which is what a JSON config buys
+    // over an environment variable: `"8"` is a mistake this can name instead of a
+    // value something else has to guess at.
+    for (const field of ['memoryGib', 'cpus'] as const) {
+      for (const bad of ['8', 0, -2, 8.5, true, null, [], {}, 9007199254740992]) {
+        const root = writeProjectConfig(REPO, { [field]: bad });
+
+        expect(() => projectSandboxConfig(REPO, root)).toThrow(`${CONFIG_PATH} sets ${field} to`);
+      }
+    }
+
+    // The string case gets the fuller claim: the message has to say what to write
+    // instead, because that is the mistake only a JSON config can catch.
+    const quoted = writeProjectConfig(REPO, { memoryGib: '8' });
+    expect(() => projectSandboxConfig(REPO, quoted)).toThrow(/whole number of gibibytes[\s\S]*8, not "8"/);
+  });
+
+  it('refuses an env mapping that is not an object of names', () => {
+    for (const env of [['VERCEL_TOKEN'], 'VERCEL_TOKEN', 8]) {
+      const root = writeProjectConfig(REPO, { env });
+
+      expect(() => projectSandboxConfig(REPO, root)).toThrow(`${CONFIG_PATH} sets env to`);
+    }
+  });
+
+  it('refuses an env entry that is not one variable name to another', () => {
+    // Each entry names the variable the container will have as its key and the
+    // host variable holding the value as that entry's value, so a name that is not
+    // a name cannot be read as a forwarding instruction at all.
+    const refused: unknown[] = [
+      { VERCEL_TOKEN: 42 },
+      { VERCEL_TOKEN: '1ST_TOKEN' }, // a name does not start with a digit
+      { '1ST_TOKEN': 'VERCEL_WEB_API_TOKEN' },
+      { 'VERCEL-TOKEN': 'VERCEL_WEB_API_TOKEN' }, // nor contains a hyphen
+      { VERCEL_TOKEN: '' },
+      { '': 'VERCEL_WEB_API_TOKEN' },
+    ];
+    for (const env of refused) {
+      const root = writeProjectConfig(REPO, { env });
+
+      expect(() => projectSandboxConfig(REPO, root)).toThrow(/is not an environment variable name/);
+    }
+  });
+
+  it('accepts a config that writes only what the project needs', () => {
+    // Every field is optional: a project that only needs a credential forwarded
+    // writes only `env`, one that needs a tool the base image lacks writes `image`
+    // too, and one that needs nothing writes no file at all.
+    expect(projectSandboxConfig(REPO, writeProjectConfig(REPO, {}))).toEqual({});
+    expect(projectSandboxConfig(REPO, writeProjectConfig(REPO, { cpus: 2 }))).toEqual({ cpus: 2 });
+    expect(projectSandboxConfig(REPO, writeProjectConfig(REPO, { env: {} }))).toEqual({ env: {} });
+  });
+});
+
+describe('dockerSandboxOptions per-project config', () => {
+  const REPO = 'koval-yurko/eleven-labs-english-agent';
+  const OTHER_REPO = 'acme/widgets';
+  const GLOBAL_IMAGE = 'factory-sandbox:2026-09-23';
+  const PROJECT_IMAGE = 'factory-sandbox-eleven-labs-english-agent:2026-10-11';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    cleanWrittenRoots();
   });
 
   it('gives the matching repository its own image, and every other session the global one', () => {
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_IMAGE', `${REPO}=${PROJECT_IMAGE}`);
+    const root = writeProjectConfig(REPO, { image: PROJECT_IMAGE });
 
-    expect(dockerSandboxOptions('session-abc', REPO).image).toBe(PROJECT_IMAGE);
-    expect(dockerSandboxOptions('session-abc', OTHER_REPO).image).toBe(GLOBAL_IMAGE);
-    // A session Factory bound to no repository has nothing to match an entry
-    // against, so it takes the global image exactly as an unmatched one does.
-    expect(dockerSandboxOptions('session-abc').image).toBe(GLOBAL_IMAGE);
+    expect(dockerSandboxOptions('session-abc', REPO, root).image).toBe(PROJECT_IMAGE);
+    expect(dockerSandboxOptions('session-abc', OTHER_REPO, root).image).toBe(GLOBAL_IMAGE);
+    // A session Factory bound to no repository has no directory to read.
+    expect(dockerSandboxOptions('session-abc', undefined, root).image).toBe(GLOBAL_IMAGE);
   });
 
-  it('resolves several entries and hands each repository its own', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_IMAGE', `${REPO}=${PROJECT_IMAGE};${OTHER_REPO}=factory-sandbox:2026-10-01`);
-
-    expect(dockerSandboxOptions('session-abc', REPO).image).toBe(PROJECT_IMAGE);
-    expect(dockerSandboxOptions('session-def', OTHER_REPO).image).toBe('factory-sandbox:2026-10-01');
-  });
-
-  it('reads a blank entry value as no override, so the global key still decides', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_IMAGE', `${REPO}=   `);
-
-    expect(dockerSandboxOptions('session-abc', REPO).image).toBe(GLOBAL_IMAGE);
-  });
-
-  it('refuses when no image resolves for this repository, naming the global key', () => {
-    // An entry for a DIFFERENT repository is not an image for this one, and the
-    // package default still carries neither git nor gh.
+  it('stands in for a global image, and refuses when neither the project nor the host has one', () => {
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', undefined);
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_IMAGE', `${OTHER_REPO}=${PROJECT_IMAGE}`);
+    const root = writeProjectConfig(REPO, { image: PROJECT_IMAGE });
 
-    expect(() => dockerSandboxOptions('session-abc', REPO)).toThrow(/FACTORY_SANDBOX_IMAGE/);
+    // A project image is a complete answer, so the global key is not also needed.
+    expect(dockerSandboxOptions('session-abc', REPO, root).image).toBe(PROJECT_IMAGE);
+    // A config for a DIFFERENT repository is not an image for this one, and the
+    // package default still carries neither git nor gh.
+    expect(() => dockerSandboxOptions('session-abc', OTHER_REPO, root)).toThrow(/FACTORY_SANDBOX_IMAGE/);
   });
 
-  it('gives the matching repository its own ceilings', () => {
+  it('gives the matching repository its own ceilings, and every other session the global ones', () => {
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
     vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
     vi.stubEnv('FACTORY_SANDBOX_CPUS', '2');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${REPO}=8`);
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_CPUS', `${REPO}=6`);
+    const root = writeProjectConfig(REPO, { memoryGib: 8, cpus: 6 });
 
-    const options = dockerSandboxOptions('session-abc', REPO);
+    const options = dockerSandboxOptions('session-abc', REPO, root);
     expect(options.memory).toBe(8 * 1024 * 1024 * 1024);
-    // Swap follows the per-project memory, or the "8 GiB cap" would be 8 GiB of
-    // RAM plus 8 GiB of swap for this repository alone.
+    // Swap follows the project's memory, or the "8 GiB cap" would be 8 GiB of RAM
+    // plus 8 GiB of swap for this repository alone.
     expect(options.memorySwap).toBe(8 * 1024 * 1024 * 1024);
     expect(options.cpuQuota).toBe(600_000);
 
-    // Same host, same mappings, a different repository: the global numbers.
-    const other = dockerSandboxOptions('session-def', OTHER_REPO);
+    // Same host, same config on disk, a different repository: the global numbers.
+    const other = dockerSandboxOptions('session-def', OTHER_REPO, root);
     expect(other.memory).toBe(4 * 1024 * 1024 * 1024);
     expect(other.cpuQuota).toBe(200_000);
   });
 
-  it('trims an entry and its value, so a readable mapping is not a different number', () => {
-    // Entries are separated by semicolons, so an operator pads them to keep a
-    // long mapping readable. That padding is the mapping's own syntax and is
-    // trimmed — around an entry, and after the `=`. Padding INSIDE the key half
-    // is not trimmed and is refused by the case below, because the slug has to be
-    // the one Factory reports rather than something near it.
+  it('takes every knob it does not write from the global configuration', () => {
+    // Per FIELD, not per file: a project that needs a bigger memory ceiling keeps
+    // the global image, the global CPU count and the globally forwarded
+    // credentials.
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
     vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${OTHER_REPO}=2;  ${REPO}= 8  `);
-
-    expect(dockerSandboxOptions('session-abc', REPO).memory).toBe(8 * 1024 * 1024 * 1024);
-  });
-
-  it('ignores a malformed per-project ceiling and falls back to the global one', () => {
-    // The same spelling rule the global knob has, for the same reason: `1e3` and
-    // `+5` read as whole numbers but are not runs of digits, and rounding either
-    // into something plausible is worse than taking what the operator set
-    // globally. The last one is past the safe-integer range, so the parser — not
-    // the bound below — is what rejects it.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '6');
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', '3');
-
-    for (const bad of ['abc', '0', '-2', '2.5', '0x10', '0b11', '1e3', '+5', '99999999999999999999']) {
-      vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${REPO}=${bad}`);
-      vi.stubEnv('FACTORY_SANDBOX_PROJECT_CPUS', `${REPO}=${bad}`);
-
-      const options = dockerSandboxOptions('session-abc', REPO);
-      expect(options.memory).toBe(6 * 1024 * 1024 * 1024);
-      expect(options.cpuQuota).toBe(300_000);
-    }
-  });
-
-  it('refuses a per-project ceiling above the host bound, naming the per-project key', () => {
-    // The bound is the host's, not the key's: an entry cannot raise what one
-    // container can be given. Naming the PER-PROJECT key is the point — the
-    // operator has to be told which of the two lines to edit.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${REPO}=31`);
-
-    expect(() => dockerSandboxOptions('session-abc', REPO)).toThrow(
-      /FACTORY_SANDBOX_PROJECT_MEMORY_GIB is 31, which is more than the 30 GiB[\s\S]*sandbox\/README\.md/,
-    );
-
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${REPO}=8`);
     vi.stubEnv('FACTORY_SANDBOX_CPUS', '2');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_CPUS', `${REPO}=13`);
+    vi.stubEnv('EXPO_TOKEN', 'expo-token');
+    const root = writeProjectConfig(REPO, { memoryGib: 8 });
 
-    expect(() => dockerSandboxOptions('session-abc', REPO)).toThrow(
-      /FACTORY_SANDBOX_PROJECT_CPUS is 13, which is more than the 12 cores[\s\S]*sandbox\/README\.md/,
+    const options = dockerSandboxOptions('session-abc', REPO, root);
+    expect(options.image).toBe(GLOBAL_IMAGE);
+    expect(options.memory).toBe(8 * 1024 * 1024 * 1024);
+    expect(options.cpuQuota).toBe(200_000);
+    expect(options.env).toEqual({ EXPO_TOKEN: 'expo-token' });
+  });
+
+  it('refuses a project ceiling above the host bound, naming the file and field to edit', () => {
+    // The bound is the host's, not the config's: a project cannot raise what one
+    // container can be given. Naming the FILE is the point — the operator has to be
+    // told which of the two places to edit.
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
+    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
+    const memory = writeProjectConfig(REPO, { memoryGib: 31 });
+
+    expect(() => dockerSandboxOptions('session-abc', REPO, memory)).toThrow(
+      /eleven-labs-english-agent\/sandbox\.json memoryGib is 31/,
+    );
+    expect(() => dockerSandboxOptions('session-abc', REPO, memory)).toThrow(/more than the 30 GiB this host can give/);
+    expect(() => dockerSandboxOptions('session-abc', REPO, memory)).toThrow(/sandbox\/README\.md/);
+
+    vi.stubEnv('FACTORY_SANDBOX_CPUS', '2');
+    const cpus = writeProjectConfig(REPO, { cpus: 13 });
+
+    expect(() => dockerSandboxOptions('session-abc', REPO, cpus)).toThrow(
+      /eleven-labs-english-agent\/sandbox\.json cpus is 13, which is more than the 12 cores/,
     );
   });
 
-  it('refuses a mapping entry it cannot read, naming the key rather than overriding nothing', () => {
-    // Skipping an unreadable entry would leave a session without the override
-    // its operator wrote, surfacing later as a missing credential or a wrong
-    // ceiling — far from the key that caused it.
+  it('refuses the session on a config it cannot read, before a container exists', () => {
+    // The fail-closed read is only worth anything if it reaches session creation:
+    // a config skipped here would start a container without the tool or credential
+    // its operator wrote, and the first sign would be a CLI reporting that it is
+    // not authenticated.
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', GLOBAL_IMAGE);
-    const PROJECT_KEYS = [
-      'FACTORY_SANDBOX_PROJECT_IMAGE',
-      'FACTORY_SANDBOX_PROJECT_MEMORY_GIB',
-      'FACTORY_SANDBOX_PROJECT_CPUS',
-      'FACTORY_SANDBOX_PROJECT_ENV',
-    ];
-    const unreadable: Array<[string, string]> = [
-      // No `=` at all.
-      ['FACTORY_SANDBOX_PROJECT_IMAGE', PROJECT_IMAGE],
-      // A key half that is not `owner/name`, so it could never match a session.
-      ['FACTORY_SANDBOX_PROJECT_IMAGE', `eleven-labs-english-agent=${PROJECT_IMAGE}`],
-      ['FACTORY_SANDBOX_PROJECT_MEMORY_GIB', 'nope'],
-      ['FACTORY_SANDBOX_PROJECT_CPUS', `koval-yurko/eleven-labs-english-agent/extra=4`],
-      // A slug with padding before the `=` is not the slug Factory reports.
-      ['FACTORY_SANDBOX_PROJECT_MEMORY_GIB', `${REPO} = 8`],
-      // The same repository twice: which entry applies is ambiguous.
-      ['FACTORY_SANDBOX_PROJECT_ENV', `${REPO}=VERCEL_TOKEN;${REPO}=VERCEL_ORG_ID`],
-    ];
+    const root = writeProjectConfig(REPO, { image: 'node:22-slim' });
 
-    for (const [key, value] of unreadable) {
-      // Every mapping is cleared first, so the case fails on the key it names
-      // rather than on one left over from the case before it.
-      for (const projectKey of PROJECT_KEYS) vi.stubEnv(projectKey, undefined);
-      vi.stubEnv(key, value);
-
-      expect(() => dockerSandboxOptions('session-abc', REPO)).toThrow(new RegExp(key));
-    }
+    expect(() => dockerSandboxOptions('session-abc', REPO, root)).toThrow(/node:22-slim/);
   });
 });
 
 /**
- * Which host credentials a project's container gets. `EXPO_TOKEN` is forwarded
- * to every session and the block above pins that; everything else is listed per
- * repository, so what is invisible anywhere else in this repository is that one
- * project's credentials do NOT reach another project's session. A Vercel token
- * handed to every session would be readable by every repository any agent ever
- * clones here.
+ * Which host credentials a project's container gets, and under what name.
+ * `EXPO_TOKEN` is forwarded to every session and the block above pins that;
+ * everything else comes from one project's own `env` mapping, so what is
+ * invisible anywhere else in this repository is that one project's credentials
+ * do NOT reach another project's session. A Vercel token handed to every session
+ * would be readable by every repository any agent ever clones here.
+ *
+ * The mapping is keyed by the CONTAINER name and valued by the HOST name, which
+ * is what lets several Vercel projects each present their own token under the one
+ * name their tooling reads.
  */
-describe('dockerSandboxEnv per-project allow-list', () => {
+describe('dockerSandboxEnv per-project config', () => {
   const REPO = 'koval-yurko/eleven-labs-english-agent';
   const OTHER_REPO = 'acme/widgets';
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    cleanWrittenRoots();
   });
 
-  it('forwards the listed host variables to the repository that lists them, and to no other', () => {
+  it('forwards a host variable under the name the container reads', () => {
+    // Several Vercel projects, each with its own token on the host, each needing to
+    // be `VERCEL_TOKEN` inside its own sandbox — which one shared host name cannot
+    // do, because only one value can hold it.
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', '  vercel-token  ');
+    vi.stubEnv('VERCEL_WEB_API_TOKEN', 'web-api-token');
+
+    expect(dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' } })).toEqual({
+      VERCEL_TOKEN: 'vercel-token',
+    });
+    expect(dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_WEB_API_TOKEN' } })).toEqual({
+      VERCEL_TOKEN: 'web-api-token',
+    });
+  });
+
+  it('forwards only what a config names, and never the host name itself', () => {
     vi.stubEnv('EXPO_TOKEN', 'expo-token');
-    vi.stubEnv('VERCEL_TOKEN', '  vercel-token  ');
-    vi.stubEnv('VERCEL_ORG_ID', 'team_123');
-    vi.stubEnv('VERCEL_PROJECT_ID', 'prj_456');
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+    vi.stubEnv('VERCEL_WEB_API_TOKEN', 'web-api-token');
     vi.stubEnv('DATABASE_URL', 'postgres://secret');
     vi.stubEnv('GITHUB_APP_PRIVATE_KEY', 'secret');
-    vi.stubEnv(
-      'FACTORY_SANDBOX_PROJECT_ENV',
-      `${REPO}=VERCEL_TOKEN,VERCEL_PROJECT_ID;${OTHER_REPO}=VERCEL_ORG_ID`,
-    );
 
-    // Disjoint sets on purpose: each repository gets its own entry and nothing
-    // from the other's, and no host secret that no entry names.
-    expect(dockerSandboxEnv(REPO)).toEqual({
+    const env = dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' } });
+
+    expect(env).toEqual({ EXPO_TOKEN: 'expo-token', VERCEL_TOKEN: 'vercel-token' });
+    // The container sees the name its tooling reads, not the host name holding the
+    // value, so nothing inside it can tell which project's token it was given.
+    expect(env).not.toHaveProperty('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN');
+    // Another project's token is on this host and is not named by this config, so
+    // it does not reach this container — nor does any secret no config names.
+    expect(env).not.toHaveProperty('VERCEL_WEB_API_TOKEN');
+    expect(env).not.toHaveProperty('DATABASE_URL');
+    expect(env).not.toHaveProperty('GITHUB_APP_PRIVATE_KEY');
+  });
+
+  it('forwards a named variable that is unset or blank as nothing, so a project can be configured early', () => {
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', undefined);
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID', '   ');
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID', 'prj_456');
+
+    expect(
+      dockerSandboxEnv({
+        env: {
+          VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
+          VERCEL_ORG_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID',
+          VERCEL_PROJECT_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID',
+        },
+      }),
+    ).toEqual({ VERCEL_PROJECT_ID: 'prj_456' });
+  });
+
+  it('reaches one host variable under two container names, and nothing without a config', () => {
+    vi.stubEnv('EXPO_TOKEN', 'expo-token');
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+
+    // The harmless direction a container-keyed mapping still allows: one token
+    // under two names, because two tools may read it differently. The ambiguous
+    // direction — two host variables claiming one container name — a JSON object
+    // cannot express, so it cannot be written by accident.
+    expect(
+      dockerSandboxEnv({
+        env: {
+          VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
+          VERCEL_API_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
+        },
+      }),
+    ).toEqual({
       EXPO_TOKEN: 'expo-token',
       VERCEL_TOKEN: 'vercel-token',
-      VERCEL_PROJECT_ID: 'prj_456',
+      VERCEL_API_TOKEN: 'vercel-token',
     });
-    expect(dockerSandboxEnv(OTHER_REPO)).toEqual({
-      EXPO_TOKEN: 'expo-token',
-      VERCEL_ORG_ID: 'team_123',
+
+    // A session with no project config gets the global forward and nothing else.
+    expect(dockerSandboxEnv()).toEqual({ EXPO_TOKEN: 'expo-token' });
+    expect(dockerSandboxEnv({})).toEqual({ EXPO_TOKEN: 'expo-token' });
+  });
+
+  it('lets a project replace the globally forwarded EXPO_TOKEN, so it can be on its own account', () => {
+    // The project mapping is the more specific of the two layers, so an entry whose
+    // container name is `EXPO_TOKEN` replaces the global value rather than being
+    // refused — that is how a project on its own Expo account is configured.
+    vi.stubEnv('EXPO_TOKEN', 'shared-expo-token');
+    vi.stubEnv('EXPO_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'project-expo-token');
+
+    expect(dockerSandboxEnv({ env: { EXPO_TOKEN: 'EXPO_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' } })).toEqual({
+      EXPO_TOKEN: 'project-expo-token',
     });
+    // And a project whose config does not mention Expo keeps the shared account.
+    expect(dockerSandboxEnv({ env: {} })).toEqual({ EXPO_TOKEN: 'shared-expo-token' });
   });
 
   it('reaches the container through the options, so the scoping is what a session actually gets', () => {
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', 'factory-sandbox:2026-09-23');
-    vi.stubEnv('VERCEL_TOKEN', 'vercel-token');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_ENV', `${REPO}=VERCEL_TOKEN`);
+    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+    const root = writeProjectConfig(REPO, {
+      env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' },
+    });
 
-    expect(dockerSandboxOptions('session-abc', REPO).env).toEqual({ VERCEL_TOKEN: 'vercel-token' });
-    // An unmatched repository gets nothing project-scoped, so `env` is omitted
+    expect(dockerSandboxOptions('session-abc', REPO, root).env).toEqual({ VERCEL_TOKEN: 'vercel-token' });
+    // An uncustomized repository gets nothing project-scoped, so `env` is omitted
     // entirely rather than present-and-empty.
-    expect(dockerSandboxOptions('session-def', OTHER_REPO)).not.toHaveProperty('env');
+    expect(dockerSandboxOptions('session-def', OTHER_REPO, root)).not.toHaveProperty('env');
+  });
+});
+
+/**
+ * The config this repository ships. Every case above writes a throwaway tree, so
+ * nothing in them proves the committed one is readable, that its image is in the
+ * family the read accepts, or that the host variables it names are the ones
+ * `.env.schema` declares — and an undeclared name is the failure that reaches an
+ * operator as a container with no credential and nothing saying why.
+ */
+describe('the committed eleven-labs-english-agent sandbox config', () => {
+  const REPO = 'koval-yurko/eleven-labs-english-agent';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
-  it('forwards a listed variable that is unset or blank as nothing, so a project can be listed early', () => {
-    vi.stubEnv('VERCEL_TOKEN', undefined);
-    vi.stubEnv('VERCEL_ORG_ID', '   ');
-    vi.stubEnv('VERCEL_PROJECT_ID', 'prj_456');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_ENV', `${REPO}=VERCEL_TOKEN,VERCEL_ORG_ID,VERCEL_PROJECT_ID,`);
+  it('is read from the repository root the server is documented to run from', () => {
+    // No `rootDir`, so this is the production path: the working directory
+    // `npm run start` keeps working from and `ops/factory-start.sh` sets.
+    const config = projectSandboxConfig(REPO);
 
-    // The trailing comma is the same case as a blank name: an entry that lists
-    // nothing is not a malformed mapping.
-    expect(dockerSandboxEnv(REPO)).toEqual({ VERCEL_PROJECT_ID: 'prj_456' });
+    expect(config?.env).toEqual({
+      VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
+      VERCEL_ORG_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID',
+      VERCEL_PROJECT_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID',
+    });
+    // Baking the Vercel CLI into the project image is why the file exists, so it
+    // has to name one — in this project's own date-stamped family.
+    expect(config?.image).toMatch(/^factory-sandbox-eleven-labs-english-agent:[0-9]{4}-[0-9]{2}-[0-9]{2}/);
+    // The ceilings are deliberately absent: this project takes the global ones.
+    expect(config?.memoryGib).toBeUndefined();
+    expect(config?.cpus).toBeUndefined();
   });
 
-  it('forwards nothing project-scoped to a session with no repository, or when no mapping is set', () => {
-    vi.stubEnv('EXPO_TOKEN', 'expo-token');
-    vi.stubEnv('VERCEL_TOKEN', 'vercel-token');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_ENV', `${REPO}=VERCEL_TOKEN`);
+  it('names only host variables .env.schema declares, so a rename cannot strand a credential', () => {
+    // The mapping is the only door a host secret has into a container, and
+    // `.env.schema` is the only list of what may be set on this host at all. A
+    // config naming something off that list forwards nothing, silently.
+    const declared = readFileSync(join(process.cwd(), '.env.schema'), 'utf8')
+      .split('\n')
+      .filter(line => /^[A-Za-z_][A-Za-z0-9_]*=/.test(line))
+      .map(line => line.slice(0, line.indexOf('=')));
+    const hosts = Object.values(projectSandboxConfig(REPO)?.env ?? {});
 
-    expect(dockerSandboxEnv()).toEqual({ EXPO_TOKEN: 'expo-token' });
-    expect(dockerSandboxEnv(undefined)).toEqual({ EXPO_TOKEN: 'expo-token' });
-
-    for (const value of [undefined, '', '   ']) {
-      vi.stubEnv('FACTORY_SANDBOX_PROJECT_ENV', value);
-      expect(dockerSandboxEnv(REPO)).toEqual({ EXPO_TOKEN: 'expo-token' });
-    }
-  });
-
-  it('matches the repository exactly, so a near-miss slug is a different project', () => {
-    vi.stubEnv('VERCEL_TOKEN', 'vercel-token');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_ENV', `${REPO}=VERCEL_TOKEN`);
-
-    const nearMisses = [
-      'koval-yurko/eleven-labs-english-agent-2',
-      'koval-yurko/eleven-labs',
-      'eleven-labs-english-agent',
-      'KOVAL-YURKO/eleven-labs-english-agent',
-      'other-owner/eleven-labs-english-agent',
-    ];
-    for (const slug of nearMisses) expect(dockerSandboxEnv(slug)).toEqual({});
-
-    // Padded on the SESSION side: Factory reports the slug, but a padded value
-    // must not silently miss the entry the operator wrote.
-    expect(dockerSandboxEnv(`  ${REPO}  `)).toEqual({ VERCEL_TOKEN: 'vercel-token' });
+    expect(hosts.length).toBeGreaterThan(0);
+    for (const host of hosts) expect(declared).toContain(host);
   });
 });
 
@@ -710,26 +935,26 @@ describe('selectSandbox', () => {
     expect(() => selectSandbox(ctx, true)).toThrow(/FACTORY_SANDBOX_MEMORY_GIB/);
   });
 
-  it('keys the per-project overrides on the repository Factory bound the session to', () => {
-    // The scoping itself is pinned against `dockerSandboxOptions` above, but it
-    // is only real if THIS function passes the repository through. The refusal is
-    // the observable, because a `DockerSandbox` keeps its resolved image private:
-    // drop the argument and the entry never matches, so this session is admitted
-    // on the global 4 GiB instead of throwing.
+  it('keys the per-project config on the repository Factory bound the session to', () => {
+    // The read and the scoping are pinned against `projectSandboxConfig` and
+    // `dockerSandboxOptions` above, but they are only real if THIS function passes
+    // the repository through. A missing global image is the observable, because a
+    // `DockerSandbox` keeps its resolved image private: the config this repository
+    // ships for `koval-yurko/eleven-labs-english-agent` names an image, so a
+    // session bound to it is created while one bound to any other repository has
+    // nothing to fall back to. Drop the argument and the first one throws too.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
-    vi.stubEnv('FACTORY_SANDBOX_PROJECT_MEMORY_GIB', 'koval-yurko/eleven-labs-english-agent=31');
+    vi.stubEnv('FACTORY_SANDBOX_IMAGE', undefined);
 
-    expect(() => selectSandbox({ ...ctx, repoFullName: 'koval-yurko/eleven-labs-english-agent' }, false)).toThrow(
-      /FACTORY_SANDBOX_PROJECT_MEMORY_GIB/,
+    expect(selectSandbox({ ...ctx, repoFullName: 'koval-yurko/eleven-labs-english-agent' }, false).name).toBe(
+      'DockerSandbox',
     );
 
-    // Same host, same mapping, a session bound to another repository: the entry
-    // does not reach it, so it is admitted on the global ceiling.
-    expect(selectSandbox({ ...ctx, repoFullName: 'acme/widgets' }, false).name).toBe('DockerSandbox');
-    // And a session with no repository at all takes the global value too.
-    expect(selectSandbox(ctx, false).name).toBe('DockerSandbox');
+    // Same host, same committed config on disk, a session bound to another
+    // repository: it does not reach it, so the missing global image refuses it.
+    expect(() => selectSandbox({ ...ctx, repoFullName: 'acme/widgets' }, false)).toThrow(/FACTORY_SANDBOX_IMAGE/);
+    // And a session with no repository at all.
+    expect(() => selectSandbox(ctx, false)).toThrow(/FACTORY_SANDBOX_IMAGE/);
   });
 
   it('trims the provider value, so a padded .env line still selects Docker', () => {

@@ -17,7 +17,17 @@
  *
  * This module is the one first-party read site for every key below (AD-7). See
  * `README.md` in this directory.
+ *
+ * It is also the only module under `src/` that reads a file at runtime, and only
+ * for one thing: the per-project `sandbox.json` under `sandbox/projects/`. That
+ * config is committed beside the Dockerfile it goes with rather than carried in
+ * an environment variable, because it describes a project's image and tooling as
+ * much as its credentials, and a file is what a reviewer can see the whole of.
+ * The working directory is therefore load-bearing here — it has to be the
+ * repository root, which is what `npm run start` and `ops/factory-start.sh` both
+ * guarantee, and what `warnIfNotRepoRoot` says out loud when it is not.
  */
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { LocalSandbox } from '@mastra/core/workspace';
@@ -59,68 +69,257 @@ export function localSandboxEnv(): Record<string, string> {
   return env;
 }
 
-// The key half of a per-project mapping entry: `owner/name`, the form Factory
-// reports a repository's slug in (`FactorySandboxContext.repoFullName`). Pinned
-// rather than split on `=` alone, so an entry that leaves out the owner — and
-// would therefore never match any session — is refused instead of quietly
-// overriding nothing.
-const PROJECT_SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+// One path component of a repository slug — the `owner` or the `name` half of
+// the `owner/name` form Factory reports a repository in
+// (`FactorySandboxContext.repoFullName`), and therefore one directory level
+// under `sandbox/projects/`. `.` and `..` satisfy the character class, so they
+// are refused separately below: the slug is the one part of a path this module
+// builds out of a value it did not author, and a component that walks up would
+// read a `sandbox.json` from outside the tree it is supposed to come from.
+const SLUG_COMPONENT = /^[A-Za-z0-9._-]+$/;
+
+/** An environment variable name, on either side of a project's `env` mapping. */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * Read one `owner/name=value;owner/name=value` mapping key and return the value
- * carried by the entry naming `repoFullName`, or `undefined` when the mapping is
- * blank, names no entry for that repository, or the session has no repository to
- * match against.
- *
- * `keyName` is used only to build an error message. The raw value is passed in
- * rather than read here so that every `process.env` read in this file stays a
- * literal one at its single call site (AD-7).
- *
- * A structural problem throws and names the key instead of being skipped. An
- * entry that is not `owner/name=value`, or a repository named twice, states an
- * intent this file cannot read, and ignoring it would leave a session without
- * the override its operator wrote — surfacing later as a missing credential or a
- * wrong ceiling, far from the key that caused it. That is the same reason the
- * ceilings below refuse rather than clamp.
- *
- * A blank value is not a structural problem: it means "no override for this
- * repository", and is reported as absent so the global key decides.
+ * A per-project sandbox image: this repository's own `factory-sandbox` family,
+ * date-stamped. The family prefix is what stops a project image from being an
+ * arbitrary one — the refusal in `dockerSandboxOptions` below exists because the
+ * package default carries neither `git` nor `gh`, and any image an operator can
+ * name here carries the same hazard. The date stamp is the rollback property
+ * `.env.schema` pins for the global image: two builds of one Dockerfile stay two
+ * distinguishable tags.
  */
-function projectMappingValue(
-  keyName: string,
-  raw: string | undefined,
-  repoFullName: string | undefined,
-): string | undefined {
-  const mapping = raw?.trim();
-  if (!mapping) return undefined;
+const PROJECT_IMAGE = /^factory-sandbox-[A-Za-z0-9._-]+:[0-9]{4}-[0-9]{2}-[0-9]{2}[A-Za-z0-9._-]*$/;
 
-  const entries = new Map<string, string>();
-  for (const entry of mapping.split(';')) {
-    const trimmed = entry.trim();
-    // An empty span between two semicolons, or a trailing one, carries no entry.
-    if (!trimmed) continue;
+/** The fields a `sandbox.json` is read for. An unlisted one is a typo, refused below. */
+const PROJECT_CONFIG_FIELDS = ['image', 'memoryGib', 'cpus', 'env'] as const;
 
-    const separator = trimmed.indexOf('=');
-    const slug = separator === -1 ? trimmed : trimmed.slice(0, separator);
-    if (separator === -1 || !PROJECT_SLUG.test(slug)) {
-      throw new Error(
-        `${keyName} entry "${trimmed}" is not owner/name=value, so the override it asks for cannot be read and ` +
-          'this session was refused before a container was created. Name the repository the way Factory reports ' +
-          'it — koval-yurko/eleven-labs-english-agent — and separate entries with semicolons (see ' +
-          'sandbox/README.md).',
-      );
-    }
-    if (entries.has(slug)) {
-      throw new Error(
-        `${keyName} names ${slug} twice, so which override applies to it is ambiguous and this session was ` +
-          'refused before a container was created. Merge the two entries into one (see sandbox/README.md).',
-      );
-    }
-    entries.set(slug, trimmed.slice(separator + 1).trim());
+/** Where a project's config lives, relative to the repository root. */
+const PROJECT_CONFIG_ROOT = join('sandbox', 'projects');
+const PROJECT_CONFIG_FILE = 'sandbox.json';
+// A seeded artifact guard 23 of the bmad-loop gate keeps present at the
+// repository root, which makes its absence a reliable "this is not the root"
+// signal rather than a guess from one missing directory.
+const REPO_ROOT_MARKER = join('sandbox', 'factory-sandbox.Dockerfile');
+
+/**
+ * What one project's `sandbox/projects/<owner>/<name>/sandbox.json` says about
+ * its session containers. Every field is optional: a project that only needs a
+ * credential forwarded writes only `env`, one that needs a tool the base image
+ * does not carry writes `image` too, and one that needs nothing writes no file
+ * at all and runs on the global configuration.
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export interface ProjectSandboxConfig {
+  /** Image for this project's containers; absent uses the global one. */
+  image?: string;
+  /** Memory ceiling in whole gibibytes; absent uses the global one. */
+  memoryGib?: number;
+  /** CPU ceiling in whole cores; absent uses the global one. */
+  cpus?: number;
+  /**
+   * Container variable name to the host variable whose value it receives. Keyed
+   * by the container name on purpose: two host variables claiming one container
+   * name is the ambiguous case — it decides which credential the project's
+   * tooling authenticates with — and a JSON object cannot express it. The
+   * harmless direction, one host variable reaching the container under two
+   * names, still can.
+   */
+  env?: Record<string, string>;
+}
+
+/**
+ * The config path for one repository, relative to the repository root, or
+ * `undefined` when `repoFullName` is absent or is not a slug this layout can
+ * address. A slug this cannot read is reported as "no config" rather than
+ * refused: it is data Factory supplied, not something an operator wrote, and
+ * refusing a session over it would blame the wrong file.
+ */
+function projectConfigPath(repoFullName: string | undefined): string | undefined {
+  const slug = repoFullName?.trim();
+  if (!slug) return undefined;
+
+  const parts = slug.split('/');
+  const [owner, name] = parts;
+  // Exactly two components: the layout is `sandbox/projects/<owner>/<name>/`, so
+  // a third would not name a project this can address.
+  if (parts.length !== 2 || owner === undefined || name === undefined) return undefined;
+  for (const part of [owner, name]) {
+    if (!SLUG_COMPONENT.test(part) || part === '.' || part === '..') return undefined;
+  }
+  return join(PROJECT_CONFIG_ROOT, owner, name, PROJECT_CONFIG_FILE);
+}
+
+/**
+ * Read and validate one project's `sandbox.json`, named by its path relative to
+ * `rootDir` — which is what every message below quotes, so an operator is
+ * pointed at the file they wrote rather than at a key they no longer have.
+ *
+ * A config this cannot read throws instead of being skipped, for the reason the
+ * ceilings in `dockerSandboxOptions` refuse rather than clamp: a config that is
+ * silently ignored leaves a session without the image, ceiling or credential its
+ * operator wrote, and that surfaces later as a missing tool or an unauthenticated
+ * CLI, far from the file that caused it. An ABSENT file is different and is not
+ * an error — it is the state every project is in before anyone customizes it.
+ */
+function readProjectConfig(relPath: string, rootDir: string): ProjectSandboxConfig {
+  let raw: string;
+  try {
+    raw = readFileSync(join(rootDir, relPath), 'utf8');
+  } catch (error) {
+    throw new Error(
+      `${relPath} could not be read (${error instanceof Error ? error.message : String(error)}), so the ` +
+        'sandbox configuration it holds for this project cannot be applied and this session was refused ' +
+        'before a container was created.',
+    );
   }
 
-  if (!repoFullName) return undefined;
-  return entries.get(repoFullName.trim()) || undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `${relPath} is not valid JSON, so the sandbox configuration it holds for this project cannot be read ` +
+        'and this session was refused before a container was created. Fix the file; nothing else in the ' +
+        'sandbox branch can tell a malformed config from an unconfigured project (see sandbox/README.md).',
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `${relPath} must hold a JSON object of per-project sandbox settings, and holds ` +
+        `${JSON.stringify(parsed)} instead, so this session was refused before a container was created.`,
+    );
+  }
+
+  const written = parsed as Record<string, unknown>;
+  const config: ProjectSandboxConfig = {};
+
+  for (const field of Object.keys(written)) {
+    if (!(PROJECT_CONFIG_FIELDS as readonly string[]).includes(field)) {
+      throw new Error(
+        `${relPath} carries "${field}", which is not one of the fields read from it — ` +
+          `${PROJECT_CONFIG_FIELDS.join(', ')} — so whatever it was meant to configure is not configured, ` +
+          'and this session was refused before a container was created rather than started on a config ' +
+          'that quietly ignores part of itself (see sandbox/README.md).',
+      );
+    }
+  }
+
+  const image = written.image;
+  if (image !== undefined) {
+    if (typeof image !== 'string' || !PROJECT_IMAGE.test(image)) {
+      throw new Error(
+        `${relPath} sets image to ${JSON.stringify(image)}, which is not a date-stamped tag in this ` +
+          "repository's own factory-sandbox family, so this session was refused before a container was " +
+          'created. The form is factory-sandbox-<project>:YYYY-MM-DD, built by `npm run sandbox:build -- ' +
+          '<owner>/<name>`; an image from anywhere else carries no guarantee of the git and GitHub CLI ' +
+          'every session needs (see sandbox/README.md).',
+      );
+    }
+    config.image = image;
+  }
+
+  for (const field of ['memoryGib', 'cpus'] as const) {
+    const value = written[field];
+    if (value === undefined) continue;
+    // Typed here rather than parsed from a string, which is what a JSON config
+    // buys over an environment variable: `"8"` is a mistake this can name
+    // instead of a value something else has to guess at.
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(
+        `${relPath} sets ${field} to ${JSON.stringify(value)}, which is not a whole number of ` +
+          (field === 'memoryGib' ? 'gibibytes' : 'cores') +
+          ' greater than zero, so this session was refused before a container was created. Write it as a ' +
+          'JSON number — 8, not "8" — and leave it out entirely to take the global value ' +
+          '(see sandbox/README.md).',
+      );
+    }
+    config[field] = value;
+  }
+
+  const env = written.env;
+  if (env !== undefined) {
+    if (!env || typeof env !== 'object' || Array.isArray(env)) {
+      throw new Error(
+        `${relPath} sets env to ${JSON.stringify(env)}, which is not a JSON object, so this session was ` +
+          'refused before a container was created. Each entry names a variable the container will have as ' +
+          'its key and the host variable holding the value as that entry\'s value (see sandbox/README.md).',
+      );
+    }
+    const forwarding: Record<string, string> = {};
+    for (const [container, host] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof host !== 'string' || !ENV_NAME.test(container) || !ENV_NAME.test(host)) {
+        throw new Error(
+          `${relPath} maps the container variable ${JSON.stringify(container)} to ${JSON.stringify(host)}, ` +
+            'and one of the two is not an environment variable name — letters, digits and underscores, not ' +
+            'starting with a digit — so the credential this entry asks for cannot be read and this session ' +
+            'was refused before a container was created. The key is the name the tooling inside the ' +
+            'container reads and the value is the host variable holding it (see sandbox/README.md).',
+        );
+      }
+      forwarding[container] = host;
+    }
+    config.env = forwarding;
+  }
+
+  return config;
+}
+
+// Set once the working directory has been found not to be the repository root,
+// so a deployment in that state says so once instead of once per session.
+let warnedAboutConfigRoot = false;
+
+/**
+ * Say once when per-project config cannot be found because the process is not
+ * running with the repository root as its working directory — the cwd
+ * `npm run start` is documented to keep working from, and the one
+ * `ops/factory-start.sh` sets before it execs.
+ *
+ * Without this the failure is invisible: every project simply looks unconfigured,
+ * each session runs on the global configuration, and the first sign is a CLI
+ * inside a container reporting that it is not authenticated. Only the default
+ * root is checked, because an explicitly supplied one is a test's.
+ */
+function warnIfNotRepoRoot(rootDir: string): void {
+  if (warnedAboutConfigRoot) return;
+  if (existsSync(join(rootDir, REPO_ROOT_MARKER))) return;
+
+  warnedAboutConfigRoot = true;
+  console.warn(
+    `[factory] the working directory ${rootDir} holds no ${REPO_ROOT_MARKER}, so it is not the repository ` +
+      `root and no ${PROJECT_CONFIG_ROOT}/<owner>/<name>/${PROJECT_CONFIG_FILE} can be found from here. ` +
+      'Every session will run on the global sandbox configuration, and a credential a project config ' +
+      'forwards will be absent inside its container with nothing else to say why. Start the server with ' +
+      'the repository root as its working directory (see sandbox/README.md).',
+  );
+}
+
+/**
+ * The sandbox configuration for one repository, or `undefined` when it has none —
+ * because the session has no repository, the slug is not one this layout can
+ * address, or that project has not been customized.
+ *
+ * `rootDir` defaults to the working directory and is a parameter so
+ * `sandbox.test.ts` can point it at a tree it wrote; production passes nothing.
+ * The file is read on each call rather than cached: it happens once per new
+ * session, which `MASTRACODE_MAX_SANDBOXES` bounds, and a cache would only add
+ * a second answer to "which config did this container get".
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export function projectSandboxConfig(
+  repoFullName: string | undefined,
+  rootDir?: string,
+): ProjectSandboxConfig | undefined {
+  const relPath = projectConfigPath(repoFullName);
+  if (!relPath) return undefined;
+
+  const root = rootDir ?? process.cwd();
+  if (rootDir === undefined) warnIfNotRepoRoot(root);
+  if (!existsSync(join(root, relPath))) return undefined;
+  return readProjectConfig(relPath, root);
 }
 
 /**
@@ -132,36 +331,36 @@ function projectMappingValue(
  *
  * Two layers reach a container. `EXPO_TOKEN` is forwarded to every session,
  * because the EAS CLI in the image is the same account whichever repository is
- * checked out. Anything else is per project: `FACTORY_SANDBOX_PROJECT_ENV`
- * lists, by repository, which further host variables that project's container
- * gets, and `repoFullName` is the repository this session is for. A project's
- * credentials therefore never reach another project's session — a Vercel token
- * is handed to the sessions whose repositories deploy to it, and to no others.
+ * checked out. Anything else comes from `config.env` — the `env` mapping in the
+ * project's own `sandbox.json`, which is per project by construction, so one
+ * project's credentials never reach another project's session. That is what
+ * lets several projects each carry their own Vercel token under the one name
+ * their tooling reads, `VERCEL_TOKEN`, without either being visible to the
+ * other.
+ *
+ * A project's mapping is the more specific of the two layers, so an entry whose
+ * container name is `EXPO_TOKEN` replaces the global value for that project
+ * rather than being refused — that is how a project on its own Expo account is
+ * configured.
  *
  * Docker applies it when the container is CREATED, so a session reattaching to
  * an existing container keeps the environment it was created with.
  *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxEnv(repoFullName?: string): Record<string, string> {
+export function dockerSandboxEnv(config?: ProjectSandboxConfig): Record<string, string> {
   const env: Record<string, string> = {};
   const expoToken = process.env.EXPO_TOKEN?.trim();
   if (expoToken) env.EXPO_TOKEN = expoToken;
 
-  // The mapping lists NAMES only; the values are read here, when the container
-  // is created. A listed name that is unset or blank on this host forwards
-  // nothing, so a project can be listed before its credentials are provisioned.
-  // The entry's own shape is `projectMappingValue`'s to refuse, and it throws.
-  const allowList = projectMappingValue(
-    'FACTORY_SANDBOX_PROJECT_ENV',
-    process.env.FACTORY_SANDBOX_PROJECT_ENV,
-    repoFullName,
-  );
-  for (const name of allowList?.split(',') ?? []) {
-    const trimmedName = name.trim();
-    if (!trimmedName) continue;
-    const value = process.env[trimmedName]?.trim();
-    if (value) env[trimmedName] = value;
+  // The config lists NAMES only; the values are read here, when the container is
+  // created. A named host variable that is unset or blank on this host forwards
+  // nothing, so a project can be configured before its credentials are
+  // provisioned. `readProjectConfig` has already refused a mapping whose shape
+  // it cannot read.
+  for (const [container, host] of Object.entries(config?.env ?? {})) {
+    const value = process.env[host]?.trim();
+    if (value) env[container] = value;
   }
 
   return env;
@@ -221,33 +420,32 @@ const DEFAULT_SANDBOX_WORKDIR = '/workspace';
  * this repository can observe a `DockerSandboxOptions`, so they are asserted in
  * `sandbox.test.ts` instead.
  *
- * `repoFullName` is the repository this session is for, and is what the three
- * per-project knobs and the per-project credential allow-list are keyed by. It
- * is optional because Factory only supplies it for a repo-backed session; a
- * session without one takes the global value of every knob and the credentials
- * forwarded to every session, and nothing else.
+ * `repoFullName` is the repository this session is for, and therefore which
+ * `sandbox/projects/<owner>/<name>/sandbox.json` — if there is one — supplies
+ * that project's image, ceilings and forwarded credentials. It is optional
+ * because Factory only supplies it for a repo-backed session; a session without
+ * one, like a project that has not been customized, takes the global value of
+ * every knob and the credentials forwarded to every session, and nothing else.
+ *
+ * `rootDir` is where that config is looked for and defaults to the working
+ * directory. It is a parameter only so `sandbox.test.ts` can point it at a tree
+ * it wrote; production passes nothing.
  *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxOptions(sessionId: string, repoFullName?: string): DockerSandboxOptions {
-  // The per-project mappings, each read literally at its one site (AD-7). They
-  // are resolved together, ahead of the globals, because a project's own entry
-  // is the more specific statement of what its container needs.
-  const projectImage = projectMappingValue(
-    'FACTORY_SANDBOX_PROJECT_IMAGE',
-    process.env.FACTORY_SANDBOX_PROJECT_IMAGE,
-    repoFullName,
-  );
-  const projectMemoryGib = projectMappingValue(
-    'FACTORY_SANDBOX_PROJECT_MEMORY_GIB',
-    process.env.FACTORY_SANDBOX_PROJECT_MEMORY_GIB,
-    repoFullName,
-  );
-  const projectCpus = projectMappingValue(
-    'FACTORY_SANDBOX_PROJECT_CPUS',
-    process.env.FACTORY_SANDBOX_PROJECT_CPUS,
-    repoFullName,
-  );
+export function dockerSandboxOptions(
+  sessionId: string,
+  repoFullName?: string,
+  rootDir?: string,
+): DockerSandboxOptions {
+  // Read once, and shared by the image, the ceilings and the forwarded env
+  // below, so one session's container is built from a single answer to "what did
+  // this project ask for" rather than from three reads of one file that could
+  // disagree. A config this cannot read has already refused the session.
+  const project = projectSandboxConfig(repoFullName, rootDir);
+  // Present exactly when `project` could be, so it is a safe label for a bound
+  // refusal below that has to name the file the operator wrote.
+  const configPath = projectConfigPath(repoFullName);
 
   // No honest default exists. `DockerSandboxOptions.image` falls back to
   // `node:22-slim`, which carries neither `git` nor `gh`, so a session started
@@ -256,10 +454,11 @@ export function dockerSandboxOptions(sessionId: string, repoFullName?: string): 
   // someone built on this host, so refuse and name the key. The slot is called
   // per session, so this surfaces at the first session rather than at boot.
   //
-  // A project entry wins over the global key; the form of that entry is
-  // `.env.schema`'s to pin, exactly as the global key's is, so the check here
-  // stays the one thing a package default could sneak past — blank.
-  const image = projectImage || process.env.FACTORY_SANDBOX_IMAGE?.trim();
+  // A project's own image wins over the global key. Its form is pinned where the
+  // config is read rather than here, exactly as the global key's form is pinned
+  // in `.env.schema`, so this check stays the one thing a package default could
+  // sneak past — blank.
+  const image = project?.image || process.env.FACTORY_SANDBOX_IMAGE?.trim();
   if (!image) {
     throw new Error(
       'FACTORY_SANDBOX_IMAGE is required when the docker sandbox provider is selected. Set it to an image ' +
@@ -267,22 +466,19 @@ export function dockerSandboxOptions(sessionId: string, repoFullName?: string): 
     );
   }
 
-  // A malformed per-project ceiling is ignored rather than refused, and the
-  // global key decides that project's ceiling — the same fallback a malformed
-  // global value gets, and for the same reason: `1e3` and `+5` read as whole
-  // numbers but are not runs of digits, and rounding either into something
-  // plausible is worse than taking the value the operator set globally.
-  // `memoryKey`/`cpusKey` record which of the two the resolved number came
-  // from, so the bound refusal below names the key the operator has to edit.
-  const memoryFromProject = positiveInt(projectMemoryGib);
+  // A project ceiling that was not a whole number was refused where the config
+  // was read — a JSON number has no "reads as a number but is not digits" case
+  // for a string value to hide in — so what reaches here is either a number the
+  // project asked for or nothing, and nothing means the global key decides, the
+  // same fallback the global key gets when it is unreadable.
+  // `memorySource`/`cpusSource` record which of the two the resolved number came
+  // from, so the bound refusal below names the file or the key to edit.
+  const memorySource = project?.memoryGib === undefined ? 'FACTORY_SANDBOX_MEMORY_GIB' : `${configPath} memoryGib`;
   const memoryGib =
-    memoryFromProject ?? positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
-  const memoryKey =
-    memoryFromProject === undefined ? 'FACTORY_SANDBOX_MEMORY_GIB' : 'FACTORY_SANDBOX_PROJECT_MEMORY_GIB';
+    project?.memoryGib ?? positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
 
-  const cpusFromProject = positiveInt(projectCpus);
-  const cpus = cpusFromProject ?? positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
-  const cpusKey = cpusFromProject === undefined ? 'FACTORY_SANDBOX_CPUS' : 'FACTORY_SANDBOX_PROJECT_CPUS';
+  const cpusSource = project?.cpus === undefined ? 'FACTORY_SANDBOX_CPUS' : `${configPath} cpus`;
+  const cpus = project?.cpus ?? positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
 
   // Refuse a knob raised past what this host can serve, before it is multiplied
   // into a byte count or a CFS quota. Clamping to the bound or falling back to
@@ -292,11 +488,11 @@ export function dockerSandboxOptions(sessionId: string, repoFullName?: string): 
   // this throws and names the key, exactly as the missing image above does, and
   // for the same reason: leaving the docker branch by throwing is what keeps a
   // refusal from falling through to the Platform or E2B arms in `selectSandbox`.
-  // The bound is the same for a per-project ceiling as for the global one: it is
-  // what this host can give one container, whichever key asked.
+  // The bound is the same for a project's own ceiling as for the global one: it
+  // is what this host can give one container, whichever of the two asked.
   if (memoryGib > DOCKER_SANDBOX_MAX_MEMORY_GIB) {
     throw new Error(
-      `${memoryKey} is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
+      `${memorySource} is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
         'this host can give one session container, so this session was refused before a container was created. ' +
         'Lower it to that number or below; the bound itself is not a setting — sandbox/README.md says what ' +
         'raising it takes.',
@@ -304,14 +500,14 @@ export function dockerSandboxOptions(sessionId: string, repoFullName?: string): 
   }
   if (cpus > DOCKER_SANDBOX_MAX_CPUS) {
     throw new Error(
-      `${cpusKey} is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
+      `${cpusSource} is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
         'give one session container, so this session was refused before a container was created. Lower it to ' +
         'that number or below; the bound itself is not a setting — sandbox/README.md says what raising it takes.',
     );
   }
 
   const memoryBytes = memoryGib * BYTES_PER_GIB;
-  const env = dockerSandboxEnv(repoFullName);
+  const env = dockerSandboxEnv(project);
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -450,11 +646,11 @@ export function selectSandbox(
     // returning, which is what keeps a refusal from falling through to the
     // Platform or E2B arms below and relocating the work off this host.
     //
-    // `ctx.repoFullName` is what keys the per-project knobs and the per-project
-    // credential allow-list to this session rather than to every session:
-    // Factory sets it from the repository the session is bound to, and leaves it
-    // undefined for one that has no repository, which then takes the global
-    // value of every knob.
+    // `ctx.repoFullName` is what decides which project's own config under
+    // `sandbox/projects/` supplies this session's image, ceilings and forwarded
+    // credentials, rather than every session's: Factory sets it from the
+    // repository the session is bound to, and leaves it undefined for one that
+    // has no repository, which then takes the global value of every knob.
     const options = dockerSandboxOptions(ctx.sessionId, ctx.repoFullName);
     admitDockerSession(ctx.sessionId, liveSessions);
     const sandbox = new DockerSandbox(options);
