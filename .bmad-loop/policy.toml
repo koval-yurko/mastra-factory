@@ -3253,7 +3253,8 @@ session_budget_grace_s = 240 # enforce mode: seconds a tripped session gets to w
 #        Vercel can each present `VERCEL_TOKEN` inside their own container
 #        without their host names colliding. A service-first name fails this arm
 #        — measured, and it is the shape this repository's own first draft
-#        shipped, `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN`.
+#        shipped before the rename — `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN`,
+#        now `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN`.
 #      IT CANNOT PASS VACUOUSLY. `.env.schema` has to exist and yield at least
 #      forty declared keys, and the shipped
 #      `koval-yurko/eleven-labs-english-agent/sandbox.json` has to exist, so a
