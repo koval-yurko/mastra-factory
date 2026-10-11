@@ -59,22 +59,111 @@ export function localSandboxEnv(): Record<string, string> {
   return env;
 }
 
+// The key half of a per-project mapping entry: `owner/name`, the form Factory
+// reports a repository's slug in (`FactorySandboxContext.repoFullName`). Pinned
+// rather than split on `=` alone, so an entry that leaves out the owner — and
+// would therefore never match any session — is refused instead of quietly
+// overriding nothing.
+const PROJECT_SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
 /**
- * Host env forwarded into every Docker session container. Unlike the local
+ * Read one `owner/name=value;owner/name=value` mapping key and return the value
+ * carried by the entry naming `repoFullName`, or `undefined` when the mapping is
+ * blank, names no entry for that repository, or the session has no repository to
+ * match against.
+ *
+ * `keyName` is used only to build an error message. The raw value is passed in
+ * rather than read here so that every `process.env` read in this file stays a
+ * literal one at its single call site (AD-7).
+ *
+ * A structural problem throws and names the key instead of being skipped. An
+ * entry that is not `owner/name=value`, or a repository named twice, states an
+ * intent this file cannot read, and ignoring it would leave a session without
+ * the override its operator wrote — surfacing later as a missing credential or a
+ * wrong ceiling, far from the key that caused it. That is the same reason the
+ * ceilings below refuse rather than clamp.
+ *
+ * A blank value is not a structural problem: it means "no override for this
+ * repository", and is reported as absent so the global key decides.
+ */
+function projectMappingValue(
+  keyName: string,
+  raw: string | undefined,
+  repoFullName: string | undefined,
+): string | undefined {
+  const mapping = raw?.trim();
+  if (!mapping) return undefined;
+
+  const entries = new Map<string, string>();
+  for (const entry of mapping.split(';')) {
+    const trimmed = entry.trim();
+    // An empty span between two semicolons, or a trailing one, carries no entry.
+    if (!trimmed) continue;
+
+    const separator = trimmed.indexOf('=');
+    const slug = separator === -1 ? trimmed : trimmed.slice(0, separator);
+    if (separator === -1 || !PROJECT_SLUG.test(slug)) {
+      throw new Error(
+        `${keyName} entry "${trimmed}" is not owner/name=value, so the override it asks for cannot be read and ` +
+          'this session was refused before a container was created. Name the repository the way Factory reports ' +
+          'it — koval-yurko/eleven-labs-english-agent — and separate entries with semicolons (see ' +
+          'sandbox/README.md).',
+      );
+    }
+    if (entries.has(slug)) {
+      throw new Error(
+        `${keyName} names ${slug} twice, so which override applies to it is ambiguous and this session was ` +
+          'refused before a container was created. Merge the two entries into one (see sandbox/README.md).',
+      );
+    }
+    entries.set(slug, trimmed.slice(separator + 1).trim());
+  }
+
+  if (!repoFullName) return undefined;
+  return entries.get(repoFullName.trim()) || undefined;
+}
+
+/**
+ * Host env forwarded into a Docker session container. Unlike the local
  * allow-list above, which keeps a host-run sandbox working, each entry here is
  * a credential deliberately handed to the agent: anything in the container —
  * the agent, or a repo it has cloned — can read it, so only keys scoped for
  * that belong here. `sandbox/README.md` is the record.
+ *
+ * Two layers reach a container. `EXPO_TOKEN` is forwarded to every session,
+ * because the EAS CLI in the image is the same account whichever repository is
+ * checked out. Anything else is per project: `FACTORY_SANDBOX_PROJECT_ENV`
+ * lists, by repository, which further host variables that project's container
+ * gets, and `repoFullName` is the repository this session is for. A project's
+ * credentials therefore never reach another project's session — a Vercel token
+ * is handed to the sessions whose repositories deploy to it, and to no others.
  *
  * Docker applies it when the container is CREATED, so a session reattaching to
  * an existing container keeps the environment it was created with.
  *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxEnv(): Record<string, string> {
+export function dockerSandboxEnv(repoFullName?: string): Record<string, string> {
   const env: Record<string, string> = {};
   const expoToken = process.env.EXPO_TOKEN?.trim();
   if (expoToken) env.EXPO_TOKEN = expoToken;
+
+  // The mapping lists NAMES only; the values are read here, when the container
+  // is created. A listed name that is unset or blank on this host forwards
+  // nothing, so a project can be listed before its credentials are provisioned.
+  // The entry's own shape is `projectMappingValue`'s to refuse, and it throws.
+  const allowList = projectMappingValue(
+    'FACTORY_SANDBOX_PROJECT_ENV',
+    process.env.FACTORY_SANDBOX_PROJECT_ENV,
+    repoFullName,
+  );
+  for (const name of allowList?.split(',') ?? []) {
+    const trimmedName = name.trim();
+    if (!trimmedName) continue;
+    const value = process.env[trimmedName]?.trim();
+    if (value) env[trimmedName] = value;
+  }
+
   return env;
 }
 
@@ -132,16 +221,45 @@ const DEFAULT_SANDBOX_WORKDIR = '/workspace';
  * this repository can observe a `DockerSandboxOptions`, so they are asserted in
  * `sandbox.test.ts` instead.
  *
+ * `repoFullName` is the repository this session is for, and is what the three
+ * per-project knobs and the per-project credential allow-list are keyed by. It
+ * is optional because Factory only supplies it for a repo-backed session; a
+ * session without one takes the global value of every knob and the credentials
+ * forwarded to every session, and nothing else.
+ *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
+export function dockerSandboxOptions(sessionId: string, repoFullName?: string): DockerSandboxOptions {
+  // The per-project mappings, each read literally at its one site (AD-7). They
+  // are resolved together, ahead of the globals, because a project's own entry
+  // is the more specific statement of what its container needs.
+  const projectImage = projectMappingValue(
+    'FACTORY_SANDBOX_PROJECT_IMAGE',
+    process.env.FACTORY_SANDBOX_PROJECT_IMAGE,
+    repoFullName,
+  );
+  const projectMemoryGib = projectMappingValue(
+    'FACTORY_SANDBOX_PROJECT_MEMORY_GIB',
+    process.env.FACTORY_SANDBOX_PROJECT_MEMORY_GIB,
+    repoFullName,
+  );
+  const projectCpus = projectMappingValue(
+    'FACTORY_SANDBOX_PROJECT_CPUS',
+    process.env.FACTORY_SANDBOX_PROJECT_CPUS,
+    repoFullName,
+  );
+
   // No honest default exists. `DockerSandboxOptions.image` falls back to
   // `node:22-slim`, which carries neither `git` nor `gh`, so a session started
   // on it fails at first use with Factory's `git-missing` — the exact failure
   // the purpose-built image exists to prevent. The only correct value is a tag
   // someone built on this host, so refuse and name the key. The slot is called
   // per session, so this surfaces at the first session rather than at boot.
-  const image = process.env.FACTORY_SANDBOX_IMAGE?.trim();
+  //
+  // A project entry wins over the global key; the form of that entry is
+  // `.env.schema`'s to pin, exactly as the global key's is, so the check here
+  // stays the one thing a package default could sneak past — blank.
+  const image = projectImage || process.env.FACTORY_SANDBOX_IMAGE?.trim();
   if (!image) {
     throw new Error(
       'FACTORY_SANDBOX_IMAGE is required when the docker sandbox provider is selected. Set it to an image ' +
@@ -149,8 +267,22 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     );
   }
 
-  const memoryGib = positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
-  const cpus = positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
+  // A malformed per-project ceiling is ignored rather than refused, and the
+  // global key decides that project's ceiling — the same fallback a malformed
+  // global value gets, and for the same reason: `1e3` and `+5` read as whole
+  // numbers but are not runs of digits, and rounding either into something
+  // plausible is worse than taking the value the operator set globally.
+  // `memoryKey`/`cpusKey` record which of the two the resolved number came
+  // from, so the bound refusal below names the key the operator has to edit.
+  const memoryFromProject = positiveInt(projectMemoryGib);
+  const memoryGib =
+    memoryFromProject ?? positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
+  const memoryKey =
+    memoryFromProject === undefined ? 'FACTORY_SANDBOX_MEMORY_GIB' : 'FACTORY_SANDBOX_PROJECT_MEMORY_GIB';
+
+  const cpusFromProject = positiveInt(projectCpus);
+  const cpus = cpusFromProject ?? positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
+  const cpusKey = cpusFromProject === undefined ? 'FACTORY_SANDBOX_CPUS' : 'FACTORY_SANDBOX_PROJECT_CPUS';
 
   // Refuse a knob raised past what this host can serve, before it is multiplied
   // into a byte count or a CFS quota. Clamping to the bound or falling back to
@@ -160,9 +292,11 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
   // this throws and names the key, exactly as the missing image above does, and
   // for the same reason: leaving the docker branch by throwing is what keeps a
   // refusal from falling through to the Platform or E2B arms in `selectSandbox`.
+  // The bound is the same for a per-project ceiling as for the global one: it is
+  // what this host can give one container, whichever key asked.
   if (memoryGib > DOCKER_SANDBOX_MAX_MEMORY_GIB) {
     throw new Error(
-      `FACTORY_SANDBOX_MEMORY_GIB is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
+      `${memoryKey} is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
         'this host can give one session container, so this session was refused before a container was created. ' +
         'Lower it to that number or below; the bound itself is not a setting — sandbox/README.md says what ' +
         'raising it takes.',
@@ -170,14 +304,14 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
   }
   if (cpus > DOCKER_SANDBOX_MAX_CPUS) {
     throw new Error(
-      `FACTORY_SANDBOX_CPUS is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
+      `${cpusKey} is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
         'give one session container, so this session was refused before a container was created. Lower it to ' +
         'that number or below; the bound itself is not a setting — sandbox/README.md says what raising it takes.',
     );
   }
 
   const memoryBytes = memoryGib * BYTES_PER_GIB;
-  const env = dockerSandboxEnv();
+  const env = dockerSandboxEnv(repoFullName);
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -315,7 +449,13 @@ export function selectSandbox(
     // slot. Both failures leave the docker branch by throwing rather than
     // returning, which is what keeps a refusal from falling through to the
     // Platform or E2B arms below and relocating the work off this host.
-    const options = dockerSandboxOptions(ctx.sessionId);
+    //
+    // `ctx.repoFullName` is what keys the per-project knobs and the per-project
+    // credential allow-list to this session rather than to every session:
+    // Factory sets it from the repository the session is bound to, and leaves it
+    // undefined for one that has no repository, which then takes the global
+    // value of every knob.
+    const options = dockerSandboxOptions(ctx.sessionId, ctx.repoFullName);
     admitDockerSession(ctx.sessionId, liveSessions);
     const sandbox = new DockerSandbox(options);
     liveSessions.set(ctx.sessionId, sandbox);

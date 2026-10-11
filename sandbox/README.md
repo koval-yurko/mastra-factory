@@ -25,11 +25,18 @@ the rest; between the six tables every key `.env.schema` declares is claimed exa
 | `FACTORY_SANDBOX_IMAGE` | a date-stamped image tag that exists on this engine | the `FACTORY_SANDBOX_IMAGE` section below |
 | `FACTORY_SANDBOX_MEMORY_GIB` | the per-session memory ceiling, in whole gibibytes | the `FACTORY_SANDBOX_MEMORY_GIB` section below |
 | `FACTORY_SANDBOX_CPUS` | the per-session CPU ceiling, in whole cores | the `FACTORY_SANDBOX_CPUS` section below |
+| `FACTORY_SANDBOX_PROJECT_IMAGE` | per-repository overrides of the image, or blank | the `FACTORY_SANDBOX_PROJECT_IMAGE` section below |
+| `FACTORY_SANDBOX_PROJECT_MEMORY_GIB` | per-repository overrides of the memory ceiling, or blank | the `FACTORY_SANDBOX_PROJECT_MEMORY_GIB` section below |
+| `FACTORY_SANDBOX_PROJECT_CPUS` | per-repository overrides of the CPU ceiling, or blank | the `FACTORY_SANDBOX_PROJECT_CPUS` section below |
+| `FACTORY_SANDBOX_PROJECT_ENV` | which host variables reach which repository's container | the `FACTORY_SANDBOX_PROJECT_ENV` section below |
 | `MASTRACODE_MAX_SANDBOXES` | how many session containers this process runs at once | the `MASTRACODE_MAX_SANDBOXES` section below |
 | `MASTRACODE_SANDBOX_WORKDIR` | the checkout base inside a docker-provider container | the `MASTRACODE_SANDBOX_WORKDIR` section below |
 | `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
 | `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
+| `VERCEL_TOKEN` | a Vercel API token for the repositories that are allowed it, or blank | the `VERCEL_TOKEN` section below |
+| `VERCEL_ORG_ID` | the Vercel team that token belongs to, or blank | the `VERCEL_ORG_ID` section below |
+| `VERCEL_PROJECT_ID` | the Vercel project inside that team, or blank | the `VERCEL_PROJECT_ID` section below |
 
 `.env.schema` declares and validates every key in that table and is the only list of key names;
 this file never
@@ -156,6 +163,84 @@ three sandboxes at 4 cores each is a mild, deliberate overcommit. The three is t
 contending containers are throttled rather than killed, and the memory number is the one that actually
 binds — which is why the concurrency count is chosen against memory and not against cores.
 
+## `FACTORY_SANDBOX_PROJECT_IMAGE`
+
+**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_IMAGE`: a list of
+`owner/name=factory-sandbox:YYYY-MM-DD` entries separated by semicolons. Blank, or no entry naming the
+session's repository, leaves the global key in charge. This key only ever narrows the choice for the
+repositories it names — it is not an alternative to the global one, and a deployment that sets only this
+key has no image for anything else.
+
+The repository is the `owner/name` slug Factory reports for the session, matched exactly after trimming.
+A session that is not bound to a repository has no slug to match, so it always takes the global image.
+An entry with no `=`, a slug that is not `owner/name`, or the same repository named twice is unreadable,
+and an unreadable override is refused rather than guessed at: the session does not start and the error
+names this key. Nothing is relocated — like the ceilings above, the docker branch throws instead of
+falling through to another provider.
+
+Each tag is date-stamped for the reason the `FACTORY_SANDBOX_IMAGE` section above gives, and the whole
+value is checked at the same place the global one is: a value of the wrong shape stops the **server** at
+startup under `npm start` before any session exists, and `npm run dev` does not apply that check either,
+so a wrong-shaped entry can survive a development run.
+
+**How to choose it.** Leave it blank. Reach for it only when one repository needs an image the others
+should not carry — a toolchain that is dead weight, or actively wrong, everywhere else. The tag history
+table at the bottom of this file records which images exist, and an override must name one that is
+already in this engine's store: the container is created from it here, not pulled from a registry.
+
+## `FACTORY_SANDBOX_PROJECT_MEMORY_GIB`
+
+**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_MEMORY_GIB`, as
+`owner/name=<whole gibibytes>` entries separated by semicolons, matched and refused exactly as the image
+override above.
+
+A value that is not a run of digits is **ignored** rather than refused, and the global key decides that
+repository's ceiling — the same fallback the global key applies, so a typo here degrades to the behaviour
+you already have instead of taking a session down.
+
+The bound is unchanged and still binds. The most a resolved ceiling may ask for is the same 30 GiB the
+`FACTORY_SANDBOX_MEMORY_GIB` section derives, and a repository entry above it refuses that repository's
+session before any container is created, with an error naming **this** key rather than the global one —
+this key is what supplied the number, and pointing at the global one would send you to fix a line that
+is not wrong.
+
+**How to choose it.** Leave it blank. A repository that needs more than the global ceiling is asking to
+oversubscribe the host in the way that section's arithmetic rules out; growing the VM and raising the
+global ceiling is the fix, not a per-repository exception to it.
+
+## `FACTORY_SANDBOX_PROJECT_CPUS`
+
+**What the value must contain.** Per-repository overrides of `FACTORY_SANDBOX_CPUS`, as
+`owner/name=<whole cores>` entries separated by semicolons, matched and validated as the memory override
+above: a value that is not a run of digits falls back to the global key, and a resolved ceiling above
+the 12 cores that section derives refuses the session with an error naming this key.
+
+**How to choose it.** Leave it blank, or lower it. CPU is the benign ceiling — contending containers are
+throttled rather than killed — so the useful direction here is taking cores away from a repository whose
+builds starve its neighbours, not granting one more.
+
+## `FACTORY_SANDBOX_PROJECT_ENV`
+
+**What the value must contain.** Which host variables reach which repository's session container, as
+`owner/name=KEY,KEY` entries separated by semicolons. It lists **names** only. The values stay in this
+host's environment and are read when a container is created, so this key is an allow-list and not a
+second copy of any secret — nothing credential-shaped is written into `.env` for it to work.
+
+A listed name that is unset or blank on the host forwards nothing, so a repository can be listed before
+its credentials are provisioned and the session simply runs without them until they are. A session whose
+repository no entry names gets nothing beyond what every session gets. As above, an entry that is not
+`owner/name=KEY,KEY`, or the same repository named twice, refuses the session with an error naming this
+key: a malformed allow-list cannot be read safely, and guessing at one would mean deciding which
+credentials to forward on the strength of a typo.
+
+**How to choose it.** Name the narrowest set of host variables the repository's own tooling needs, and
+scope them to the repositories that need them. The alternative — forwarding a credential to every
+session — hands it to every repository any session clones, which is the exposure the `EXPO_TOKEN`
+section below warns about.
+
+Like every other key on this page it is applied when a container is **created**, so changing it and
+restarting the server reaches only sessions whose containers are created after the restart.
+
 ## `MASTRACODE_MAX_SANDBOXES`
 
 **What the value must contain.** A whole number of concurrent docker-provider session containers — the
@@ -233,8 +318,10 @@ reason the key is listed at all rather than left out and forgotten.
 
 **What the value must contain.** An Expo access token, or nothing. When set, it is forwarded into every
 docker-provider session container as `EXPO_TOKEN`, which is how the EAS CLI in the image authenticates
-— `eas whoami` then prints the account instead of `Not logged in`. Blank forwards nothing. No other
-host variable reaches a session container; this is the only one.
+— `eas whoami` then prints the account instead of `Not logged in`. Blank forwards nothing. This is the
+one host variable that reaches **every** session container regardless of which repository the session is
+bound to; `FACTORY_SANDBOX_PROJECT_ENV` above is how anything else reaches one, and only the containers
+it names.
 
 **How to obtain it.** expo.dev → account settings → Access tokens → create a token. Prefer a robot
 user's token or one from an account that only this deployment uses: the token is readable by
@@ -244,6 +331,42 @@ clones, so treat it as handed to the agent rather than kept from it.
 Like the ceilings below, it is applied when a session's container is **created**. Setting, changing
 or revoking it and restarting the server reaches only sessions whose containers are created after the
 restart; an existing session keeps the value it started with until its container is removed.
+
+## `VERCEL_TOKEN`
+
+**What the value must contain.** A Vercel API token, or nothing. It is not forwarded to every session:
+`FACTORY_SANDBOX_PROJECT_ENV` above names the repositories whose containers receive it, and no other
+session container sees it. Inside one, it is what lets the Vercel CLI in a checked-out repository read
+deployment status, build failures and recent runtime logs without an interactive login step.
+
+**How to obtain it.** vercel.com → account settings → Tokens → create a token. The deployment this
+serves accepts a full-access classic token, so scope it as narrowly as the account allows and prefer one
+from an account that only this deployment uses. Treat it as handed to the agent rather than kept from
+it: anything running in that container can read it, including any script in a repository it clones.
+
+Applied when a container is **created**, like `EXPO_TOKEN` above, so rotating it reaches only the
+containers created after the restart.
+
+## `VERCEL_ORG_ID`
+
+**What the value must contain.** The identifier of the Vercel team the token above belongs to, or
+nothing. It names an account and is not a credential. It is forwarded to exactly the repositories the
+same `FACTORY_SANDBOX_PROJECT_ENV` entries name — the CLI needs both to address a project without an
+interactive link step, and a token with no team identifier makes it ask.
+
+**How to obtain it.** From a checkout of the repository, `vercel link` writes both this and the project
+identifier below into `.vercel/project.json`; the project's settings page in the dashboard shows the same
+two strings. Either way it is stable for the life of the project, so it is set once.
+
+## `VERCEL_PROJECT_ID`
+
+**What the value must contain.** The identifier of the Vercel project the deployment belongs to, or
+nothing. It names a project inside the team above and is not a credential. Forwarded alongside the other
+two by the same entries.
+
+**How to obtain it.** The same `vercel link` run or the same settings page. Take both identifiers from
+one place and set them together: a project identifier from a different team reads like a permissions
+problem rather than like the mismatch it is.
 
 ## Ceilings with no key
 
