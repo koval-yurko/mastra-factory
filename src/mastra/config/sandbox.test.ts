@@ -418,7 +418,7 @@ describe('projectSandboxConfig', () => {
       image: IMAGE,
       memoryGib: 8,
       cpus: 6,
-      env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' },
+      env: { VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN' },
     };
     const root = writeProjectConfig(REPO, config);
 
@@ -705,10 +705,10 @@ describe('dockerSandboxEnv per-project config', () => {
     // Several Vercel projects, each with its own token on the host, each needing to
     // be `VERCEL_TOKEN` inside its own sandbox — which one shared host name cannot
     // do, because only one value can hold it.
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', '  vercel-token  ');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN', '  vercel-token  ');
     vi.stubEnv('VERCEL_WEB_API_TOKEN', 'web-api-token');
 
-    expect(dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' } })).toEqual({
+    expect(dockerSandboxEnv({ env: { VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN' } })).toEqual({
       VERCEL_TOKEN: 'vercel-token',
     });
     expect(dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_WEB_API_TOKEN' } })).toEqual({
@@ -718,17 +718,17 @@ describe('dockerSandboxEnv per-project config', () => {
 
   it('forwards only what a config names, and never the host name itself', () => {
     vi.stubEnv('EXPO_TOKEN', 'expo-token');
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN', 'vercel-token');
     vi.stubEnv('VERCEL_WEB_API_TOKEN', 'web-api-token');
     vi.stubEnv('DATABASE_URL', 'postgres://secret');
     vi.stubEnv('GITHUB_APP_PRIVATE_KEY', 'secret');
 
-    const env = dockerSandboxEnv({ env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' } });
+    const env = dockerSandboxEnv({ env: { VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN' } });
 
     expect(env).toEqual({ EXPO_TOKEN: 'expo-token', VERCEL_TOKEN: 'vercel-token' });
     // The container sees the name its tooling reads, not the host name holding the
     // value, so nothing inside it can tell which project's token it was given.
-    expect(env).not.toHaveProperty('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN');
+    expect(env).not.toHaveProperty('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN');
     // Another project's token is on this host and is not named by this config, so
     // it does not reach this container — nor does any secret no config names.
     expect(env).not.toHaveProperty('VERCEL_WEB_API_TOKEN');
@@ -737,16 +737,16 @@ describe('dockerSandboxEnv per-project config', () => {
   });
 
   it('forwards a named variable that is unset or blank as nothing, so a project can be configured early', () => {
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', undefined);
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID', '   ');
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID', 'prj_456');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN', undefined);
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID', '   ');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID', 'prj_456');
 
     expect(
       dockerSandboxEnv({
         env: {
-          VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
-          VERCEL_ORG_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID',
-          VERCEL_PROJECT_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID',
+          VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN',
+          VERCEL_ORG_ID: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID',
+          VERCEL_PROJECT_ID: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID',
         },
       }),
     ).toEqual({ VERCEL_PROJECT_ID: 'prj_456' });
@@ -754,7 +754,7 @@ describe('dockerSandboxEnv per-project config', () => {
 
   it('reaches one host variable under two container names, and nothing without a config', () => {
     vi.stubEnv('EXPO_TOKEN', 'expo-token');
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN', 'vercel-token');
 
     // The harmless direction a container-keyed mapping still allows: one token
     // under two names, because two tools may read it differently. The ambiguous
@@ -763,8 +763,8 @@ describe('dockerSandboxEnv per-project config', () => {
     expect(
       dockerSandboxEnv({
         env: {
-          VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
-          VERCEL_API_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
+          VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN',
+          VERCEL_API_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN',
         },
       }),
     ).toEqual({
@@ -794,9 +794,9 @@ describe('dockerSandboxEnv per-project config', () => {
 
   it('reaches the container through the options, so the scoping is what a session actually gets', () => {
     vi.stubEnv('FACTORY_SANDBOX_IMAGE', 'factory-sandbox:2026-09-23');
-    vi.stubEnv('VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN', 'vercel-token');
+    vi.stubEnv('ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN', 'vercel-token');
     const root = writeProjectConfig(REPO, {
-      env: { VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN' },
+      env: { VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN' },
     });
 
     expect(dockerSandboxOptions('session-abc', REPO, root).env).toEqual({ VERCEL_TOKEN: 'vercel-token' });
@@ -826,9 +826,9 @@ describe('the committed eleven-labs-english-agent sandbox config', () => {
     const config = projectSandboxConfig(REPO);
 
     expect(config?.env).toEqual({
-      VERCEL_TOKEN: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN',
-      VERCEL_ORG_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID',
-      VERCEL_PROJECT_ID: 'VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID',
+      VERCEL_TOKEN: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN',
+      VERCEL_ORG_ID: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID',
+      VERCEL_PROJECT_ID: 'ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID',
     });
     // Baking the Vercel CLI into the project image is why the file exists, so it
     // has to name one — in this project's own date-stamped family.

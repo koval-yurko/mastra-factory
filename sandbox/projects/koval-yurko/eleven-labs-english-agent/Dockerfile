@@ -1,25 +1,48 @@
 # Session image for the koval-yurko/eleven-labs-english-agent repository.
 #
-# Extends the base image instead of replacing it, so git, the GitHub CLI and the
-# rest of what every session needs still come from sandbox/factory-sandbox.Dockerfile,
-# and this file adds only what this project's work calls for. The base tag is pinned
-# by date for the reason the global image's tag is: two builds of one Dockerfile stay
-# two distinguishable images, so rolling back is naming the older one. Bump it here
-# deliberately, the way the pinned eas-cli version in the base gets bumped.
+# DEFINED FROM SCRATCH, not built on sandbox/factory-sandbox.Dockerfile. A project
+# image carries only what this repository's sessions actually use, so the shared
+# image's Expo/EAS toolchain stays out of it — nothing here builds through Expo,
+# and a CLI an agent never runs is still a CLI an agent can run, plus ~200 MB of
+# image and a version to keep patched. The trade is that the session contract
+# below is this file's own responsibility rather than something it picks up: a
+# project image that forgets a line here does not inherit it from anywhere.
+#
+# THE SESSION CONTRACT, which every project image carries itself:
+#   * git and the GitHub CLI — the Factory clones with one and opens pull
+#     requests with the other, and sandbox/build.sh smoke-tests both in the
+#     finished image before it will record a tag.
+#   * node, npm and corepack — this repository is TypeScript, and corepack is
+#     what lets a checkout pick its own package manager.
+#   * WORKDIR /workspace — the clone path. It agrees with
+#     MASTRACODE_SANDBOX_WORKDIR and with the base image's own WORKDIR; guard 46
+#     pins those and the per-project gate pins this one, because the runtime
+#     addresses /workspace and an image built to a different path lands every
+#     session in an empty directory without failing.
+#   * CMD sleep infinity — the container has to stay up on its own. The runtime
+#     passes no command, so an image with nothing to run exits immediately and
+#     the session dies before the agent types anything.
 #
 # Build it with `npm run sandbox:build -- koval-yurko/eleven-labs-english-agent`,
 # which smoke-tests it, checks its architecture, and writes the resulting tag into
 # the sandbox.json beside this file. Procedure in sandbox/README.md.
-#
-# The base tag below is the newest one in sandbox/README.md's tag history, so it has
-# to exist in the local image store before this file can build — build the base first
-# if it does not. Moving to a newer base means editing this line, which is the point:
-# a project image inherits a base deliberately, not whenever the base happens to move.
-#
-# No WORKDIR: /workspace is the base image's contract, pinned by the bmad-loop gate
-# across the base Dockerfile, MASTRACODE_SANDBOX_WORKDIR and src/mastra/config/sandbox.ts.
-# Restating it here would add a fourth place that has to agree.
-FROM factory-sandbox:2026-10-03c
+FROM node:22-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ca-certificates curl gnupg openssh-client less \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
+# Build and inspection tools this repository's sessions reach for: native npm
+# modules need build-essential and python3, and reading a tree needs ripgrep.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential python3 python3-pip python3-venv ripgrep jq unzip \
+ && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
 
 # Vercel CLI — pinned; bump the version and rebuild to upgrade.
 #
@@ -30,3 +53,6 @@ FROM factory-sandbox:2026-10-03c
 # version — from being the only way to reach that data from a session. Read-only use
 # only; the commands that are and are not allowed are the target repository's to say.
 RUN npm install -g vercel@63.1.2 && npm cache clean --force && vercel --version
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

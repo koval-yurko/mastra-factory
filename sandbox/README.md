@@ -14,9 +14,11 @@ and references this directory by path rather than reproducing the Dockerfile.
 
 `projects/<owner>/<name>/` under this directory holds the exceptions: one Dockerfile and one
 `sandbox.json` for each repository that needs a toolchain, a ceiling or a credential the others should
-not carry. The base image stays canonical for everything shared, and a project Dockerfile extends an
-already-built base tag instead of restating it. The `Per-project sandboxes` section below is the record
-for that directory; it owns no environment key of its own.
+not carry. The base image stays canonical for the repositories that need nothing special. A project
+Dockerfile is written from scratch on a pinned public base and does not extend the base image: inheriting
+it would drag in every tool that image carries, including ones that project has no use for, and would make
+the two builds order-dependent. The `Per-project sandboxes` section below is the record for that
+directory; it owns no environment key of its own.
 
 ## Keys this subject owns
 
@@ -36,9 +38,9 @@ the rest; between the six tables every key `.env.schema` declares is claimed exa
 | `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
 | `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
-| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN` | a Vercel API token for that one repository, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN` section below |
-| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID` | the Vercel team that token belongs to, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID` section below |
-| `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID` | the Vercel project inside that team, or blank | the `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID` section below |
+| `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN` | a Vercel API token for that one repository, or blank | the `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN` section below |
+| `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID` | the Vercel team that token belongs to, or blank | the `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID` section below |
+| `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID` | the Vercel project inside that team, or blank | the `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID` section below |
 
 `.env.schema` declares and validates every key in that table and is the only list of key names;
 this file never
@@ -206,11 +208,30 @@ session before any container is created, with an error naming this file and this
 global key — this file supplied the number, and pointing at the global one would send you to fix a line
 that is not wrong.
 
+**What the `Dockerfile` has to carry.** A project Dockerfile is written from scratch on a pinned public
+base; it does not extend `factory-sandbox`. That is deliberate: inheriting the base would pull in every
+tool it carries, including ones this project has no use for, and an installed CLI is one an agent can run
+whether or not anything asked for it. The cost is that the Dockerfile restates the session contract
+itself, and the per-project Dockerfile gate is what keeps that from being forgotten:
+
+- `git` and `gh`, installed and on `PATH` — Factory clones the repository and opens pull requests from
+  inside the container, so a project image without them fails every session bound to it.
+- `WORKDIR /workspace`, the one directory the sandbox runtime mounts and works in. The runtime supplies
+  no working directory of its own, so an image that omits this starts sessions somewhere else.
+- A long-lived `CMD` or `ENTRYPOINT`. The runtime passes no command and expects the container to stay up
+  between exec calls; `CMD ["sleep", "infinity"]` is the convention the base image uses.
+- The project's own tools, at pinned versions. Nothing else: no `COPY` of the build context, which is the
+  repository root and would bake `.env` into an image layer, and no literal credential in an `ENV` or
+  `ARG`. Credentials arrive through `env` below, at container creation, so they stay out of the image.
+
+A project that needs no extra tool at all needs no Dockerfile and no `image` field — it takes the global
+tag and the global image.
+
 **What `env` holds.** A map from the name a variable has **inside the container** to the name it has **on
 this host**:
 
 ```json
-{ "env": { "VERCEL_TOKEN": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN" } }
+{ "env": { "VERCEL_TOKEN": "ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN" } }
 ```
 
 The direction is the point. Two Vercel projects each need their own token, and the Vercel CLI in each
@@ -225,6 +246,26 @@ created, so committing this file publishes no secret. A host name that is unset 
 nothing, so a project can be committed before its credentials are provisioned and the session simply runs
 without them until they are. Every host name an `env` map uses is declared in `.env.schema`, which is why
 a new project's host keys are added there rather than invented in this file.
+
+**How a host name is spelled.** Project-forwarded host keys follow one convention, and it is enforced:
+
+```
+<PROJECT>_<SERVICE>_<WHAT IT IS>
+```
+
+`PROJECT` is the repository-name half of the slug in upper case with underscores for separators, so
+`koval-yurko/eleven-labs-english-agent` gives `ELEVEN_LABS_ENGLISH_AGENT`. `SERVICE` is the external
+service the credential belongs to — `VERCEL`, `EXPO`, `SUPABASE`. The last part says what the value is:
+`TOKEN`, `ORG_ID`, `PROJECT_ID`, `DB_URL`. Project first, so every credential belonging to one repository
+sorts together in `.env.schema` and in a `grep`, and so two Vercel projects can each present
+`VERCEL_TOKEN` to their own sandbox without their host names colliding. Service in the middle, so the
+service is visible without parsing the tail. `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN` and
+`MARKETING_SITE_VERCEL_TOKEN` are the same shape for two different repositories.
+
+If two owners ever have repositories with the same name, the owner-qualified form is accepted instead:
+`<OWNER>_<PROJECT>_<SERVICE>_<WHAT IT IS>`, as in `KOVAL_YURKO_ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN`.
+Anything else — service first, another project's prefix, or no underscore after the project — is rejected
+by the per-project config gate, so the convention cannot rot one project at a time.
 
 An `env` entry whose container-side name is `EXPO_TOKEN` overrides the global forward for that project,
 which is how two projects build against two Expo accounts.
@@ -243,16 +284,16 @@ sandbox/projects/
 
 ```json
 { "image": "factory-sandbox-eleven-labs-english-agent:2026-10-11",
-  "env": { "VERCEL_TOKEN": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN",
-           "VERCEL_ORG_ID": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID",
-           "VERCEL_PROJECT_ID": "VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID" } }
+  "env": { "VERCEL_TOKEN": "ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN",
+           "VERCEL_ORG_ID": "ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID",
+           "VERCEL_PROJECT_ID": "ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID" } }
 ```
 
 ```json
 { "image": "factory-sandbox-marketing-site:2026-10-11",
-  "env": { "VERCEL_TOKEN": "VERCEL_ACME_MARKETING_SITE_TOKEN",
-           "VERCEL_ORG_ID": "VERCEL_ACME_MARKETING_SITE_ORG_ID",
-           "VERCEL_PROJECT_ID": "VERCEL_ACME_MARKETING_SITE_PROJECT_ID" } }
+  "env": { "VERCEL_TOKEN": "MARKETING_SITE_VERCEL_TOKEN",
+           "VERCEL_ORG_ID": "MARKETING_SITE_VERCEL_ORG_ID",
+           "VERCEL_PROJECT_ID": "MARKETING_SITE_VERCEL_PROJECT_ID" } }
 ```
 
 Both of those hand their checkout a `VERCEL_TOKEN`, which is what the Vercel CLI looks for, and neither
@@ -262,8 +303,8 @@ forwarded only into the one directory that names it.
 ```json
 { "image": "factory-sandbox-mobile-app:2026-10-11",
   "memoryGib": 16,
-  "env": { "EXPO_TOKEN": "EXPO_ACME_MOBILE_APP_TOKEN",
-           "SUPABASE_DB_URL": "SUPABASE_ACME_MOBILE_APP_DB_URL" } }
+  "env": { "EXPO_TOKEN": "MOBILE_APP_EXPO_TOKEN",
+           "SUPABASE_DB_URL": "MOBILE_APP_SUPABASE_DB_URL" } }
 ```
 
 That one takes the global Expo forward away and replaces it, so it builds against its own Expo account;
@@ -280,8 +321,11 @@ the global tag and needs no Dockerfile of its own — a directory with a `sandbo
 `Dockerfile` is a valid project, and the build command has nothing to do there.
 
 Only the first of those four is real; the rest are here to show the shape. Adding them would mean
-declaring `VERCEL_ACME_MARKETING_SITE_TOKEN` and the others in `.env.schema` first, since a host name an
-`env` map uses has to exist there before it can be forwarded.
+declaring `MARKETING_SITE_VERCEL_TOKEN` and the others in `.env.schema` first, since a host name an
+`env` map uses has to exist there before it can be forwarded — spelled the way the convention above
+requires, which the same gate checks. Three of the four also name an `image`, so three of the four would
+need a Dockerfile beside the config and a `npm run sandbox:build -- <owner>/<name>` run on every host
+before their sessions work.
 
 **What goes wrong, and what you see.** This file is read, not parsed leniently. One that cannot be read,
 is not valid JSON, holds a JSON value that is not an object, carries a field the table above does not
@@ -393,7 +437,7 @@ Like the ceilings below, it is applied when a session's container is **created**
 or revoking it and restarting the server reaches only sessions whose containers are created after the
 restart; an existing session keeps the value it started with until its container is removed.
 
-## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_TOKEN`
+## `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_TOKEN`
 
 **What the value must contain.** A Vercel API token for the Vercel project that
 `koval-yurko/eleven-labs-english-agent` deploys to, or nothing. It is not forwarded to every session:
@@ -414,7 +458,7 @@ that is the map's direction and not an accident.
 Applied when a container is **created**, like `EXPO_TOKEN` above, so rotating it reaches only the
 containers created after the restart.
 
-## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_ORG_ID`
+## `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_ORG_ID`
 
 **What the value must contain.** The identifier of the Vercel team that token belongs to, or nothing. It
 names an account and is not a credential. The same `env` map forwards it, and it reaches that container
@@ -425,7 +469,7 @@ token with no team identifier makes it ask.
 identifier below into `.vercel/project.json`; the project's settings page in the dashboard shows the same
 two strings. Either way it is stable for the life of the project, so it is set once.
 
-## `VERCEL_ELEVEN_LABS_ENGLISH_AGENT_PROJECT_ID`
+## `ELEVEN_LABS_ENGLISH_AGENT_VERCEL_PROJECT_ID`
 
 **What the value must contain.** The identifier of the Vercel project that repository deploys to, or
 nothing. It names a project inside the team above and is not a credential. Forwarded alongside the other
@@ -543,10 +587,11 @@ base build runs, and then writes the tag it built into the `image` field of that
 decides which image a session uses is updated by the same run that produced the image, so the two cannot
 drift. Nothing is written to `.env` — a project image is not the global one.
 
-Two things it needs first. The base tag that project's Dockerfile extends must already be in this
-engine's store, so build the base image after any change to it and before rebuilding the projects on top
-of it. And the slug must exist: a name with no `sandbox/projects/<owner>/<name>/Dockerfile` exits 1
-naming the path it looked for, rather than building nothing quietly.
+One thing it needs first: the slug must exist. A name with no `sandbox/projects/<owner>/<name>/Dockerfile`
+exits 1 naming the path it looked for, rather than building nothing quietly. There is no ordering
+dependency on the base image — a project Dockerfile is written from scratch on a pinned public base, so it
+builds on a host that has never built `factory-sandbox` at all, and a change to the base image cannot
+break it.
 
 Run it once per host before that project's sessions are expected to work. The `sandbox.json` is
 committed, the image is not — it lives in this engine's store and nowhere else — so a freshly cloned
@@ -571,12 +616,13 @@ architecture line is the half the version checks cannot catch: an image built fo
 form is `docker run --rm factory-sandbox:<YYYY-MM-DD> sh -c 'git --version && gh --version'`, the same
 command with the date written out.
 
-A project image is checked the same way with its own tag, and the `gh` half still has to pass —
-it is inherited from the base image, so it catches a base the project was rebuilt against that no
-longer has it. Add the tool that Dockerfile installs to the check: for
+A project image is checked the same way with its own tag, and the `gh` half still has to pass — the
+project Dockerfile installs it itself rather than inheriting it, so this is what catches a project image
+that omitted part of the session contract and would then fail every session that tries to open a pull
+request. Add the tool that Dockerfile installs to the check: for
 `factory-sandbox-eleven-labs-english-agent:2026-10-11` that is `vercel --version`, which is also the
 check that the version it pins is the one that got installed. `npm run sandbox:build -- <owner>/<name>`
-runs the inherited half only, so the project-specific half is a manual step.
+runs the shared half only, so the project-specific half is a manual step.
 
 Record the tag in the table below once this passes, then point `FACTORY_SANDBOX_IMAGE` at it and
 restart the server. Sessions started after the restart are created from that tag.
@@ -585,22 +631,23 @@ restart the server. Sessions started after the restart are created from that tag
 
 - **`docker build` cannot connect to the daemon.** The engine is not running or `DOCKER_HOST` is not
   exported in this shell. Neither is fixed here: see `ops/README.md`.
-- **The `gh` layer fails.** Two causes. The `curl` fetching `githubcli-archive-keyring.gpg` needs
+- **The `gh` layer fails.** Applies to a project Dockerfile as well as the base one, since both install
+  `gh` the same way. Two causes. The `curl` fetching `githubcli-archive-keyring.gpg` needs
   `https://cli.github.com` to be reachable from inside the build — a proxy or a blocked egress stops it
   there, and the layer fails before any `gh` package is seen. Or the write to
   `/usr/share/keyrings/githubcli-archive-keyring.gpg` fails because the directory does not exist in the
-  base image, which a future base-image change could cause; the fix is an explicit `mkdir -p` ahead of
+  image being built on, which a future base change could cause; the fix is an explicit `mkdir -p` ahead of
   the `curl` in that same chain. A failure at `apt-get install gh` *after* both of those means the
   source list was written but the repository did not resolve.
 - **The build is killed part-way, or `apt-get` fails writing.** The VM is out of disk. Reclaim with
   `docker image prune` and `docker system df`, or grow the VM — checkouts plus `node_modules` in
   long-lived session containers are what fill it over months.
-- **A project build fails at its `FROM` line.** The base tag that Dockerfile extends is not in this
-  engine's store — pruned, never built here, or a date written into the Dockerfile that no build ever
-  produced. `docker images factory-sandbox` shows what exists; build that base tag first, or move the
-  `FROM` line to one that is there and rebuild. The base and the project are separate builds with no
-  ordering enforced between them, so this is the one way a base change quietly breaks the projects on
-  top of it.
+- **A project build fails at its `FROM` line.** The pinned public base is not in this engine's store and
+  could not be pulled — egress blocked or proxied, the registry unreachable, or a tag mistyped in that
+  Dockerfile. `docker images` shows what is already local; `docker pull` the reference on its own to see
+  the real error before rebuilding. This used to be the way a base-image change quietly broke the projects
+  built on top of it; project Dockerfiles no longer extend `factory-sandbox`, so a base rebuild cannot
+  break them.
 - **A project build exits 1 before building anything.** The slug names no
   `sandbox/projects/<owner>/<name>/Dockerfile`. The error prints the path it looked for; the argument is
   the `owner/name` slug and not a project name on its own.
