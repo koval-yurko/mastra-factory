@@ -16,7 +16,7 @@
  * read directly. Instead `@mastra/factory` is mocked with `importOriginal`
  * spread and only `MastraFactory` swapped for a class that records its argument:
  * `createFactorySecretEncryption`, which `./auth` imports from the same module,
- * stays real. The four storage/pubsub packages are stubbed for the reason
+ * stays real. The three storage packages are stubbed for the reason
  * `infrastructure.test.ts` stubs them — to keep the suite from dialling anything
  * and from opening the operator's real libSQL file — and the pairings they carry
  * are asserted there rather than here.
@@ -59,9 +59,6 @@ vi.mock('@mastra/pg', () => ({
 vi.mock('@mastra/libsql', () => ({
   LibSQLFactoryStorage: class LibSQLFactoryStorage extends StubBackend {},
 }));
-vi.mock('@mastra/redis-streams', () => ({
-  RedisStreamsPubSub: class RedisStreamsPubSub extends StubBackend {},
-}));
 vi.mock('@mastra/code-sdk/utils/project', () => ({
   getDatabasePath: () => '/stub/mastracode/mastra.db',
 }));
@@ -75,7 +72,7 @@ vi.mock('@mastra/code-sdk/utils/storage-maintenance', () => ({ DEFAULT_RETENTION
 // mentioned the key — the same reason `../index.test.ts` sweeps, and the same
 // list, because `./factory` is what that boot reaches these modules through.
 const FACTORY_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'WORKOS_', 'GITHUB_APP_', 'LINEAR_', 'SLACK_APP_', 'E2B_'];
-const FACTORY_ENV_EXACT = ['REDIS_URL', 'DATABASE_URL', 'APP_DATABASE_URL', 'DOCKER_HOST', 'BETTER_AUTH_SECRET'];
+const FACTORY_ENV_EXACT = ['DATABASE_URL', 'DOCKER_HOST', 'BETTER_AUTH_SECRET'];
 
 for (const key of Object.keys(process.env)) {
   if (FACTORY_ENV_PREFIXES.some(prefix => key.startsWith(prefix)) || FACTORY_ENV_EXACT.includes(key)) {

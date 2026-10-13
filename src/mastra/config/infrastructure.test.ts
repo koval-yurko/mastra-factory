@@ -1,22 +1,21 @@
 /**
- * Which backend each of the three extracted concerns is, and with which options.
+ * Which backend each of the two extracted infrastructure concerns is, and with
+ * which options.
  *
  * That pairing is the whole of what Story 5.4 moved, and no other check in this
  * repository can see it: `tsc` is happy with either arm of either branch, and the
  * entry's own boot in `index.test.ts` only ever exercises the no-database arm,
- * because the verify gate has no Postgres and no Redis. So the Postgres pair, the
- * libSQL fallback, and the credential redaction in the Redis log are asserted
- * here or nowhere.
+ * because the verify gate has no Postgres. So the Postgres pair and the libSQL
+ * fallback are asserted here or nowhere.
  *
- * The four backend packages are stubbed, deliberately and not as a convenience:
+ * The three backend packages are stubbed, deliberately and not as a convenience:
  * the question these modules answer is which class is constructed with which
  * options, and stubbing is what makes the options readable. It also keeps the
- * gate from dialling anything — `RedisStreamsPubSub` against a URL is how this
- * suite would hang rather than fail (see `../index.test.ts`).
+ * gate from dialling anything.
  *
  * Environment is arranged with `vi.stubEnv`, never by assignment, so no key name
- * appears here as a literal `process.env` read: AD-7 counts those, and
- * `./database-url` and `./pubsub` are meant to be the only ones.
+ * appears here as a literal `process.env` read: `./env` is meant to be the only
+ * one.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,9 +42,6 @@ vi.mock('@mastra/pg', () => ({
 vi.mock('@mastra/libsql', () => ({
   LibSQLFactoryStorage: class LibSQLFactoryStorage extends StubBackend {},
 }));
-vi.mock('@mastra/redis-streams', () => ({
-  RedisStreamsPubSub: class RedisStreamsPubSub extends StubBackend {},
-}));
 vi.mock('@mastra/code-sdk/utils/project', () => ({
   getDatabasePath: () => '/stub/mastracode/mastra.db',
 }));
@@ -62,9 +58,8 @@ function optionsOf(instance: unknown): Record<string, unknown> {
  * the mock factories and an `instanceof` across two generations would compare
  * against a different class object.
  */
-async function loadStorage(env: { DATABASE_URL?: string; APP_DATABASE_URL?: string; NODE_ENV?: string }) {
+async function loadStorage(env: { DATABASE_URL?: string; NODE_ENV?: string }) {
   vi.stubEnv('DATABASE_URL', env.DATABASE_URL);
-  vi.stubEnv('APP_DATABASE_URL', env.APP_DATABASE_URL);
   vi.stubEnv('NODE_ENV', env.NODE_ENV);
   vi.resetModules();
   const pg = await import('@mastra/pg');
@@ -72,14 +67,6 @@ async function loadStorage(env: { DATABASE_URL?: string; APP_DATABASE_URL?: stri
   const { storage } = await import('./storage');
   const { vector } = await import('./vector');
   return { ...pg, ...libsql, storage, vector };
-}
-
-async function loadPubsub(redisUrl: string | undefined) {
-  vi.stubEnv('REDIS_URL', redisUrl);
-  vi.resetModules();
-  const { RedisStreamsPubSub } = await import('@mastra/redis-streams');
-  const { pubsub } = await import('./pubsub');
-  return { RedisStreamsPubSub, pubsub };
 }
 
 afterEach(() => {
@@ -122,22 +109,6 @@ describe('storage and vector', () => {
     expect(vector).toBeUndefined();
   });
 
-  it('ride the deprecated alias when it is the only database key set', async () => {
-    // The two halves of this scenario are resolved in `./database-url` and
-    // consumed here, so `database-url.test.ts` proving the alias wins does not
-    // by itself prove the alias reaches a backend. A consumer that read
-    // `DATABASE_URL` directly instead of importing the resolved value would pass
-    // every other assertion in this file and drop the alias on the floor.
-    const url = 'postgres://u:p@127.0.0.1:54329/legacy';
-
-    const { PgFactoryStorage, PgVector, storage, vector } = await loadStorage({ APP_DATABASE_URL: url });
-
-    expect(storage).toBeInstanceOf(PgFactoryStorage);
-    expect(optionsOf(storage).connectionString).toBe(url);
-    expect(vector).toBeInstanceOf(PgVector);
-    expect(optionsOf(vector).connectionString).toBe(url);
-  });
-
   it('carry the same retention policy on both arms', async () => {
     // Retention is what bounds the growth of the only copy of this deployment's
     // data. An arm that dropped it would typecheck and keep everything forever.
@@ -149,80 +120,3 @@ describe('storage and vector', () => {
   });
 });
 
-describe('pubsub', () => {
-  it('rides Redis Streams when REDIS_URL is set', async () => {
-    const url = 'redis://someone:secret@127.0.0.1:6399';
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    const { RedisStreamsPubSub, pubsub } = await loadPubsub(url);
-
-    expect(pubsub).toBeInstanceOf(RedisStreamsPubSub);
-    expect(optionsOf(pubsub)).toEqual({ url });
-    expect(log).toHaveBeenCalledTimes(1);
-  });
-
-  it('redacts the credentials REDIS_URL may embed before logging it', async () => {
-    // The log line is the only place this URL is ever printed, and it goes to a
-    // file the rotation conf keeps on disk for a week.
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    await loadPubsub('redis://someone:secret@127.0.0.1:6399');
-
-    const message = String(log.mock.calls[0]?.[0]);
-    expect(message).toContain('redis://127.0.0.1:6399');
-    expect(message).not.toContain('secret');
-    expect(message).not.toContain('someone');
-  });
-
-  it('keeps the log generic for a URL it cannot parse', async () => {
-    // The constructor will surface the real error; this line must not be the
-    // thing that throws first, and must not echo an unparsed value either.
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    await loadPubsub('not a url');
-
-    const message = String(log.mock.calls[0]?.[0]);
-    expect(message).toContain('Redis Streams (redis)');
-    expect(message).not.toContain('not a url');
-  });
-
-  it('leaves the in-process default in place when REDIS_URL is unset or empty', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    for (const value of [undefined, '']) {
-      const { pubsub } = await loadPubsub(value);
-      expect(pubsub).toBeUndefined();
-    }
-    expect(log).not.toHaveBeenCalled();
-  });
-
-  it('reads a whitespace-only REDIS_URL as unset, so a padded .env line dials nothing', async () => {
-    // Why the read is trimmed: without it `REDIS_URL="   "` is truthy, and a
-    // padded `.env` line builds a RedisStreamsPubSub against an unparseable
-    // target — dialling a Redis that need not exist and logging the generic
-    // name — where the same padding on `DATABASE_URL` has always read as absent.
-    // The trim makes every connection string in this directory agree, and
-    // `.env.schema`'s "unset keeps the in-process bus" true of a blank value too.
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    const { pubsub } = await loadPubsub('   ');
-
-    expect(pubsub).toBeUndefined();
-    expect(log).not.toHaveBeenCalled();
-  });
-
-  it('trims a padded REDIS_URL before it reaches the bus', async () => {
-    // The other half of the trim: padding must be removed rather than carried
-    // into the connection string, where it would make an otherwise valid URL
-    // unparseable and leave the log unable to name the target it redacts.
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    const { RedisStreamsPubSub, pubsub } = await loadPubsub('  redis://someone:secret@127.0.0.1:6399  ');
-
-    expect(pubsub).toBeInstanceOf(RedisStreamsPubSub);
-    expect(optionsOf(pubsub)).toEqual({ url: 'redis://someone:secret@127.0.0.1:6399' });
-    const message = String(log.mock.calls[0]?.[0]);
-    expect(message).toContain('redis://127.0.0.1:6399');
-    expect(message).not.toContain('secret');
-  });
-});

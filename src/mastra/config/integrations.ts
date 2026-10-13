@@ -27,25 +27,26 @@ import { parseAuthorizedBotsEnv } from '@mastra/factory/integrations/github/webh
 import { LinearIntegration } from '@mastra/factory/integrations/linear/integration';
 import { SlackIntegration } from '@mastra/factory/integrations/slack/integration';
 import { publicUrl } from './public-url';
+import { env } from './env';
 import { customTools } from '../tools';
 
 // Read RAW and ONCE: the GitHub integration below wants this trimmed (a
 // whitespace-only secret is no secret), while the `stateSecret` chain further
 // down takes it exactly as the environment gave it, where a whitespace-only
 // value is still truthy and still signs `state`.
-const githubWebhookSecretRaw = process.env.GITHUB_APP_WEBHOOK_SECRET;
+const githubWebhookSecretRaw = env.GITHUB_APP_WEBHOOK_SECRET;
 
 // Direct GitHub App fallback: when the platform-backed integration isn't in
 // play (self-hosted / local deploys), a complete GITHUB_APP_* env group wires
 // a GithubIntegration so the app still gets a real GitHub connection — Connect
 // GitHub in onboarding, the repo picker, and webhooks. A partial group stays
 // disabled so the status route can report exactly what's missing.
-const githubAppId = process.env.GITHUB_APP_ID?.trim();
-const githubPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
-const githubClientId = process.env.GITHUB_APP_CLIENT_ID?.trim();
-const githubClientSecret = process.env.GITHUB_APP_CLIENT_SECRET?.trim();
+const githubAppId = env.GITHUB_APP_ID?.trim();
+const githubPrivateKey = env.GITHUB_APP_PRIVATE_KEY?.trim();
+const githubClientId = env.GITHUB_APP_CLIENT_ID?.trim();
+const githubClientSecret = env.GITHUB_APP_CLIENT_SECRET?.trim();
 /** The factory call's `platform: { githubAppSlug }` needs this one by itself. */
-export const githubAppSlug = process.env.GITHUB_APP_SLUG?.trim();
+export const githubAppSlug = env.GITHUB_APP_SLUG?.trim();
 const github =
   githubAppId && githubPrivateKey && githubClientId && githubClientSecret && githubAppSlug
     ? new GithubIntegration({
@@ -57,15 +58,15 @@ const github =
         webhookSecret: githubWebhookSecretRaw?.trim() || undefined,
         // Extra reviewer bot logins this deployment trusts to trigger
         // review/comment notifications, on top of the built-in defaults.
-        authorizedBots: parseAuthorizedBotsEnv(process.env.MASTRACODE_GITHUB_AUTHORIZED_BOTS),
+        authorizedBots: parseAuthorizedBotsEnv(env.MASTRACODE_GITHUB_AUTHORIZED_BOTS),
       })
     : undefined;
 
 // Direct Linear OAuth fallback for self-hosted / local deploys. As with the
 // GitHub fallback, only a complete credential group enables the integration;
 // partial configuration remains available to the diagnostics routes.
-const linearClientId = process.env.LINEAR_CLIENT_ID?.trim();
-const linearClientSecret = process.env.LINEAR_CLIENT_SECRET?.trim();
+const linearClientId = env.LINEAR_CLIENT_ID?.trim();
+const linearClientSecret = env.LINEAR_CLIENT_SECRET?.trim();
 const linear =
   linearClientId && linearClientSecret
     ? new LinearIntegration({
@@ -76,7 +77,7 @@ const linear =
 
 // Read RAW and ONCE, for the mirror image of the reason above: the signer chain
 // below takes this key untrimmed, and the Slack integration takes it trimmed.
-const slackSigningSecretRaw = process.env.SLACK_APP_SIGNING_SECRET;
+const slackSigningSecretRaw = env.SLACK_APP_SIGNING_SECRET;
 
 // Deployment-stable secret for OAuth/link `state` signing. Shared by the
 // factory's integration signer and the channel-account-link deep link so both
@@ -85,7 +86,7 @@ const slackSigningSecretRaw = process.env.SLACK_APP_SIGNING_SECRET;
 // a stable signer. Unset → per-process random secret (single-process local dev
 // only). Every arm is the raw value, untrimmed, exactly as before.
 export const stateSecret =
-  githubWebhookSecretRaw || process.env.WORKOS_COOKIE_PASSWORD || slackSigningSecretRaw || undefined;
+  githubWebhookSecretRaw || env.WORKOS_COOKIE_PASSWORD || slackSigningSecretRaw || undefined;
 
 // Slack channels + account linking. Optional: the Slack adapter validates the
 // signing secret at construction, so the integration is only built when the
@@ -98,12 +99,12 @@ const slack = slackSigningSecret
       // `|| undefined` here and not on the two below: this options object
       // documents `undefined` as the absent shape for the token, while the
       // OAuth pair is consumed by truthiness, where `''` is already absent.
-      botToken: process.env.SLACK_APP_BOT_TOKEN?.trim() || undefined,
-      clientId: process.env.SLACK_APP_CLIENT_ID?.trim(),
-      clientSecret: process.env.SLACK_APP_CLIENT_SECRET?.trim(),
+      botToken: env.SLACK_APP_BOT_TOKEN?.trim() || undefined,
+      clientId: env.SLACK_APP_CLIENT_ID?.trim(),
+      clientSecret: env.SLACK_APP_CLIENT_SECRET?.trim(),
       // Slack requires an HTTPS redirect_uri, which locally is the tunnel
       // origin rather than the app's own public URL.
-      oidcRedirectBaseUrl: process.env.MASTRACODE_CHANNELS_PUBLIC_URL ?? publicUrl,
+      oidcRedirectBaseUrl: env.MASTRACODE_CHANNELS_PUBLIC_URL ?? publicUrl,
       uiOrigin: publicUrl,
     })
   : undefined;

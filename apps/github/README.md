@@ -6,7 +6,7 @@ This file is normative for the URLs that app's console asks for, the permissions
 it is registered with, and what each key under "Keys this subject owns" below must contain and how
 to obtain it.
 
-`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
 
@@ -20,9 +20,8 @@ before trusting a claim after a dependency bump.
 The table below is the closed list of the keys this file owns, and this file is the only record
 for what each must contain and how to obtain it. The
 other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
-owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
-once. The `MASTRA_PLATFORM_GITHUB_*` keys are **not** here: they belong to the Mastra Platform
-integration rather than to this deployment's own GitHub App, and `README.md` owns them.
+owner, claim the rest; between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly
+once.
 
 | Key | What the value must contain | Full record |
 |---|---|---|
@@ -32,15 +31,9 @@ integration rather than to this deployment's own GitHub App, and `README.md` own
 | `GITHUB_APP_CLIENT_SECRET` | a client secret belonging to that same app | the `GITHUB_APP_CLIENT_SECRET` section below |
 | `GITHUB_APP_SLUG` | the final path segment of the app's public page | the `GITHUB_APP_SLUG` section below |
 | `GITHUB_APP_WEBHOOK_SECRET` | the one random string the console field and `.env` both carry | the `GITHUB_APP_WEBHOOK_SECRET` section below |
-| `MASTRACODE_GITHUB_RECONCILE_ENABLED` | left unset, so the sweep runs | the "Reconcile sweep" section below |
-| `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` | left unset, so the cycle is an hour | the "Reconcile sweep" section below |
-| `MASTRACODE_GITHUB_PR_RECONCILE_ENABLED` | left unset, so the pull-request half falls back to the pair above | the "Reconcile sweep" section below |
-| `MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED` | left unset, so the issue half falls back to the pair above | the "Reconcile sweep" section below |
-| `MASTRACODE_GITHUB_PR_RECONCILE_INTERVAL_MS` | left unset, so the pull-request cycle is an hour | the "Reconcile sweep" section below |
-| `MASTRACODE_GITHUB_ISSUE_RECONCILE_INTERVAL_MS` | left unset, so the issue cycle is an hour too — it takes the legacy interval first and the pull-request-effective one only after that | the "Reconcile sweep" section below |
 | `MASTRACODE_GITHUB_AUTHORIZED_BOTS` | extra reviewer bot logins to trust, if any | the `MASTRACODE_GITHUB_AUTHORIZED_BOTS` section below |
 
-`.env.schema` declares and validates every key in that table and is the only list of key names;
+`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
 this file never
 restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
@@ -154,10 +147,8 @@ them — `installation` most plausibly — and the alternative is another trip t
 
 `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` and
 `GITHUB_APP_SLUG` are all-or-nothing. Fill all five, or leave all five blank and run without GitHub.
-A partial fill is not a third option, and it does not announce itself the same way in both directions.
-Filling the group from the top — the App ID first, the rest "later" — stops the server before it
-starts: env validation names the first key left empty and refuses to load. Filling only keys from the
-end of the group passes validation instead, and GitHub then stays inert with nothing logged, because
+A partial fill is not a third option, and it does not announce itself: env validation accepts an
+incomplete group, and GitHub then stays inert with nothing logged, because
 an incomplete group is never wired up (`src/mastra/config/integrations.ts:48-49` builds the
 integration only when all five are non-empty). Only all five blank is the supported way to run without
 GitHub.
@@ -382,46 +373,11 @@ installation approving again.
 
 ## Reconcile sweep
 
-Leave `MASTRACODE_GITHUB_RECONCILE_ENABLED` on. It controls one worker that sweeps **both** pull
-requests and issues — two reconcilers sharing a single timer and a single lease
-(`integration.js:1006-1014`, `reconcile-worker.js:7`) — re-reading each one's state from GitHub and
-writing it back onto the matching cards (`rules.js:697-727`). Left unset the sweep runs anyway: the
-package treats anything that is not `false` as enabled, empty included
-(`reconciliation-config.js:3-5,9-15`).
-
-`MASTRACODE_GITHUB_RECONCILE_ENABLED` and `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` are the
-**fallback** pair. `integration.js:1006-1014` reads a per-sweep enable and interval key for pull
-requests and for issues first, and consults these two only where the matching per-sweep key is
-unset. That is the state this deployment is in — none of the per-sweep keys is set, so these two are
-what is actually in force — but it is why everything below is stated as "unless a per-sweep override
-is set".
-
-Four per-sweep names exist, and this deployment leaves all four unset. They are listed here because
-this file owns them and because a sweep behaving unexpectedly on one half and not the other is traced
-through them, not because anything sets them (`reconciliation-config.js:3-15`):
-
-| Name | Effect |
-|---|---|
-| `MASTRACODE_GITHUB_PR_RECONCILE_ENABLED` | `false` turns the pull-request half off and `true` turns it on even where `MASTRACODE_GITHUB_RECONCILE_ENABLED` is `false`; any other value falls back to that key |
-| `MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED` | the same for the issue half, with the same fallback |
-| `MASTRACODE_GITHUB_PR_RECONCILE_INTERVAL_MS` | a positive integer in milliseconds for the pull-request cycle; anything else falls back to `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` |
-| `MASTRACODE_GITHUB_ISSUE_RECONCILE_INTERVAL_MS` | a positive integer in milliseconds for the issue cycle; anything else falls back to `MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS`, and only then to whatever the pull-request half ended up running at |
-
-The per-sweep name wins **only when its value is one this package recognises**. The enable keys accept
-`true` and `false`, matched after the value is trimmed and lowercased — so `FALSE` and a padded
-` false ` both count — and treat anything else as absent, so a half set to `0`, `no` or `off` is not
-turned off: it falls through to the legacy name and then to enabled. The interval keys accept a positive
-whole number of milliseconds and treat anything else as absent the same way, but their chain has one
-link more than the enable keys. An absent issue interval takes
-`MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` first (`integration.js:1014`), and only when that is absent
-too does it take whatever the pull-request half ended up running at (`reconcile-worker.js:35-36`),
-which with everything unset is the hour above. So with the legacy interval set and the pull-request
-override set to something else, the issue half runs at the legacy value, not alongside the
-pull-request half. Setting one of these is supported but is not part of this deployment; turning
-**both** halves off is what `MASTRACODE_GITHUB_RECONCILE_ENABLED=false` alone already does, so what the
-enable pair adds is running one half only — `MASTRACODE_GITHUB_RECONCILE_ENABLED=false` with
-`MASTRACODE_GITHUB_ISSUE_RECONCILE_ENABLED=true` leaves the issue sweep running and the pull-request
-one off, which no single key can express.
+The sweep runs with nothing set. One worker sweeps **both** pull requests and issues — two
+reconcilers sharing a single timer and a single lease (`integration.js:1006-1014`,
+`reconcile-worker.js:7`) — re-reading each one's state from GitHub and writing it back onto the
+matching cards (`rules.js:697-727`). This deployment leaves the package's reconcile settings at their
+defaults and does not declare or validate them.
 
 **The cycle is one hour.** The worker defaults to `intervalMs ?? 36e5` (`reconcile-worker.js:35`),
 and the package's own `DEFAULT_GITHUB_RECONCILE_INTERVAL_MS = 60 * 6e4` (`reconcile-worker.js:5`) is
@@ -431,16 +387,7 @@ that same hour. The issue sweep takes the pull-request interval unless given its
 This sweep is the **only** writer of merge state when GitHub cannot reach this deployment's webhook
 endpoint — behind a private network, during a tunnel outage, or before the Webhook URL above is
 registered. At an hour, that is a slow backstop rather than a substitute: with webhooks landing,
-merge state is current within seconds; with webhooks down, it can be an hour stale. Turning the sweep
-off is only reasonable when webhook delivery is known to be healthy, and it buys nothing but a few
-API calls.
-
-`MASTRACODE_GITHUB_RECONCILE_INTERVAL_MS` is what shortens the cycle — the same interval in
-milliseconds, for the case where an hour is the wrong number, and it applies to whichever sweeps have
-no per-sweep interval override of their own. Left alone, an hour is what runs.
-
-Do not confuse either key with `MASTRA_PLATFORM_GITHUB_RECONCILE_ENABLED`, a separate key that does
-not control this sweep and stays unset in this deployment.
+merge state is current within seconds; with webhooks down, it can be an hour stale.
 
 ## `MASTRACODE_GITHUB_AUTHORIZED_BOTS`
 
@@ -502,14 +449,12 @@ npm run build && npm run start
 ```
 
 Expected: the build completes and the server reaches its startup banner. This runs in the foreground
-and stays there — leave it, and use a second shell from here on. Two boot failures belong to this
+and stays there — leave it, and use a second shell from here on. One boot failure belongs to this
 story specifically:
 
 - `MastraFactory: integration 'github' signs OAuth state and requires a replica-stable state secret,
   but none is configured` — `GITHUB_APP_WEBHOOK_SECRET` is empty and neither fallback is set
   (`factory.js:369`, `integration.js:228`). This is a refusal to start, not a degraded mode.
-- varlock refusing to load and naming a `GITHUB_APP_*` key — the identity group was filled from the
-  top and the named key is the first one left empty.
 
 ### 3 — a `ping` reaches the endpoint
 

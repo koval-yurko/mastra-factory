@@ -12,7 +12,7 @@ This file is background. It is **not** normative for anything:
 - `ops/README.md` is the record for bring-up, `DOCKER_HOST`, the checkpoints, teardown and supervision.
 - `docs/self-hosting-research.md` §0 is where the Colima decision was taken, and §7 is its supervision detail.
 - `sandbox/README.md` is the record for building and tagging the session image.
-- `.env.schema` is the only list of environment keys.
+- `src/mastra/config/env.ts` (`envSpecs`) is the only list of environment keys.
 
 Nothing here restates a command those files own. Read this to understand the shape; read them to operate it.
 

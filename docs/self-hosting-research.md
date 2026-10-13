@@ -12,7 +12,7 @@ written. Ready to execute §8.
 > Facts marked **[verified]** were read out of the shipped packages (`@mastra/factory@0.15.0`,
 > `@mastra/auth-better-auth@1.1.5`, `@mastra/docker@0.8.0`, `@mastra/core`/`server`/`deployer@1.67.0`,
 > `@mastra/pg@1.25.0`, `@mastra/code-sdk@1.7.2`, `varlock@1.20.0`), not the docs. The published documentation
-> is thin and contradicts itself; trust the packages and this repo's `.env.schema`, `src/mastra/index.ts` and
+> is thin and contradicts itself; trust the packages and this repo's `src/mastra/config/env.ts`, `src/mastra/index.ts` and
 > `src/mastra/config/` (which now holds every concern the entry used to construct: storage, vector, pubsub,
 > auth, the integrations, the sandbox — and the `MastraFactory` call that assembles them, in
 > `config/factory.ts`).
@@ -355,9 +355,8 @@ requested, not five, and Linear's console declares no scopes at all. **`app:ment
 unreachable at this version** for three independent reasons: the scope is not requested, `actor=app` is never
 put on the authorize URL, and the package registers no Linear webhook route and carries no
 `AgentSessionEvent` handler anywhere, so nothing would receive a mention even if the scope were granted out
-of band — the application's webhooks should be left disabled. The all-or-nothing claim is asymmetric rather
-than symmetric: the secret without the id fails varlock at `npm run start` and names `LINEAR_CLIENT_ID`,
-while the id without the secret passes validation and leaves the integration silently unbuilt. And the boot
+of band — the application's webhooks should be left disabled. The all-or-nothing claim does not fail loudly: either
+half without the other passes validation and leaves the integration silently unbuilt. And the boot
 error that actually exists is a different one — `LinearIntegration` requires a replica-stable state secret,
 so a configured Linear pair with none of `GITHUB_APP_WEBHOOK_SECRET` → `WORKOS_COOKIE_PASSWORD` →
 `SLACK_APP_SIGNING_SECRET` set refuses to start. The corrected form of all four, with the `file:line`
@@ -471,7 +470,7 @@ export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 npm run db:up
 # ✔ container healthy on 127.0.0.1:54329   (image pgvector/pgvector:pg18, db mastracode_web)
 
-# 3 — deps (keep devDependencies — the mastra CLI and varlock are runtime deps of `npm start`)
+# 3 — deps (keep devDependencies — the mastra CLI is a runtime dep of `npm start`)
 npm install
 npm install @mastra/docker
 npm install @mastra/auth-better-auth          # peer hono@^4 — add `hono` if npm insists
@@ -485,7 +484,7 @@ npm run check
 # ✔ tsc clean
 
 # 6 — .env on LOOPBACK (MASTRACODE_PUBLIC_URL=http://127.0.0.1:4111), signUpEnabled:true
-npm run dev                                   # `dev` bypasses varlock; `start` is the varlock path
+npm run dev                                   # validates .env at boot, as `start` does
 # ✔ /signin renders, you create THE account, an org exists, a session opens a Docker sandbox
 
 # 7 — close registration: signUpEnabled:false, restart
@@ -493,7 +492,7 @@ npm run dev                                   # `dev` bypasses varlock; `start` 
 
 # 8 — tunnel (zone Active first), then switch .env to the public URL + MASTRA_HOST
 sudo cloudflared service install <TOKEN>
-npm run build && npm run start                # production path: varlock + NODE_ENV=production
+npm run build && npm run start                # production path: NODE_ENV=production
 # ✔ sign-in works over HTTPS
 
 # 9 — own GitHub App (§5): register every URL from §4.1, install it, connect a repo
@@ -511,7 +510,7 @@ sudo pmset -c sleep 0 disablesleep 1 autorestart 1 powernap 0
 
 ### `.env` target state
 
-Non-normative — the records are `.env.schema` for the key list and the six owned-keys READMEs for the values.
+Non-normative — the records are `src/mastra/config/env.ts` (`envSpecs`) for the key list and the six owned-keys READMEs for the values.
 ```dotenv
 NODE_ENV=production
 PORT=4111
@@ -554,21 +553,15 @@ SLACK_APP_CLIENT_SECRET=
 ANTHROPIC_API_KEY=
 ```
 
-**Keys absent from `.env.schema` still reach the process.** `varlock run` builds the child env as
-`{ ...process.env, ...resolvedEnv }` (`run.command-*.mjs:158-162`) **[verified]**, confirmed by experiment.
-Declaring a key only adds validation, `@public` (undeclared keys default to *sensitive*, so varlock redacts
-their values in the server's own stdout) and generated types. Undeclared **as of this research (2026-09-22)**:
-`MASTRA_HOST`, `PORT`, `NODE_ENV`, the three `FACTORY_SANDBOX_*`, `MASTRACODE_DISPATCH_MAX_IN_FLIGHT`,
-`BETTER_AUTH_SECRET`.
+**Every key in `.env` reaches the process, declared or not.** `mastra start` and `mastra factory dev`
+load `.env` into `process.env`, and the server inherits it whole. Declaring a key in `envSpecs`
+(`src/mastra/config/env.ts`) only adds validation — at boot, under both `npm run dev` and `npm run start`
+— and, for a key listed in `SENSITIVE_KEYS`, masking in the server's own logger (not in `console.*` output
+or a dependency's logs). A declared-but-unset key is absent from the environment entirely, not an empty
+string. `ops/README.md` is the record for what `MASTRA_HOST` and `PORT` must contain.
 
-Four of that list's six entries have been declared since: `MASTRA_HOST` and `PORT` in `.env.schema`'s
-*Server socket* section, and `BETTER_AUTH_SECRET` and all three keys of the `FACTORY_SANDBOX_*` entry
-in their own sections. Only `NODE_ENV` and `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` are still undeclared.
-Declaring a key gives it no default — a declared-but-unset key is absent from the child environment
-entirely, not an empty string — so the behaviour described above is unchanged, and the validation and
-`@public` marking apply only under `varlock run` (`npm run start`), never under `npm run dev`, which does
-not read `.env.schema`. `.env.schema` is the list of keys either way; `ops/README.md` is the record for what
-`MASTRA_HOST` and `PORT` must contain.
+> Note: as researched on 2026-09-22 this passage described `varlock run`, which then launched the server,
+> validated only on `npm run start` and redacted undeclared keys in stdout. varlock has since been removed.
 
 ---
 
@@ -605,13 +598,13 @@ without the encryption key is worthless — store them together or not at all.
 | Sandbox image lacks a package the target repo needs | Medium | expected with a generic image; one-line fix + retag |
 | Domain expiry breaks every callback | Medium | keep auto-renew on |
 | Mastra Studio shows no login UI in production | Low | cosmetic EE-gate artifact; Factory's `/signin` is fine (§3.1) |
-| Docs ≠ source (undocumented `MASTRACODE_AUTH_DISABLED`, polling defaults) | Low | trust `.env.schema` + `src/mastra/config/` (the entry reads no key) |
+| Docs ≠ source (undocumented `MASTRACODE_AUTH_DISABLED`, polling defaults) | Low | trust `src/mastra/config/env.ts` + `src/mastra/config/` (the entry reads no key) |
 
 ---
 
 ## 11. Environment variables — traps only
 
-The full catalogue is `.env.schema`; §8 has the target `.env`. These are the ones whose behaviour isn't
+The full catalogue is `envSpecs` in `src/mastra/config/env.ts`; §8 has the target `.env`. These are the ones whose behaviour isn't
 obvious:
 
 | Var | Trap |

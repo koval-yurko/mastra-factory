@@ -15,10 +15,14 @@
  * fails the boot.
  */
 import type { FactoryIntegration } from '@mastra/factory';
+import { isSetLocally, parameterStore } from '../config/env';
+import { createParameterStoreTool } from './parameter-store/definition';
 import { getWeatherTool } from './weather/definition';
 
 const TOOLS = {
   get_weather: getWeatherTool,
+  // Only with FACTORY_SSM_PARAMETER_PATH set: without a prefix there is no store to manage.
+  ...(parameterStore ? { parameter_store: createParameterStoreTool(parameterStore, isSetLocally) } : {}),
 };
 
 export const customTools: FactoryIntegration = {

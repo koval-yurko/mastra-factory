@@ -20,4 +20,5 @@
  * See `README.md` in this directory for what the entry was forked from and how
  * these modules are reconciled with an upstream template update.
  */
-export const publicUrl = process.env.MASTRACODE_PUBLIC_URL?.trim() || undefined;
+import { env } from './env';
+export const publicUrl = env.MASTRACODE_PUBLIC_URL?.trim() || undefined;

@@ -6,7 +6,7 @@ Cloudflare Tunnel that makes this deployment reachable from the internet. This f
 what each key under "Keys this subject owns" below must contain and how to obtain it, and for the
 order the bring-up commands run in.
 
-`.env.schema` is the list of keys. `README.md` ("Configure your Factory") states what the three
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `README.md` ("Configure your Factory") states what the three
 `POSTGRES_*` values must contain and how to choose them, and `apps/slack/README.md` is the record for
 `MASTRACODE_CHANNELS_PUBLIC_URL`. None of them is restated here.
 
@@ -15,7 +15,7 @@ order the bring-up commands run in.
 The table below is the closed list of the keys this file owns, and this file is the only record
 for what each must contain and how to obtain it. The four
 subject READMEs under `apps/` and `sandbox/`, plus `README.md` as the residual owner, claim the rest;
-between the six tables every key `.env.schema` declares is claimed exactly once.
+between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly once.
 
 | Key | What the value must contain | Full record |
 |---|---|---|
@@ -24,9 +24,8 @@ between the six tables every key `.env.schema` declares is claimed exactly once.
 | `PORT` | the pinned port the server listens on | the `PORT` section below |
 | `MASTRACODE_PUBLIC_URL` | the origin the browser reaches this deployment at | the `MASTRACODE_PUBLIC_URL` section below |
 | `NODE_ENV` | the runtime mode this process runs as | the `NODE_ENV` section below |
-| `REDIS_URL` | the Redis the cross-process event bus rides on, when there is one | the `REDIS_URL` section below |
 
-`.env.schema` declares and validates every key in that table and is the only list of key names;
+`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
 this file never
 restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
@@ -36,13 +35,13 @@ Not .env keys: `PATH`.
 
 `PATH` is a process-environment setting rather than configuration: it is written into both plists
 because a launchd agent inherits a minimal one, and exported again by `ops/factory-start.sh`. It is
-not read from `.env` and does not belong in `.env.schema`, and "The artifacts" below is where it is
+not read from `.env` and does not belong in `envSpecs`, and "The artifacts" below is where it is
 described. `NODE_BIN` next to it in that wrapper is not an environment variable at all — it is a
 `readonly` shell constant holding the nvm prefix `node` and `npm` come from, and it exists only to
 build `PATH`, so it is neither set by the deployment nor carved out from anything.
 
 That line above is machine input, not prose. The verify gate reconciles every key the plists, the
-wrapper and `docker-compose.yml` set against `.env.schema`, and reads it as the carve-out list — so
+wrapper and `docker-compose.yml` set against the key list, and reads it as the carve-out list — so
 it has to stay a column-0 line beginning exactly `Not .env keys:` with the names backticked. Bullet
 it, indent it or reword the prefix and the gate fails, reporting that it found no carve-out list.
 
@@ -83,7 +82,7 @@ test -S "$HOME/.colima/default/docker.sock" && echo present
 The value is a local filesystem path. It is the same on every boot of the same profile, so it can be set
 once in a shell profile and left alone.
 
-**Setting it in `.env` instead.** `.env` reaches the server, which varlock starts from it, and Compose,
+**Setting it in `.env` instead.** `.env` reaches the server, which `mastra start` loads it into, and Compose,
 which loads `.env` too — but not a bare `docker` command, which never reads `.env` at all. A value written
 there must use the fully written-out path: nothing expands `$HOME` in `.env`, so `unix://$HOME/…` stays
 literal and points at a socket that does not exist, the same silent failure as in a property list.
@@ -267,12 +266,9 @@ address that actually got bound rather than the one that was asked for.
 Unset is worse and quieter still. `@mastra/deployer` resolves
 `bindHost = serverOptions?.host ?? process.env.MASTRA_HOST`, so with neither set the server listens on
 **every** interface, this machine's LAN address included, and logs nothing about it. Listing the key
-in `.env.schema` changes none of that: leaving it blank is not a boot error, and an unset key is
+in `envSpecs` changes none of that: leaving it blank is not a boot error, and an unset key is
 absent from the server's environment entirely rather than reaching it as an empty string, so nothing
-is handed to the listener in its place. On the `npm run start` path the server's own stdout does echo
-the value it was given — but that is what `.env` said, never the address the socket actually took,
-and `npm run dev` is bare `mastra factory dev`, so the bring-up in `README.md` step 2 gets not even
-that. Ingress checkpoint 1 is the only thing that reports what was bound. `HOST` is not a substitute
+is handed to the listener in its place. Ingress checkpoint 1 is the only thing that reports what was bound. `HOST` is not a substitute
 either; it changes the URL printed in the startup banner and moves no socket.
 
 **How to obtain it.** Nothing issues it. It is a constant for a single-machine deployment, and the
@@ -335,20 +331,6 @@ production requirement, which is why the bring-up in `README.md` leaves it unset
 
 **How to obtain it.** Nothing issues it. It is a constant for this deployment, and the only place it
 is written is that plist.
-
-## `REDIS_URL`
-
-**What the value must contain.** A Redis connection URL — `redis://` or `rediss://`, with whatever
-credentials the instance needs. It is the bus the server publishes session, workflow and signal
-events on, and the lease provider that replaces the file-based thread locks once it is set.
-
-**How to obtain it.** There is nothing to obtain on this host: this deployment runs one server
-process, the in-process bus is what a single process wants, and the key stays unset. It exists for
-the multi-replica case, where every replica must be given the *same* Redis — two replicas on
-different instances share no events at all and each behaves as though it were alone. Nothing reports
-that; the symptom is a session whose stream stops updating in one browser while the work proceeds in
-another. The value may embed a password, so it is one of the keys the server's own log masks rather
-than echoing.
 
 ## Bringing the tunnel up
 
@@ -415,8 +397,8 @@ state to leave it in: correct by coincidence, and silently wrong the day the coi
 restart the server.
 
 One thing changes underfoot at the same moment, and it is a loss rather than a gain. `npm run start`
-is `varlock run -- mastra start`, and varlock reads `.env` and `.env.local` only — `.env.development`
-is not one of its sources. `npm run dev` does read that file (`README.md` step 1), so anything kept
+is `mastra start`, which reads `.env.production` and `.env` only — `.env.development` and `.env.local`
+are not among its sources. `npm run dev` does read that file (`README.md` step 1), so anything kept
 there has been applying right up to this point and stops applying the instant you move to the
 production path, with nothing logged. Move it into `.env` before the switch, not after.
 
@@ -686,7 +668,7 @@ declined `sudo` leaves nothing half-placed.
 Three things have to be true before either agent is started, and none of them is checked by anything:
 
 - **`npm run build` has been run, and re-run since the last source change.** `npm run start` is
-  `varlock run -- mastra start`, and `mastra start` never builds: it resolves `.mastra/output` and
+  `mastra start`, and `mastra start` never builds: it resolves `.mastra/output` and
   throws `Output directory … does not exist` if it is absent
   (`node_modules/mastra/dist/index.js:4845-4848`). `.mastra/` is gitignored, so a fresh checkout has
   no build at all. Bootstrapping without one is a 30-second crash-loop on `ThrottleInterval`, and its

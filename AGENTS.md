@@ -26,8 +26,8 @@ names in `companions:` — there is no PRD.
   `src/mastra/public/factory-skills/<skill-name>/SKILL.md`.
 - Never renumber sections in `docs/self-hosting-research.md` — the numbers are cited as stable
   anchors across the spec and stories.
-- Keep secrets out of the repo: `.env` is gitignored; `.env.schema` and `.env.example` carry key
-  names and shapes only.
+- Keep secrets out of the repo: `.env` is gitignored; `src/mastra/config/env.ts` and `.env.example`
+  carry key names and shapes only.
 - Treat every dependency bump as one-way and read the changelog first — there are no backups, and
   the Postgres volume is the only copy of projects, work items, sessions, memory and tokens.
 
@@ -67,11 +67,20 @@ names in `companions:` — there is no PRD.
 - `src/mastra/index.ts` must export a `Mastra` instance named `mastra` built by a literal
   `new Mastra(...)` in that file — the deployer's `checkConfigExport` Babel plugin inspects the
   entry's source. Never re-export it, never construct it in a helper.
-- Read each environment key at exactly one site in first-party code; every consumer receives the
-  parsed value by argument or export.
-- `.env.schema` is the only list of environment keys and is normative for validation, generated
-  types and `@public`/sensitive marking; what a value must contain and how to obtain it belongs in
-  the owning subject's README. Never restate one side in the other.
+- Read `process.env` for a configuration key only in `src/mastra/config/env.ts`; every other module
+  reads the exported `env` object, each key at exactly one site, and every consumer receives the
+  parsed value by argument or export. Never write to `process.env`.
+- `src/mastra/config/env.ts` (`envSpecs`, envalid) lists every environment key this deployment
+  uses — no unused keys; add a key there and to `.env.example` (same order, one-line comment) when
+  something starts using it — and is normative for validation, defaults and sensitive marking
+  (`SENSITIVE_KEYS`); what a value must
+  contain and how to obtain it belongs in the owning subject's README. Never restate one side in the
+  other.
+- `envSpecs` has two groups, mirrored by `.env.example`: SYSTEM keys stay in `.env` (bootstrap,
+  dependency-read, Compose and host settings), ADDITIONAL keys (secrets and app credentials only
+  first-party config reads) belong in AWS SSM Parameter Store. With `FACTORY_SSM_PARAMETER_PATH`
+  set, `env.ts` loads every parameter under that path at boot as initial values, and a non-blank
+  value in `.env` or the shell overrides it.
 - Set `MASTRA_HOST` to the literal `127.0.0.1` — unset binds every interface including the LAN,
   and `localhost` is not equivalent here.
 - Leave these unset or self-hosting silently defers back to Mastra's platform:

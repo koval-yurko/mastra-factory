@@ -2,8 +2,7 @@
 #
 # app-db is the separate "application database" referenced by DATABASE_URL
 # (distinct from Mastra's own storage). The web server runs the GitHub schema
-# migrations automatically on boot when the feature is enabled. The
-# deprecated APP_DATABASE_URL name is still honored as a fallback.
+# migrations automatically on boot when the feature is enabled.
 #
 # Usage:
 #   npm run db:up            # docker compose up -d --wait --wait-timeout 120

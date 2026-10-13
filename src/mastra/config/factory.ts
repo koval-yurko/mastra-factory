@@ -2,8 +2,8 @@
  * The assembly: explicit `MastraFactory` config built out of today's env vars.
  *
  * Every concern is constructed in its own module in this directory — the three
- * upstream infrastructure ones (pubsub, storage, vector) and this project's own
- * three (auth, the integrations, the sandbox) — and imported here as a finished
+ * upstream infrastructure ones (storage, vector) and this project's own three
+ * (auth, the integrations, the sandbox) — and imported here as a finished
  * value. What is read in THIS file is only the handful of keys the factory call
  * itself takes, and each of those is read at one site (AD-7). So anyone reading
  * this directory sees exactly which env var feeds which slot.
@@ -23,19 +23,18 @@
  * these modules are reconciled with an upstream template update.
  */
 import { MastraFactory } from '@mastra/factory';
+import { env } from './env';
 // Every concern, each constructed in its own module in this directory (AD-8;
 // `README.md` records the fork the entry came from). These lines are also the
 // ORDER the concerns evaluate in: an ES module's imports run before any
-// statement of the importing module, so pubsub's log, the deprecated-alias
-// warning and the missing-`DATABASE_URL` failure happen first, in this
-// sequence, then the auth warnings, then any integration construction failure —
+// statement of the importing module, so the missing-`DATABASE_URL` failure
+// happens first, then the auth warnings, then any integration construction failure —
 // all of it before anything below. `./sandbox` has no load-time side effect at
 // all, so its position is free; it is last of the concerns for readability.
 // `./positive-int` and `./public-url` are listed after them because they are
 // shared values rather than concerns — not because they evaluate last. Their
 // position here decides nothing: `./public-url` is in fact reached earlier, as an
 // import of `./integrations`, and neither does anything at load.
-import { pubsub } from './pubsub';
 import { storage } from './storage';
 import { vector } from './vector';
 import { auth, secretEncryption } from './auth';
@@ -55,7 +54,7 @@ export const factory = new MastraFactory({
   // Per-replica cap on concurrent Factory background dispatches. Unset means
   // the dispatcher default; invalid and non-positive values are ignored.
   dispatcher: {
-    maxInFlight: positiveInt(process.env.MASTRACODE_DISPATCH_MAX_IN_FLIGHT),
+    maxInFlight: positiveInt(env.MASTRACODE_DISPATCH_MAX_IN_FLIGHT),
   },
   // Agent state (threads, messages, memory, OM, recall vectors) lives in the
   // single app Postgres alongside the github/app tables — one shared DB (and
@@ -64,7 +63,6 @@ export const factory = new MastraFactory({
   // owns the branch and describes it.
   storage,
   vector,
-  pubsub,
   platform: {
     // The deployment's own self-hosted App slug, when one is configured. It is
     // NOT Platform's identity: Platform posts as its own App, which names
@@ -79,7 +77,7 @@ export const factory = new MastraFactory({
   publicUrl,
   // Allowed cross-origin SPA origins (comma-separated). The SPA is served from
   // a separate static host, so credentialed requests must be explicitly allowed.
-  allowedOrigins: (process.env.MASTRACODE_ALLOWED_ORIGINS ?? '')
+  allowedOrigins: (env.MASTRACODE_ALLOWED_ORIGINS ?? '')
     .split(',')
     .map(o => o.trim())
     .filter(Boolean),

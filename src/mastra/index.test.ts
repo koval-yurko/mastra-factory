@@ -15,9 +15,9 @@
  *
  * The entry boots the factory at module load (top-level `await
  * factory.prepare()` / `finalize()`). That boot reads deployment env, so
- * anything inherited from the operator's shell would configure it: `REDIS_URL`
- * makes it dial a Redis that need not exist (the gate hangs rather than fails),
- * and a malformed `FACTORY_CREDENTIAL_ENCRYPTION_KEY` aborts the import before a
+ * anything inherited from the operator's shell would configure it: a
+ * `DATABASE_URL` makes it dial a Postgres that need not exist, and a malformed
+ * `FACTORY_CREDENTIAL_ENCRYPTION_KEY` aborts the import before a
  * single test runs. The preamble therefore sweeps away every variable that boot
  * consults — the entry itself now reads none of them: every read sits in a
  * `./config/` module, reached through `./config/factory`, and all of them are
@@ -62,12 +62,11 @@ const ENTRY_ENV_PREFIXES = [
 // in `./config/auth`: inherited from a shell it would make the boot below
 // construct a real self-managed auth provider before the test that deliberately
 // arranges one, so the two boots would stop being distinguishable.
-// REDIS_URL, DATABASE_URL and APP_DATABASE_URL are read in `./config/pubsub`
-// and `./config/database-url` rather than in the entry, but they are read by
-// importing the entry all the same — `./config/factory` pulls them in, and the
-// entry pulls that in — so all three must stay swept here. Nothing about which
+// DATABASE_URL is read in `./config/env` rather than in the entry, but it is
+// read by importing the entry all the same — `./config/factory` pulls it in, and
+// the entry pulls that in — so it must stay swept here. Nothing about which
 // file holds the read changes what an inherited value would do to this boot.
-const ENTRY_ENV_EXACT = ['REDIS_URL', 'DATABASE_URL', 'APP_DATABASE_URL', 'DOCKER_HOST', 'BETTER_AUTH_SECRET'];
+const ENTRY_ENV_EXACT = ['DATABASE_URL', 'DOCKER_HOST', 'BETTER_AUTH_SECRET'];
 
 for (const key of Object.keys(process.env)) {
   if (ENTRY_ENV_PREFIXES.some(prefix => key.startsWith(prefix)) || ENTRY_ENV_EXACT.includes(key)) {

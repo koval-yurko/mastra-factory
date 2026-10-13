@@ -12,7 +12,7 @@ Six steps, in order. Do not move past a step whose checkpoint fails. A container
 
 ### 1 — Compose `.env`
 
-Copy `.env.example` to `.env` and fill these seven. `.env.schema` declares every key this deployment reads and `.env.example` documents each one; only what is non-obvious is repeated here.
+Copy `.env.example` to `.env` and fill these seven. `src/mastra/config/env.ts` (`envSpecs`) declares every key this deployment reads and `.env.example` documents each one; only what is non-obvious is repeated here.
 
 ```dotenv
 MASTRA_HOST=127.0.0.1
@@ -36,7 +36,7 @@ What will not announce itself:
 - **`BETTER_AUTH_SECRET`** — unset, blank or **misspelled** does not fail the boot. The server falls back to the platform provider and `/signin` shows a single **Sign in with Mastra Platform** button with no email/password form. That button is the only symptom.
 - **`FACTORY_CREDENTIAL_ENCRYPTION_KEY`** — must be 43 standard-base64 characters followed by `=`, as `openssl rand -base64 32` emits. A base64url (`-`, `_`) or unpadded spelling is rejected even though it decodes to 32 bytes — that sentence is the boot error verbatim. Carrying such a key from an older deployment: **rewrite the spelling, never regenerate** — `-`→`+`, `_`→`/`, pad to 44 with `=` — the bytes are unchanged and stored credentials stay readable. See step 5 before saving any credential.
 
-Four keys must stay **unset**: `MASTRACODE_AUTH_DISABLED` (drops authentication *and* credential encryption — every stored secret becomes plaintext), `MASTRACODE_ALLOWED_ORIGINS` (cross-site cookies the browser drops over HTTP — sign-in appears to succeed and keeps no session), `MASTRA_SHARED_API_URL` (hands identity back to the platform, beating `BETTER_AUTH_SECRET`), `BETTER_AUTH_TRUSTED_ORIGINS` (widens what may post credentials here).
+Three keys must stay **unset**: `MASTRACODE_AUTH_DISABLED` (drops authentication *and* credential encryption — every stored secret becomes plaintext), `MASTRACODE_ALLOWED_ORIGINS` (cross-site cookies the browser drops over HTTP — sign-in appears to succeed and keeps no session), `MASTRA_SHARED_API_URL` (hands identity back to the platform, beating `BETTER_AUTH_SECRET`).
 
 `npm run dev` loads `.env`, then `.env.local`, then `.env.development`, later winning; an exported shell variable beats all three, silently. Files are read once at startup, relative to the working directory.
 
@@ -157,7 +157,27 @@ Sandboxes: `FACTORY_SANDBOX_PROVIDER=docker` runs each session in its own contai
 
 ### Environment keys
 
-`.env.schema` is the only list of keys and is what validates them; `.env.example` carries a comment per key. Two things live here because `.env.example` defers to this file for them: the exact format of `FACTORY_CREDENTIAL_ENCRYPTION_KEY` and the command that generates it (step 1), and the rule about when it must be in force (step 5). Keys owned elsewhere: `apps/github/README.md`, `apps/linear/README.md`, `apps/slack/README.md`, `sandbox/README.md`, `ops/README.md`. Non-obvious runtime behaviour is in `docs/self-hosting-research.md` §11.
+`src/mastra/config/env.ts` (`envSpecs`) is the only list of keys and validates them at boot, under both `npm run dev` and `npm run start`; `.env.example` carries a comment per key. Two things live here because `.env.example` defers to this file for them: the exact format of `FACTORY_CREDENTIAL_ENCRYPTION_KEY` and the command that generates it (step 1), and the rule about when it must be in force (step 5). Keys owned elsewhere: `apps/github/README.md`, `apps/linear/README.md`, `apps/slack/README.md`, `sandbox/README.md`, `ops/README.md`. Non-obvious runtime behaviour is in `docs/self-hosting-research.md` §11.
+
+Only the server's logger masks values of the keys in `SENSITIVE_KEYS` (in `env.ts`), printing `[redacted:KEY]`. Output written with `console.*` or by a dependency's own logger is not masked.
+
+### Optional: values from AWS Parameter Store
+
+The server can load key values from AWS Systems Manager Parameter Store at boot. Off unless `FACTORY_SSM_PARAMETER_PATH` is set; when off, no AWS call is made. These four keys must be in `.env` or the shell — a parameter with one of their names is ignored:
+
+| Key | Must contain |
+| --- | --- |
+| `FACTORY_SSM_PARAMETER_PATH` | A parameter path starting with `/`, e.g. `/mastra-factory`. Unset turns the feature off. |
+| `AWS_SECRETS_MANAGER_REGION` | The region holding the parameters, e.g. `eu-central-1`. Required when the path is set. |
+| `AWS_SECRETS_MANAGER_ACCESS_KEY_ID` | An access key id allowed to read the path (and decrypt its SecureStrings). Set with the secret or not at all. |
+| `AWS_SECRETS_MANAGER_SECRET_ACCESS_KEY` | The matching secret. With neither key set, the AWS SDK's default credential chain (`AWS_ACCESS_KEY_ID`, an `~/.aws` profile, an instance role) is used instead. |
+
+- Every parameter under the path is loaded, recursively, with SecureStrings decrypted. The key is the last segment of the name: `/mastra-factory/DATABASE_URL` sets `DATABASE_URL`.
+- Parameter Store supplies the initial values. A non-blank value for the same key in `.env` or the shell overrides the parameter, and the boot log names each key where that happens (names only). A blank `KEY=` line does not hide a parameter.
+- `src/mastra/config/env.ts` and `.env.example` split the keys into two groups: **system** keys stay in `.env`, and **additional** keys — secrets and app credentials such as `BETTER_AUTH_SECRET`, `FACTORY_CREDENTIAL_ENCRYPTION_KEY`, the `GITHUB_APP_*`, `LINEAR_CLIENT_*` and `SLACK_APP_*` credentials, and `EXPO_TOKEN` — belong in Parameter Store. Remove a key from `.env` once it is in Parameter Store, or the `.env` value keeps winning.
+- Values go into the server's config object only; `process.env` is never written. So only keys that first-party config code reads can come from Parameter Store. Keys only dependencies read — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MASTRA_HOST`, `PORT` — must stay in `.env`.
+- If the load fails, the server does not start, and the error names the path.
+- With the path set, the Code Agent also gets a `parameter_store` tool in every session: `list` (key names only), `get` (returns a value to the agent), `put` (writes a `SecureString`, overwriting) and `delete`, on keys directly under the path. The credentials above then also need write access (`ssm:PutParameter`, `ssm:DeleteParameter`, and KMS encrypt for `SecureString`). A change takes effect at the next restart, and only if `.env` does not also set the key (the tool warns when it does). A value the agent reads is stored in the session thread.
 
 ## Deploy
 
@@ -170,9 +190,9 @@ Self-hosting needs persistent storage, `MASTRACODE_PUBLIC_URL` on the public HTT
 
 ## Production mode on this host
 
-Two LaunchAgents own the deployment: `ai.mastra.colima` runs the container engine, and `ai.mastra.factory` runs `ops/factory-start.sh`, which waits for the Docker socket then execs `npm run start` (`varlock run -- mastra start`), serving the build in `.mastra/output`. `ops/README.md` owns those files and the first bootstrap. Every command below names the **Factory** agent only — restarting Colima would take the database and every session container with it.
+Two LaunchAgents own the deployment: `ai.mastra.colima` runs the container engine, and `ai.mastra.factory` runs `ops/factory-start.sh`, which waits for the Docker socket then execs `npm run start` (`mastra start`), serving the build in `.mastra/output`. `ops/README.md` owns those files and the first bootstrap. Every command below names the **Factory** agent only — restarting Colima would take the database and every session container with it.
 
-`launchctl list` reports the pid of `npm run start`; the process on `4111` is a `node index.mjs` further down the chain (`caffeinate` → `factory-start.sh` → `npm` → `varlock` → `mastra start` → `node`). Both are correct and never the same number.
+`launchctl list` reports the pid of `npm run start`; the process on `4111` is a `node index.mjs` further down the chain (`caffeinate` → `factory-start.sh` → `npm` → `mastra start` → `node`). Both are correct and never the same number.
 
 ### Logs
 
@@ -188,7 +208,7 @@ launchctl print gui/$(id -u)/ai.mastra.factory                    # state, runs,
 
 - **`out.log` at zero bytes while the server is plainly serving** is the rotation trap, not a quiet server: `newsyslog` renames, `launchd` keeps the old descriptor. Fix with `launchctl kickstart -k` on the job that owns the file — the Factory one does not reopen Colima's two.
 - **Nothing in any of the four files** means launchd never spawned the job; ask launchd itself. `-` pid with `78` is `EX_CONFIG`, a refused plist. A pid that changes each time is a crash loop on the 30-second throttle.
-- **`Command failed with exit code 1` / `command [mastra start] failed` at the end of `out.log`** is what a `bootout` leaves behind — varlock reporting the terminated child. Not a start failure.
+- **An `npm error` / `command failed` at the end of `out.log`** is what a `bootout` leaves behind — `npm` reporting the terminated child. Not a start failure.
 
 ### Rebuild: stop, build, start
 
@@ -263,7 +283,7 @@ DuckDB has a single writer, so a Mastra Code CLI using the same directory at the
 
 `mastra factory dev` does not serve Studio, because the Factory UI owns `/`. Run it as its own UI against this server with `npm run studio`, then open `http://127.0.0.1:3000` and use **Observability → Traces / Logs / Metrics**.
 
-A Factory agent takes its model from the Factory session behind a request, and a Studio request has none, so Studio's agent pages fail to resolve one. `patches/@mastra+code-sdk+1.11.0.patch` lets such a request fall back to `MASTRA_STUDIO_FALLBACK_MODEL` (a `provider/model` id, resolved with the signed-in user's provider credentials); `.env.schema` records the key. It gives the request a model, not a project: a Studio chat that reaches the agent's workspace still fails with `Project path is required`, so run agents from the Factory UI.
+A Factory agent takes its model from the Factory session behind a request, and a Studio request has none, so Studio's agent pages fail to resolve one. `patches/@mastra+code-sdk+1.11.0.patch` lets such a request fall back to `MASTRA_STUDIO_FALLBACK_MODEL` (a `provider/model` id, resolved with the signed-in user's provider credentials); `src/mastra/config/env.ts` records the key. It gives the request a model, not a project: a Studio chat that reaches the agent's workspace still fails with `Project path is required`, so run agents from the Factory UI.
 
 ## Scripts
 

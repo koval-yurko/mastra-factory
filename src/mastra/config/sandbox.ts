@@ -24,6 +24,7 @@ import { LocalSandbox } from '@mastra/core/workspace';
 import { DockerSandbox, type DockerSandboxOptions } from '@mastra/docker';
 import { PlatformSandbox, createRepoTemplate as createPlatformRepoTemplate } from '@mastra/platform-workspace';
 import { E2BSandbox, createRepoTemplate as createE2BRepoTemplate } from '@mastra/e2b';
+import { env } from './env';
 import { positiveInt } from './positive-int';
 import type { MastraSandbox } from '@mastra/core/workspace';
 import type { FactorySandboxContext } from '@mastra/factory';
@@ -51,12 +52,14 @@ export const LOCAL_SANDBOX_ENV_KEYS = [
 
 /** Exported for `sandbox.test.ts` only — nothing else imports it. */
 export function localSandboxEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
+  const forwarded: Record<string, string> = {};
   for (const key of LOCAL_SANDBOX_ENV_KEYS) {
+    // Host process keys (`PATH`, `HOME`, …), not configuration — so read from
+    // `process.env`, not from `./env`.
     const value = process.env[key];
-    if (value) env[key] = value;
+    if (value) forwarded[key] = value;
   }
-  return env;
+  return forwarded;
 }
 
 /**
@@ -72,10 +75,10 @@ export function localSandboxEnv(): Record<string, string> {
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
 export function dockerSandboxEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  const expoToken = process.env.EXPO_TOKEN?.trim();
-  if (expoToken) env.EXPO_TOKEN = expoToken;
-  return env;
+  const forwarded: Record<string, string> = {};
+  const expoToken = env.EXPO_TOKEN?.trim();
+  if (expoToken) forwarded.EXPO_TOKEN = expoToken;
+  return forwarded;
 }
 
 // Hard ceilings for one Docker-sandbox session container. They are ceilings,
@@ -120,7 +123,6 @@ const DOCKER_SANDBOX_PIDS_LIMIT = 4096;
 // Default per-command timeout. The package default is 5 minutes, which a repo
 // install or a test suite routinely exceeds.
 const DOCKER_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
-const DEFAULT_SANDBOX_WORKDIR = '/workspace';
 
 /**
  * Build the Docker sandbox options for one session.
@@ -141,7 +143,7 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
   // the purpose-built image exists to prevent. The only correct value is a tag
   // someone built on this host, so refuse and name the key. The slot is called
   // per session, so this surfaces at the first session rather than at boot.
-  const image = process.env.FACTORY_SANDBOX_IMAGE?.trim();
+  const image = env.FACTORY_SANDBOX_IMAGE?.trim();
   if (!image) {
     throw new Error(
       'FACTORY_SANDBOX_IMAGE is required when the docker sandbox provider is selected. Set it to an image ' +
@@ -149,8 +151,8 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     );
   }
 
-  const memoryGib = positiveInt(process.env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
-  const cpus = positiveInt(process.env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
+  const memoryGib = positiveInt(env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
+  const cpus = positiveInt(env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
 
   // Refuse a knob raised past what this host can serve, before it is multiplied
   // into a byte count or a CFS quota. Clamping to the bound or falling back to
@@ -177,7 +179,7 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
   }
 
   const memoryBytes = memoryGib * BYTES_PER_GIB;
-  const env = dockerSandboxEnv();
+  const containerEnv = dockerSandboxEnv();
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -201,10 +203,10 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     timeout: DOCKER_SANDBOX_TIMEOUT_MS,
     // The base-class option, NOT the package's deprecated same-named alias
     // (`sandbox.test.ts` pins that the alias is absent).
-    workingDirectory: process.env.MASTRACODE_SANDBOX_WORKDIR?.trim() || DEFAULT_SANDBOX_WORKDIR,
+    workingDirectory: env.MASTRACODE_SANDBOX_WORKDIR.trim(),
     // Omitted rather than `{}` when nothing is forwarded, so an unset key
     // leaves the options exactly as they were before forwarding existed.
-    ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(Object.keys(containerEnv).length > 0 ? { env: containerEnv } : {}),
     // No `dockerOptions`: dockerode reads DOCKER_HOST itself, and ops/README.md
     // owns that key — re-reading it here would be a second source of truth.
   };
@@ -266,7 +268,7 @@ function admitDockerSession(sessionId: string, liveSessions: Map<string, MastraS
   // whenever the server happens to be at its cap.
   if (liveSessions.has(sessionId)) return;
 
-  const maxSandboxes = positiveInt(process.env.MASTRACODE_MAX_SANDBOXES) ?? DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
+  const maxSandboxes = positiveInt(env.MASTRACODE_MAX_SANDBOXES) ?? DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
   if (liveSessions.size < maxSandboxes) return;
 
   throw new Error(
@@ -300,13 +302,13 @@ export function selectSandbox(
   liveSessions: Map<string, MastraSandbox> = liveDockerSandboxes,
 ): MastraSandbox {
   // The one and only read of the sandbox-provider key (the const below is it;
-  // `.env.schema` lists the name). `docker` is deliberately the FIRST branch,
+  // `./env` lists the name). `docker` is deliberately the FIRST branch,
   // evaluated ahead of the platform and E2B checks: on a self-hosted deployment
   // the guarantee that agent work stays on this host has to be structural, not
   // contingent on a stray MASTRA_PROJECT_ID or E2B_API_KEY never appearing in
   // `.env`. Any other value falls through unchanged, so an unrecognised
   // provider never turns into a boot failure.
-  const sandboxProvider = process.env.FACTORY_SANDBOX_PROVIDER?.trim();
+  const sandboxProvider = env.FACTORY_SANDBOX_PROVIDER?.trim();
   if (sandboxProvider === 'docker') {
     // Order matters twice here. The image is resolved FIRST: a missing image
     // breaks every session on this deployment, while the cap only refuses this
@@ -330,7 +332,7 @@ export function selectSandbox(
     });
   }
 
-  if (!useLocalSandbox && process.env.E2B_API_KEY?.trim()) {
+  if (!useLocalSandbox && env.E2B_API_KEY?.trim()) {
     return new E2BSandbox({
       id: ctx.sessionId,
       template: createE2BRepoTemplate(ctx),
@@ -339,7 +341,7 @@ export function selectSandbox(
 
   return new LocalSandbox({
     workingDirectory: join(
-      process.env.MASTRACODE_LOCAL_SANDBOX_ROOT?.trim() || join(homedir(), '.mastracode', 'web', 'sandboxes'),
+      env.MASTRACODE_LOCAL_SANDBOX_ROOT?.trim() || join(homedir(), '.mastracode', 'web', 'sandboxes'),
       ctx.sessionId,
     ),
     env: localSandboxEnv(),
@@ -347,8 +349,8 @@ export function selectSandbox(
 }
 
 const hasPlatformSandboxEnv =
-  ['MASTRA_PLATFORM_ACCESS_TOKEN', 'MASTRA_PLATFORM_SECRET_KEY'].some(key => Boolean(process.env[key]?.trim())) &&
-  ['MASTRA_ENVIRONMENT_ID', 'MASTRA_PROJECT_ID'].every(key => Boolean(process.env[key]?.trim()));
+  (['MASTRA_PLATFORM_ACCESS_TOKEN', 'MASTRA_PLATFORM_SECRET_KEY'] as const).some(key => Boolean(env[key]?.trim())) &&
+  (['MASTRA_ENVIRONMENT_ID', 'MASTRA_PROJECT_ID'] as const).every(key => Boolean(env[key]?.trim()));
 
 /**
  * The finished `sandbox:` slot `./factory` hands to `MastraFactory`.

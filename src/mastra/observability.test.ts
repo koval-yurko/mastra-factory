@@ -8,7 +8,7 @@ import { MastraStorageExporter, SensitiveDataFilter } from '@mastra/observabilit
 import { PinoLogger } from '@mastra/loggers';
 import { describe, expect, it } from 'vitest';
 import observability, { isStudioNoSessionProbe, requestContextKeys, serializationOptions } from './observability';
-import logger from './logger';
+import logger, { maskSecrets } from './logger';
 
 describe('observability.ts', () => {
   const instance = observability.getDefaultInstance();
@@ -81,5 +81,35 @@ describe('logger.ts', () => {
   it('exports a PinoLogger', () => {
     // `__registerFsLogger` takes any MastraLogger; Pino is what forwards to observability.
     expect(logger).toBeInstanceOf(PinoLogger);
+  });
+
+  it('masks secret values in messages and arguments, and leaves the caller\'s objects alone', () => {
+    const secrets: [string, string][] = [['BETTER_AUTH_SECRET', 'auth-secret-value']];
+    const args = { nested: { note: 'token=auth-secret-value' }, list: ['auth-secret-value'], count: 3 };
+
+    expect(maskSecrets('signing with auth-secret-value', secrets)).toBe('signing with [redacted:BETTER_AUTH_SECRET]');
+    expect(maskSecrets(args, secrets)).toEqual({
+      nested: { note: 'token=[redacted:BETTER_AUTH_SECRET]' },
+      list: ['[redacted:BETTER_AUTH_SECRET]'],
+      count: 3,
+    });
+    expect(args.nested.note).toBe('token=auth-secret-value');
+  });
+
+  it('masks an Error into a copy, and skips values too short to mask safely', () => {
+    const error = new TypeError('bad key auth-secret-value');
+    const masked = maskSecrets(error, [['BETTER_AUTH_SECRET', 'auth-secret-value']]);
+
+    expect(masked).not.toBe(error);
+    expect(masked.name).toBe('TypeError');
+    expect(masked.message).toBe('bad key [redacted:BETTER_AUTH_SECRET]');
+    expect(masked.stack).not.toContain('auth-secret-value');
+    expect(maskSecrets('a short abc', [['EXPO_TOKEN', 'abc']])).toBe('a short abc');
+  });
+
+  it('masks what a child logger writes too', () => {
+    const child = logger.child({ module: 'test' });
+    expect(child).toBeInstanceOf(PinoLogger);
+    expect(child.info).not.toBe(PinoLogger.prototype.info);
   });
 });

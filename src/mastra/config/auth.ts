@@ -22,6 +22,7 @@
 import { MastraAuthBetterAuth } from '@mastra/auth-better-auth';
 import { createFactorySecretEncryption } from '@mastra/factory';
 import type { IMastraAuthProvider } from '@mastra/core/server';
+import { env } from './env';
 
 /**
  * The exact shape of a base64-encoded 32-byte key: 43 characters of the
@@ -89,7 +90,7 @@ const PREVIOUS_KEYS_SHAPE_ERROR =
   'FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS must be a JSON object of key ids to base64 keys.';
 
 function credentialEncryption() {
-  const encodedKey = process.env.FACTORY_CREDENTIAL_ENCRYPTION_KEY?.trim();
+  const encodedKey = env.FACTORY_CREDENTIAL_ENCRYPTION_KEY?.trim();
   if (!encodedKey) {
     console.warn(
       '[factory] FACTORY_CREDENTIAL_ENCRYPTION_KEY is not set. Stored model-provider keys, custom-provider ' +
@@ -103,7 +104,7 @@ function credentialEncryption() {
   // use. The entry read this key twice — once to decide whether there was
   // anything to parse and once to parse it — which is the duplication AD-7
   // exists to forbid.
-  const encodedPreviousKeys = process.env.FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS;
+  const encodedPreviousKeys = env.FACTORY_CREDENTIAL_ENCRYPTION_PREVIOUS_KEYS;
   // Unset or empty still means "no rotation in progress" — `''` is falsy, so it
   // never reaches the parser. Only a non-empty, unparseable value throws, and it
   // throws the SAME sentence the not-an-object arm below does rather than the
@@ -122,7 +123,7 @@ function credentialEncryption() {
 
   return createFactorySecretEncryption({
     primary: {
-      id: process.env.FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID?.trim() || 'v1',
+      id: env.FACTORY_CREDENTIAL_ENCRYPTION_KEY_ID.trim(),
       key: decodeCredentialEncryptionKey('FACTORY_CREDENTIAL_ENCRYPTION_KEY', encodedKey),
     },
     previous: Object.entries(previousKeys).map(([id, value]) => {
@@ -157,7 +158,7 @@ function credentialEncryption() {
  * Auth selection, ordered by how explicit the operator's intent is:
  *   1. MASTRACODE_AUTH_DISABLED=1 — explicit opt-out, auth off entirely.
  *   2. MASTRA_SHARED_API_URL — explicit platform deferral; identity rides the
- *      shared platform API (`.env.schema` names this the highest-precedence
+ *      shared platform API (`.env.example` names this the highest-precedence
  *      auth config), so it wins even over a configured BETTER_AUTH_SECRET —
  *      but loudly, because silently ignoring sign-in config is how self-hosted
  *      logins end up 302-ing somewhere that rejects their redirect_uri.
@@ -194,16 +195,16 @@ function credentialEncryption() {
  * Exported for `auth.test.ts` only — nothing else imports it.
  */
 export function selectAuth(): IMastraAuthProvider | null | undefined {
-  if (process.env.MASTRACODE_AUTH_DISABLED === '1') return null;
+  if (env.MASTRACODE_AUTH_DISABLED === '1') return null;
 
   // A blank secret must never reach the constructor: `new MastraAuthBetterAuth({})`
   // throws ("Better Auth instance is required…") at module load, taking the whole
   // deployment down at boot with a message that names the wrong cause for an
   // operator who simply forgot the key. So gate on a trimmed, non-empty value and
   // otherwise fall through — exactly as an unconfigured WorkOS group did before.
-  const betterAuthSecret = process.env.BETTER_AUTH_SECRET?.trim();
+  const betterAuthSecret = env.BETTER_AUTH_SECRET?.trim();
 
-  if (process.env.MASTRA_SHARED_API_URL?.trim()) {
+  if (env.MASTRA_SHARED_API_URL?.trim()) {
     if (betterAuthSecret) {
       console.warn(
         '[Auth] BETTER_AUTH_SECRET is set but ignored: MASTRA_SHARED_API_URL takes precedence, so sign-in defers to the platform. Unset MASTRA_SHARED_API_URL to use self-managed Better Auth sign-in.',

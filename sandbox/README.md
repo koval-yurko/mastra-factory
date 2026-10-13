@@ -4,7 +4,7 @@ The operator-plane subject for the container image every agent session runs insi
 normative for what each key under "Keys this subject owns" below must contain and how to obtain or
 choose it, and for the commands that build, smoke-test and retag the image.
 
-`.env.schema` is the list of keys. `ops/README.md` states what `DOCKER_HOST` must contain and how to
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `ops/README.md` states what `DOCKER_HOST` must contain and how to
 obtain it — export it before running any command below, because the build has to reach the Colima
 engine. Neither is restated here.
 
@@ -17,7 +17,7 @@ and references this directory by path rather than reproducing the Dockerfile.
 The table below is the closed list of the keys this file owns, and this file is the only record
 for what each must contain and how to choose it. The
 three subject READMEs under `apps/`, `ops/README.md`, and `README.md` as the residual owner, claim
-the rest; between the six tables every key `.env.schema` declares is claimed exactly once.
+the rest; between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly once.
 
 | Key | What the value must contain | Full record |
 |---|---|---|
@@ -31,7 +31,7 @@ the rest; between the six tables every key `.env.schema` declares is claimed exa
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
 | `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
 
-`.env.schema` declares and validates every key in that table and is the only list of key names;
+`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
 this file never
 restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
@@ -87,11 +87,9 @@ value is matched after trimming, so surrounding spaces are harmless, but the cas
 `DOCKER_HOST` points at. Never `latest` — a moving tag makes a bad image impossible to roll back from.
 
 A value that is neither blank nor of that form stops the **server** at startup, before any session
-exists: `npm start` refuses to come up and the error names this key. That is a different failure from
-the blank case below — nothing is running, so there is no session view to open and no container to
-look for. Fix the line in `.env` and start the server again. `npm run dev` does not apply this check
-and takes whatever is written, so a tag of the wrong shape can survive a development run and only show
-up the first time the server is started for real.
+exists: `npm start` and `npm run dev` both refuse to come up and the error names this key. That is a
+different failure from the blank case below — nothing is running, so there is no session view to open
+and no container to look for. Fix the line in `.env` and start the server again.
 
 **How to obtain it.** Build the image (below) and use the tag you built. The tag history table at the
 bottom of this file records which ones exist. There is no default and none is invented: with

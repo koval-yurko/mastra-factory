@@ -5,7 +5,7 @@ that carries mentions and messages between a Slack workspace and Factory's agent
 normative for the URLs Slack's console asks for, the events and settings that app is registered with,
 and what each key under "Keys this subject owns" below must contain and how to obtain it.
 
-`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URLs as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
 
@@ -14,7 +14,7 @@ here.
 The table below is the closed list of the keys this file owns, and this file is the only record
 for what each must contain and how to obtain it. The
 other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
-owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
+owner, claim the rest; between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly
 once.
 
 | Key | What the value must contain | Full record |
@@ -25,7 +25,7 @@ once.
 | `SLACK_APP_CLIENT_SECRET` | the client secret of that same app | the `SLACK_APP_CLIENT_SECRET` section below |
 | `MASTRACODE_CHANNELS_PUBLIC_URL` | the public HTTPS origin Slack must reach | the `MASTRACODE_CHANNELS_PUBLIC_URL` section below |
 
-`.env.schema` declares and validates every key in that table and is the only list of key names;
+`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
 this file never
 restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here

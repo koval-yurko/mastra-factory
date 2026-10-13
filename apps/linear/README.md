@@ -5,7 +5,7 @@ app that lets an organization connect its Linear workspace and pull issues into 
 board. This file is normative for the redirect URL Linear's console asks for, the scopes the app
 requests, and what each key under "Keys this subject owns" below must contain and how to obtain it.
 
-`.env.schema` is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URL as a
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `docs/self-hosting-research.md` §4.1 keeps the same URL as a
 narrative index across every provider; if the two ever disagree, this file wins. Neither is restated
 here.
 
@@ -19,19 +19,15 @@ names another directory. Re-read the citation before trusting a claim after a de
 The table below is the closed list of the keys this file owns, and this file is the only record
 for what each must contain and how to obtain it. The
 other two `apps/` subjects, `sandbox/README.md`, `ops/README.md`, and `README.md` as the residual
-owner, claim the rest; between the six tables every key `.env.schema` declares is claimed exactly
+owner, claim the rest; between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly
 once.
 
 | Key | What the value must contain | Full record |
 |---|---|---|
 | `LINEAR_CLIENT_ID` | the client ID of this deployment's Linear OAuth application | the `LINEAR_CLIENT_ID` section below |
 | `LINEAR_CLIENT_SECRET` | the client secret of that same application | the `LINEAR_CLIENT_SECRET` section below |
-| `MASTRACODE_LINEAR_ISSUE_RECONCILE_ENABLED` | left unset, so the sweep runs | the "Reconcile sweep" section below |
-| `MASTRACODE_LINEAR_RECONCILE_ENABLED` | left unset; the legacy fallback for the key above | the "Reconcile sweep" section below |
-| `MASTRACODE_LINEAR_ISSUE_RECONCILE_INTERVAL_MS` | left unset, so the cycle is five minutes | the "Reconcile sweep" section below |
-| `MASTRACODE_LINEAR_RECONCILE_INTERVAL_MS` | left unset; the legacy fallback for the key above | the "Reconcile sweep" section below |
 
-`.env.schema` declares and validates every key in that table and is the only list of key names;
+`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
 this file never
 restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
 `docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
@@ -135,20 +131,14 @@ misconfiguration to hunt for.
 ## Both, or neither
 
 Fill both keys, or leave both blank and run without Linear. A partial fill is not a third option — but
-it does **not** announce itself the same way in both directions, and only one of the two directions is
-an error at all.
-
-- **Secret set, id unset.** varlock refuses to load and names `LINEAR_CLIENT_ID`. `npm run start` runs
-  the server through varlock, so this stops it before it boots. `npm run dev` does not go through
-  varlock and starts anyway, which is why the same `.env` can look fine in one command and broken in the
-  other.
-- **Id set, secret unset.** Nothing fails and nothing is logged.
-  `src/mastra/config/integrations.ts:68-69` builds the integration from a ternary over both trimmed
-  values, so an incomplete pair yields `undefined` and the integration is simply never registered.
-  From the outside this is indistinguishable from leaving both blank: `/web/linear/status` answers
-  with `"reason":"missing_config"` in both cases
-  (`node_modules/@mastra/factory/dist/routes/surface.js:222-236`). Checkpoint 1 is the only warning
-  available.
+it does **not** announce itself: env validation accepts either half alone, and nothing fails and
+nothing is logged.
+`src/mastra/config/integrations.ts:68-69` builds the integration from a ternary over both trimmed
+values, so an incomplete pair yields `undefined` and the integration is simply never registered.
+From the outside this is indistinguishable from leaving both blank: `/web/linear/status` answers
+with `"reason":"missing_config"` in both cases
+(`node_modules/@mastra/factory/dist/routes/surface.js:222-236`). Checkpoint 1 is the only warning
+available.
 
 **A configured pair also needs a stable state signer, or the server refuses to start.** The OAuth
 `state` is signed on `/auth/linear/connect` and verified on the callback (`routes.js:128,139-140`),
@@ -362,36 +352,7 @@ Linear without anyone opening the intake board.
 **The cycle is five minutes.** The worker defaults to `intervalMs ?? 3e5`
 (`node_modules/@mastra/factory/dist/integrations/issue-reconcile-worker.js:25`), and the package's own
 `DEFAULT_ISSUE_RECONCILE_INTERVAL_MS = 5 * 6e4` (`:5`) is that same five minutes. Nothing in this
-deployment overrides it.
-
-Four environment names control it, and this deployment leaves all four unset — the five-minute
-default above is what actually runs. They are listed here because this file owns them and because a
-Linear sweep behaving unexpectedly is traced through them, not because anything sets them
-(`reconciliation-config.js:12-17`):
-
-| Name | Effect |
-|---|---|
-| `MASTRACODE_LINEAR_ISSUE_RECONCILE_ENABLED` | `false` turns the sweep off |
-| `MASTRACODE_LINEAR_RECONCILE_ENABLED` | the legacy fallback, used when the child name is unset **or unrecognised** |
-| `MASTRACODE_LINEAR_ISSUE_RECONCILE_INTERVAL_MS` | a positive integer in milliseconds |
-| `MASTRACODE_LINEAR_RECONCILE_INTERVAL_MS` | the legacy fallback, used when the child interval is unset or invalid |
-
-The child name wins **only when its value is one this package recognises**, which is the part worth
-getting right. `optionalBoolean` accepts `true` and `false` and returns `undefined` for anything else
-after one `console.warn` (`node_modules/@mastra/factory/dist/integrations/reconciliation-config.js:2-8`),
-so a child set to `0`, `no` or `off` does not turn the sweep off — it falls through to the legacy name,
-and then to the `?? true` default (`reconciliation-config.js:5`). With both unset the sweep **runs**:
-the default is enabled, not disabled.
-
-The intervals fall through the same way. A non-positive or non-numeric child interval prints one
-`[Linear reconciliation]` warning and is discarded (`reconciliation-config.js:7-10,16`), after which
-the **legacy** interval applies if that one is set and valid; the five-minute default is what remains
-only when the legacy name is unset or invalid too.
-
-Which is why none of the four is given a restricted set of accepted values: an unrecognised one is
-not refused, it falls through, so the failure to guard against is a sweep that goes on running at a
-cycle you thought you had changed. Read the warning line the package prints before concluding that a
-value took.
+deployment overrides it, and the package's reconcile settings are not declared or validated here.
 
 ## Checkpoints
 
@@ -433,7 +394,7 @@ npm run build && npm run start
 ```
 
 Expected: the build completes and the server reaches its startup banner. This runs in the foreground and
-stays there — leave it, and use a second shell from here on. Two boot failures belong to this story
+stays there — leave it, and use a second shell from here on. One boot failure belongs to this story
 specifically:
 
 - `MastraFactory: integration 'linear' signs OAuth state and requires a replica-stable state secret, but
@@ -441,11 +402,10 @@ specifically:
   `GITHUB_APP_WEBHOOK_SECRET`, `WORKOS_COOKIE_PASSWORD` or `SLACK_APP_SIGNING_SECRET` is
   (`node_modules/@mastra/factory/dist/factory.js:369`, `integration.js:306`). A refusal to start, not a
   degraded mode.
-- varlock refusing to load and naming `LINEAR_CLIENT_ID` — the secret was filled in and the id was not.
 
-**A clean boot does not prove Linear is configured.** The id-set/secret-unset case reaches exactly this
+**A clean boot does not prove Linear is configured.** A half-filled pair reaches exactly this
 same banner, because an incomplete pair is never wired up and never announces itself. This checkpoint
-rules out the two failures above and nothing more; checkpoint 3 is what proves the integration was
+rules out the failure above and nothing more; checkpoint 3 is what proves the integration was
 actually built.
 
 ### 3 — the surface is live, not stubbed

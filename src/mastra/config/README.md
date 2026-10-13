@@ -47,16 +47,15 @@ now moved, and so has the assembly itself: the entry imports `factory.ts` and no
 
 | Module | Owns |
 |---|---|
-| `database-url.ts` | Resolves the database connection string once, and refuses to boot without one outside development and tests. The single first-party read site for `DATABASE_URL`, `APP_DATABASE_URL` and `NODE_ENV`. |
+| `database-url.ts` | Resolves the database connection string once, and refuses to boot without one outside development and tests. The single first-party read site for `DATABASE_URL` and `NODE_ENV`. |
 | `storage.ts` | The `FactoryStorage` backend — Postgres when a connection string is configured, local libSQL otherwise. |
 | `vector.ts` | The recall-search vector store, which rides the same database as storage, or nothing when there is no connection string. |
-| `pubsub.ts` | The event bus — Redis Streams when configured, the in-process default otherwise, with a blank value reading as unset. The single read site for `REDIS_URL`. |
 | `auth.ts` | The identity provider — self-managed Better Auth, a deliberate platform deferral, an explicit opt-out, or the factory default — and the credential encryption that decision gates. Owns the `signUpEnabled: false` literal, the `BETTER_AUTH_SECRET`/`MASTRA_SHARED_API_URL`/`MASTRACODE_AUTH_DISABLED` precedence chain and the three `FACTORY_CREDENTIAL_ENCRYPTION_*` keys. |
 | `integrations.ts` | The three direct integrations (GitHub, Linear, Slack), the app slug the factory's `platform` slot takes, and the OAuth/link `state` signer secret. The single read site for every `GITHUB_APP_*`, `LINEAR_*` and `SLACK_APP_*` key, plus `MASTRACODE_GITHUB_AUTHORIZED_BOTS`, `WORKOS_COOKIE_PASSWORD` and `MASTRACODE_CHANNELS_PUBLIC_URL`. The public URL it hands the Slack integration comes from `public-url.ts`, not from a read of its own. |
 | `sandbox.ts` | The `sandbox:` slot: the Docker branch that keeps agent work on this host, its container ceilings, its concurrent-session cap, and the Platform → E2B → local chain behind it. The single read site for every `FACTORY_SANDBOX_*` key, the three `MASTRACODE_*` sandbox knobs, `E2B_API_KEY`, `EXPO_TOKEN` (forwarded into docker session containers) and the four `MASTRA_*` Platform keys. |
 | `positive-int.ts` | The positive-integer parser every capacity knob is read through. Reads no environment of its own. |
 | `public-url.ts` | The browser-facing origin, trimmed, with a blank value reading as unset so the `??` fallbacks downstream fire. The single read site for `MASTRACODE_PUBLIC_URL`, which has consumers in two different concerns. |
-| `factory.ts` | The assembly: the `new MastraFactory({ … })` call that puts the six concerns together, the `configVersion` literal, and the single read site for `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` — the two keys only that call takes. |
+| `factory.ts` | The assembly: the `new MastraFactory({ … })` call that puts the five concerns together, the `configVersion` literal, and the single read site for `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` — the two keys only that call takes. |
 
 `database-url.ts` exists so that neither consumer of the connection string has to import the other
 to get it: with the string exported from `storage.ts`, `vector.ts` would depend on the storage
@@ -75,14 +74,13 @@ construction, and FR34/AD-8 admit neither in the entry.
 
 Each module exports the finished instance, value or slot (or `undefined`), and `factory.ts` imports
 every one of them except `database-url.ts`, whose two consumers — `storage.ts` and `vector.ts` —
-take it directly. Import order in `factory.ts` — `pubsub`, `storage`, `vector`, `auth`, `integrations`, `sandbox`
+take it directly. Import order in `factory.ts` — `storage`, `vector`, `auth`, `integrations`, `sandbox`
 — is what fixes the order they evaluate in, because an ES module's imports run before any statement
 of the importing module. Reordering those lines reorders the boot-time log, warnings and failures
-they emit: pubsub's Redis log, the deprecated-alias warning and the missing-`DATABASE_URL` throw,
-then the ignored-`BETTER_AUTH_SECRET` warning and the plaintext-credentials warning, then any
+they emit: the missing-`DATABASE_URL` throw, then the ignored-`BETTER_AUTH_SECRET` warning and the plaintext-credentials warning, then any
 integration construction failure. `sandbox.ts` is the one concern with no load-time side effect at
 all — nothing is constructed until the factory calls the slot for a session — so its position is
-free and it is last of the six for readability. `positive-int.ts` and `public-url.ts` are listed
+free and it is last of the five for readability. `positive-int.ts` and `public-url.ts` are listed
 after them and are not in that list: they are shared values rather than concerns, their position
 decides nothing (`public-url.ts` is in fact reached earlier, as an import of `integrations.ts`), and
 neither does anything at load.
@@ -90,18 +88,18 @@ neither does anything at load.
 The entry imports exactly one thing from this directory — `factory` — and does nothing with it but
 `prepare()`, hand the result to a literal `new Mastra(...)`, and `finalize()`.
 
-The keys these modules read are declared in `.env.schema`, which is the only list of environment
-keys, and are claimed by the READMEs that own them. This file deliberately carries no key table.
+The keys these modules read are declared in `envSpecs` in `env.ts`, which is the only list of
+environment keys, and are claimed by the READMEs that own them. `env.ts` is also the one module that
+reads `process.env` for them; every other module here takes the validated value from its `env`. This file deliberately carries no key table.
 
 ## Tests here
 
 Every module here is tested beside itself, and the suite for a module moved in with it.
 
 `database-url.test.ts` and `infrastructure.test.ts` pin the pairings that are the whole of what was
-moved: which of the two database keys wins, that the deprecated alias still warns exactly once, that
+moved: that a padded `DATABASE_URL` is trimmed and a blank one read as absent, that
 a deployment with no database refuses to load outside development and tests, which backend each
-concern gets and with which options, and that credentials embedded in `REDIS_URL` are redacted before
-the URL reaches the log.
+concern gets and with which options.
 
 `auth.test.ts` pins the ORDER of the provider chain — that an explicit opt-out wins over everything,
 that a platform deferral wins over a configured secret and says so exactly once, and that a blank
@@ -139,12 +137,11 @@ through a public member, so a second read that drifted to a different origin is 
 41's read-site count rather than by that assertion.
 
 None of that is visible to any other check. `tsc` accepts either arm of every branch; the entry's own
-boot in `../index.test.ts` only ever exercises the no-database, no-Redis, no-integration arms, because
-the verify gate has neither a Postgres nor a Redis nor any credential. So `infrastructure.test.ts`
-stubs the four backend packages rather than connecting to them — the question those modules answer is
+boot in `../index.test.ts` only ever exercises the no-database, no-integration arms, because
+the verify gate has neither a Postgres nor any credential. So `infrastructure.test.ts`
+stubs the backend packages rather than connecting to them — the question those modules answer is
 *which class with which options*, and a stub is what makes the options readable. It also keeps the
-suite from dialling: constructing a real `RedisStreamsPubSub` against a URL is how it would hang
-rather than fail. The auth, integration and sandbox suites deliberately do NOT stub their packages:
+suite from dialling. The auth, integration and sandbox suites deliberately do NOT stub their packages:
 they assert against real instances (`sandbox.name`, `toBeInstanceOf(MastraAuthBetterAuth)`, the
 integration constructors' own required-field rules), and every one of those constructors is pure and
 dials nothing.
@@ -155,9 +152,9 @@ under this directory, that `signUpEnabled: false` is still a literal with no env
 it, and that the Docker branch still precedes the Platform and E2B arms. Two further guards close
 the shape this directory ends in — that `src/mastra/index.ts` is four things and nothing else,
 reading no environment key and constructing nothing but its `Mastra`; and that every key declared in
-`.env.schema` has at most one literal read site across `src/`, with `MASTRACODE_PUBLIC_URL`,
+`envSpecs` has at most one literal read site across `src/`, with `MASTRACODE_PUBLIC_URL`,
 `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` at exactly one each, in the
-module named for it here. That last one derives its key list from `.env.schema` rather than carrying
+module named for it here. That last one derives its key list from `envSpecs` rather than carrying
 a hand-written one, so it covers a key added tomorrow without anyone remembering it exists; the
 exactly-once half stays with the per-story lists, which is where a key that must be read at all is
 named. And `npm run build` is a gate command in its own right, the last one: it is the only check

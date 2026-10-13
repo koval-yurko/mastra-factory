@@ -15,10 +15,11 @@
     "check": "tsc --noEmit",
     "test": "vitest run --dir src",
     "build": "mastra build --dir src/mastra",
-    "start": "varlock run -- mastra start",
+    "start": "mastra start",
     "deploy": "mastra deploy"
   },
   "dependencies": {
+    "@aws-sdk/client-ssm": "^3.1151.0",
     "@mastra/auth-better-auth": "1.1.6",
     "@mastra/code-sdk": "1.11.0",
     "@mastra/core": "1.75.0",
@@ -31,7 +32,8 @@
     "@mastra/observability": "1.18.4",
     "@mastra/pg": "1.30.0",
     "@mastra/platform-workspace": "1.6.1",
-    "@mastra/redis-streams": "0.5.1",
+    "dotenv": "^17.4.2",
+    "envalid": "^8.2.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -39,7 +41,6 @@
     "mastra": "1.33.0",
     "patch-package": "^8.0.1",
     "typescript": "^5.9.2",
-    "varlock": "^1.9.0",
     "vitest": "5.0.1"
   },
   "packageManager": "npm@11.17.0",
