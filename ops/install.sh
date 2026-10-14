@@ -51,6 +51,7 @@ readonly CONF_NAME=ai.mastra.factory.conf
 for required in \
   "$REPO_ROOT/ops/launchagents/ai.mastra.colima.plist" \
   "$REPO_ROOT/ops/launchagents/ai.mastra.factory.plist" \
+  "$REPO_ROOT/actions-runner/ai.mastra.runner.plist" \
   "$REPO_ROOT/ops/newsyslog/$CONF_NAME"; do
   if [[ ! -f "$required" ]]; then
     print -u2 "[install] refusing: missing $required"
@@ -58,6 +59,15 @@ for required in \
     exit 1
   fi
 done
+
+# The runner plist starts runsvc.sh from the runner program, which
+# actions-runner/register.sh downloads. Linking it first would leave launchd a
+# job that cannot spawn.
+if [[ ! -x "$REPO_ROOT/actions-runner/runner/runsvc.sh" ]]; then
+  print -u2 "[install] refusing: $REPO_ROOT/actions-runner/runner/runsvc.sh is missing"
+  print -u2 "[install] nothing was installed. Run actions-runner/register.sh first."
+  exit 1
+fi
 
 if [[ ! -x "$REPO_ROOT/ops/factory-start.sh" ]]; then
   print -u2 "[install] refusing: $REPO_ROOT/ops/factory-start.sh is missing or not executable"
@@ -83,9 +93,10 @@ print "[install] log directory: $LOG_DIR"
 # Link rather than copy: launchd follows a symlink in ~/Library/LaunchAgents,
 # and linking keeps the repo copy the only copy (AD-5). Edit the file in the
 # repo, re-bootstrap the agent, done.
-for plist in ai.mastra.colima.plist ai.mastra.factory.plist; do
-  ln -sfn "$REPO_ROOT/ops/launchagents/$plist" "$AGENT_DIR/$plist"
-  print "[install] linked $AGENT_DIR/$plist -> $REPO_ROOT/ops/launchagents/$plist"
+for plist in ops/launchagents/ai.mastra.colima.plist ops/launchagents/ai.mastra.factory.plist \
+  actions-runner/ai.mastra.runner.plist; do
+  ln -sfn "$REPO_ROOT/$plist" "$AGENT_DIR/${plist:t}"
+  print "[install] linked $AGENT_DIR/${plist:t} -> $REPO_ROOT/$plist"
 done
 
 # The opposite case: the newsyslog conf must be root-owned 644, and a

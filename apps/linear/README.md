@@ -207,8 +207,8 @@ LINEAR_CLIENT_SECRET=<the client secret, shown once at creation>
 ```
 
 `.env` is gitignored, is not in this repository, and is read once at startup — so make the edit, then
-restart the server. Behind the tunnel that is `npm run build && npm run start`, as `ops/README.md`
-describes; `npm run dev` is the wrong thing behind a public hostname. Both keys have to land together,
+restart the server: `launchctl kickstart -k gui/$(id -u)/ai.mastra.factory` (no build needed for a `.env`
+change); `npm run dev` is the wrong thing behind a public hostname. Both keys have to land together,
 for the reason "Both, or neither" above gives.
 
 ## Connect a workspace
@@ -390,11 +390,11 @@ If both rows instead print a `No such file or directory` warning, `.env` does no
 ### 2 — the server boots with Linear configured
 
 ```bash
-npm run build && npm run start
+launchctl kickstart -k gui/$(id -u)/ai.mastra.factory
 ```
 
-Expected: the build completes and the server reaches its startup banner. This runs in the foreground and
-stays there — leave it, and use a second shell from here on. One boot failure belongs to this story
+Expected: within a minute `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4111/health`
+prints `200`. A boot failure is in `~/Library/Logs/mastra-factory/err.log`. One belongs to this story
 specifically:
 
 - `MastraFactory: integration 'linear' signs OAuth state and requires a replica-stable state secret, but

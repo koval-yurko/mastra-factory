@@ -227,7 +227,7 @@ MASTRACODE_CHANNELS_PUBLIC_URL=https://factory.kovalchuk.win
 ```
 
 `.env` is gitignored, is not in this repository, and is read once at startup — so make the edit, then
-restart. Behind the tunnel that is `npm run build && npm run start`, as `ops/README.md` describes.
+restart: `launchctl kickstart -k gui/$(id -u)/ai.mastra.factory`.
 What each value must contain, and what breaks when it is wrong, is in its own section below.
 
 **Editing the app afterwards does not mean editing this file by hand.** The console keeps a
@@ -306,8 +306,8 @@ failure the paragraph above describes. Set it explicitly.
 ## Checkpoints
 
 Run these in order. Checkpoint 1 is the console; 2 to 5 need `.env` filled from "Creating the app"
-and the server running behind the tunnel (`npm run build && npm run start`) — leave it running in
-one shell and use a second for the `curl` lines. Commands are written from the repository root.
+and the server running behind the tunnel (the `ai.mastra.factory` LaunchAgent, restarted after the
+`.env` edit). Commands are written from the repository root.
 
 ### 1 — the manifest creates the app
 

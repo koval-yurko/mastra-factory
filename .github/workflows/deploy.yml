@@ -1,0 +1,77 @@
+# Build every push to main on this Mac's self-hosted runner, store it as a
+# release, and activate it. Design: docs/ci-deploy-research.md.
+# Runner, hook and GitHub security settings: actions-runner/README.md.
+#
+# Manual run (Actions > deploy > Run workflow) with `release` set activates a
+# stored release — that is also how to roll back from GitHub.
+#
+# Never add pull_request, pull_request_target, issue_comment or workflow_run:
+# this runner runs jobs as the deployment user.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release id to activate (ops/deploy.sh --list). Empty = build the selected commit.
+        required: false
+        default: ''
+
+# One run at a time; a newer pending run replaces an older pending one.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: >-
+      github.repository == 'koval-yurko/mastra-factory' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'koval-yurko' &&
+      github.triggering_actor == 'koval-yurko' &&
+      !inputs.release
+    runs-on: [self-hosted, macOS, ARM64, factory-mac]
+    timeout-minutes: 30
+    outputs:
+      release: ${{ steps.store.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node is the server's Node
+        run: |
+          echo "node $(node --version), expected $FACTORY_NODE_VERSION"
+          test "$(node --version)" = "$FACTORY_NODE_VERSION"
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - name: Store the release
+        id: store
+        run: '"$REPO_ROOT/ops/release-store.sh" "$GITHUB_SHA"'
+
+  deploy:
+    needs: build
+    if: >-
+      always() &&
+      github.repository == 'koval-yurko/mastra-factory' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'koval-yurko' &&
+      github.triggering_actor == 'koval-yurko' &&
+      (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.release != ''))
+    runs-on: [self-hosted, macOS, ARM64, factory-mac]
+    # Up to 6 h waiting for Factory work to finish, plus the restart; the default is 360.
+    timeout-minutes: 420
+    steps:
+      - name: Activate the release
+        env:
+          RELEASE: ${{ inputs.release || needs.build.outputs.release }}
+        run: '"$REPO_ROOT/ops/deploy.sh" "$RELEASE"'

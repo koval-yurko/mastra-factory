@@ -15,12 +15,15 @@ names in `companions:` — there is no PRD.
 
 - Keep first-party `.ts`/`.js`/`.mjs`/`.cjs` under `src/` only, and keep `tsconfig.json` at
   `include: ["src/**/*"]` — `tsc --noEmit` type-checks only the files that `include` names, so
-  code outside `src/` is never type-checked. Sole carve-out: `ops/*.sh`, limited to process
-  supervision and file placement, never application logic.
+  code outside `src/` is never type-checked. Sole carve-out: shell scripts in `ops/` and
+  `actions-runner/`, limited to process supervision and file placement, never application logic.
 - Never add `workspaces` to `package.json`, add a second package, or switch package managers.
   One root `package.json` + `package-lock.json`, npm.
 - Never add a root directory — root is a closed set and changing it is an architecture-spine
-  change. Provider and app subjects go under `apps/`.
+  change. Provider and app subjects go under `apps/`. `.github/`, `actions-runner/` and the
+  gitignored `releases/` were added for CI/CD (`docs/ci-deploy-research.md`).
+- Never `git clean -x`: it deletes `releases/` (every stored build and database dump) and
+  `actions-runner/runner/` (the runner registration).
 - Never hand-edit `.agents/skills/` — it is hash-locked in `skills-lock.json`, so an edit either
   breaks the hash or is overwritten. Repo-local skill overrides go to
   `src/mastra/public/factory-skills/<skill-name>/SKILL.md`.
@@ -58,9 +61,14 @@ names in `companions:` — there is no PRD.
   that adds a check APPENDS it there and never rewrites or reorders the array, because the guards
   already in it are enforced nowhere else; gating a new `npm run <script>` also obliges naming it
   in this section. `.bmad-loop/policy.toml` is tracked, so a story worktree has it.
-- `npm run start` is the production entry point and must keep working with the repo root as cwd.
-  Renaming the script, or moving the repo, requires updating the LaunchAgent plist,
-  `ops/factory-start.sh` and the newsyslog conf in the same change.
+- `npm run start:release` is the production entry point (`ops/factory-start.sh` execs it; it
+  serves `releases/current`), and `npm run start` runs the local build in `.mastra/output`; both
+  must keep working with the repo root as cwd. Renaming either script, or moving the repo, requires
+  updating the LaunchAgent plists, `ops/factory-start.sh`, `ops/release-lib.sh`,
+  `actions-runner/register.sh` and the newsyslog conf in the same change.
+- Code reaches production only through a push to `main` (`.github/workflows/deploy.yml` on the
+  self-hosted runner). Never run `npm run build` to update the live server; use the release
+  scripts in `ops/` (`deploy.sh`, `rollback.sh`, `local-mode.sh`).
 
 ## Conventions that differ from defaults
 

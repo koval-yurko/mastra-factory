@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.mastra.runner</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/koval/dev/test/mastra-factory/actions-runner/runner</string>
+
+  <!-- GitHub requires a custom service to start the runner through runsvc.sh. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-dimsu</string>
+    <string>/Users/koval/dev/test/mastra-factory/actions-runner/runner/runsvc.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/koval/.nvm/versions/node/v24.19.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>DOCKER_HOST</key>
+    <string>unix:///Users/koval/.colima/default/docker.sock</string>
+    <!-- As in the runner's own plist template: tells the runner it runs as a
+         service, so a self-update restarts it in place. -->
+    <key>ACTIONS_RUNNER_SVC</key>
+    <string>1</string>
+  </dict>
+
+  <key>SessionCreate</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/koval/Library/Logs/mastra-factory/runner.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/koval/Library/Logs/mastra-factory/runner.err.log</string>
+</dict>
+</plist>
