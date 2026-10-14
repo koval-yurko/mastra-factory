@@ -127,4 +127,20 @@ if [[ ! -x "$NODE_BIN/npm" ]]; then
 fi
 
 cd "$REPO_ROOT"
+
+# The released build is releases/current (docs/ci-deploy-research.md): CI stores
+# each build there and ops/deploy.sh moves the link. Until the first release
+# exists, fall back to the local build in .mastra/output, so a reboot during the
+# switch-over does not leave the deployment down. Name which one starts: the two
+# can be different code, and out.log is the only record of the choice.
+if [[ -f releases/current/output/index.mjs ]]; then
+  print "[factory] starting release $(readlink releases/current)"
+  exec npm run start:release
+fi
+if [[ -L releases/current ]]; then
+  # A link to a missing build is a broken release store, not a fresh install.
+  print -u2 "[factory] releases/current -> $(readlink releases/current) has no output/index.mjs — run ops/rollback.sh"
+  exit 1
+fi
+print "[factory] no releases/current yet — starting the local build in .mastra/output"
 exec npm run start

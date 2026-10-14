@@ -29,6 +29,7 @@ import { SlackIntegration } from '@mastra/factory/integrations/slack/integration
 import { publicUrl } from './public-url';
 import { env } from './env';
 import { customTools } from '../tools';
+import { liveSessions } from '../ops/live-sessions';
 
 // Read RAW and ONCE: the GitHub integration below wants this trimmed (a
 // whitespace-only secret is no secret), while the `stateSecret` chain further
@@ -109,11 +110,14 @@ const slack = slackSigningSecret
     })
   : undefined;
 
-// `customTools` is not a provider: it carries this deployment's own agent tools
-// (Factory has no tools slot, see `src/mastra/tools/`), so it is always present and last.
+// `customTools` and `liveSessions` are not providers, so they are always present
+// and last: `customTools` carries this deployment's own agent tools (Factory has no
+// tools slot, see `src/mastra/tools/`); `liveSessions` serves the route the deploy
+// polls for in-flight work (`src/mastra/ops/`).
 export const integrations = [
   ...(github ? [github] : []),
   ...(linear ? [linear] : []),
   ...(slack ? [slack] : []),
   customTools,
+  liveSessions,
 ];

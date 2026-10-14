@@ -16,6 +16,7 @@
     "test": "vitest run --dir src",
     "build": "mastra build --dir src/mastra && node src/build/complete-output.ts",
     "start": "mastra start",
+    "start:release": "mastra start --dir releases/current/output",
     "deploy": "mastra deploy"
   },
   "dependencies": {

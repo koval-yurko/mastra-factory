@@ -109,6 +109,11 @@ const systemSpecs = {
   // Second link of the OAuth `state` signer chain (`./integrations`).
   WORKOS_COOKIE_PASSWORD: optional,
 
+  // Factory login the deploy scripts sign in with (`ops/deploy.sh`). Only those
+  // scripts read them, from `.env`; the server never does.
+  FACTORY_DEPLOY_EMAIL: optional,
+  FACTORY_DEPLOY_PASSWORD: optional,
+
   // Keep UNSET (AGENTS.md): each one hands this deployment back to Mastra's
   // platform, a cloud sandbox, or no authentication.
   MASTRACODE_AUTH_DISABLED: optional,
@@ -162,6 +167,7 @@ export const SENSITIVE_KEYS: ReadonlySet<EnvKey> = new Set<EnvKey>([
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
   'WORKOS_COOKIE_PASSWORD',
+  'FACTORY_DEPLOY_PASSWORD',
   'MASTRA_PLATFORM_ACCESS_TOKEN',
   'MASTRA_PLATFORM_SECRET_KEY',
   'E2B_API_KEY',
