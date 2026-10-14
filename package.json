@@ -14,7 +14,7 @@
     "sandbox:build": "sh sandbox/build.sh",
     "check": "tsc --noEmit",
     "test": "vitest run --dir src",
-    "build": "mastra build --dir src/mastra",
+    "build": "mastra build --dir src/mastra && node src/build/complete-output.ts",
     "start": "mastra start",
     "deploy": "mastra deploy"
   },
