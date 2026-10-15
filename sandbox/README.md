@@ -1,407 +1,361 @@
-# Sandbox image
+# Sandbox images
 
-The operator-plane subject for the container image every agent session runs inside. This file is
-normative for what each key under "Keys this subject owns" below must contain and how to obtain or
-choose it, and for the commands that build, smoke-test and retag the image.
+The operator-plane subject for the containers that agent sessions run in. This file is normative for
+the files in this folder, for what each key under "Keys this subject owns" must contain, for the
+project secrets in AWS SSM Parameter Store, and for how images are built, checked and rolled back.
 
-`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `ops/README.md` states what `DOCKER_HOST` must contain and how to
-obtain it — export it before running any command below, because the build has to reach the Colima
-engine. Neither is restated here.
+`src/mastra/config/env.ts` (`envSpecs`) is the list of keys. `ops/README.md` states what `DOCKER_HOST`
+must contain and how to obtain it. Export it before you run a command below, because the build must
+reach the Colima engine. Neither is restated here.
 
-`factory-sandbox.Dockerfile` in this directory is the image, and it is the canonical artifact — the one
-file to edit and build. `docs/self-hosting-research.md` §2.1 says why the image carries `git` and `gh`
-and references this directory by path rather than reproducing the Dockerfile.
+`docs/self-hosting-research.md` §2.1 says why every image carries `git` and `gh`.
 
 ## Keys this subject owns
 
-The table below is the closed list of the keys this file owns, and this file is the only record
-for what each must contain and how to choose it. The
-three subject READMEs under `apps/`, `ops/README.md`, and `README.md` as the residual owner, claim
-the rest; between the six tables every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly once.
+The table below is the closed list of the keys this file owns. The three subject READMEs under
+`apps/`, `ops/README.md`, and `README.md` as the residual owner, claim the rest; between the six tables
+every key `envSpecs` in `src/mastra/config/env.ts` declares is claimed exactly once.
 
 | Key | What the value must contain | Full record |
 |---|---|---|
 | `FACTORY_SANDBOX_PROVIDER` | which sandbox runs session commands | the `FACTORY_SANDBOX_PROVIDER` section below |
-| `FACTORY_SANDBOX_IMAGE` | a date-stamped image tag that exists on this engine | the `FACTORY_SANDBOX_IMAGE` section below |
-| `FACTORY_SANDBOX_MEMORY_GIB` | the per-session memory ceiling, in whole gibibytes | the `FACTORY_SANDBOX_MEMORY_GIB` section below |
-| `FACTORY_SANDBOX_CPUS` | the per-session CPU ceiling, in whole cores | the `FACTORY_SANDBOX_CPUS` section below |
 | `MASTRACODE_MAX_SANDBOXES` | how many session containers this process runs at once | the `MASTRACODE_MAX_SANDBOXES` section below |
 | `MASTRACODE_SANDBOX_WORKDIR` | the checkout base inside a docker-provider container | the `MASTRACODE_SANDBOX_WORKDIR` section below |
 | `MASTRACODE_LOCAL_SANDBOX_ROOT` | the checkout root on this host, for the local provider only | the `MASTRACODE_LOCAL_SANDBOX_ROOT` section below |
 | `E2B_API_KEY` | must stay unset | the `E2B_API_KEY` section below |
-| `EXPO_TOKEN` | an Expo access token for the EAS CLI inside session containers, or blank | the `EXPO_TOKEN` section below |
 
-`envSpecs` in `src/mastra/config/env.ts` declares and validates every key in that table and is the only list of key names;
-this file never
-restates what it declares. Behaviour that is non-obvious rather than operator-facing lives in
-`docs/self-hosting-research.md` §11 ("Environment variables — traps only"), which is referenced here
-by path and never copied.
+Images, ceilings and credentials are **not** keys. They are in the files of this folder and in SSM, as
+the sections below describe. `envSpecs` declares and validates every key in that table and is the only
+list of key names. Behaviour that is non-obvious rather than operator-facing lives in
+`docs/self-hosting-research.md` §11 ("Environment variables — traps only").
 
-## Before you start
+## The files in this folder
 
-- A container engine installed and running, with `DOCKER_HOST` exported in the shell you use for every
-  command below. `ops/README.md` is the procedure and owns that value. `docker info` exiting 0 is the
-  precondition for everything here; nothing on this page can work without it.
-- Enough free disk in the VM. The build pulls a base image and two `apt-get` layers.
+```
+sandbox/
+├── factory-sandbox.Dockerfile      the shared image
+├── sandbox.json                    the shared ceilings: memoryGib, cpus
+└── projects/<owner>/<name>/        one folder per repository that needs something different
+    ├── sandbox.json                its own ceilings and secrets — required
+    └── Dockerfile                  its own image — optional; this folder is its build context
+```
 
-## What the image carries
+The folder name is the repository slug that Factory reports for a session (`owner/name`). Slugs are
+compared in lower case. A repository with no folder here runs on the shared image with the shared
+ceilings and gets no secrets.
 
-`node:22-bookworm-slim` plus, in one layer, `git`, `ca-certificates`, `curl`, `gnupg`,
-`openssh-client`, `less` and the GitHub CLI (`gh`, from `https://cli.github.com/packages` under its own
-`signed-by` keyring), and in a second layer a generic toolchain: `build-essential`, `python3`,
-`python3-pip`, `python3-venv`, `ripgrep`, `jq`, `unzip` — note that on bookworm `python3-pip` is an
-externally-managed environment (PEP 668), so a plain `pip install` refuses and `python3 -m venv` is the
-path a session must take. `corepack enable` runs next, so `npm`, `pnpm` and `yarn` all resolve. The
-last layer installs the EAS CLI (`eas-cli`, https://docs.expo.dev/eas/cli/) globally from npm at a
-pinned version; to upgrade, change the version in that `RUN` line and rebuild. The `eas-cli` skill
-under `src/mastra/public/factory-skills/` is what tells the agent it is there. The
-working directory is `/workspace`, the image defines no user so session commands run as root, and the
-container's command is `sleep infinity`, because a session's container is long-lived and driven by
-`docker exec`.
+`sandbox/sandbox.json` must hold both fields:
 
-`git` and `gh` are there because the repository is cloned **inside** the session's container, never onto
-this host — a session that cannot find either one fails at first use.
+```json
+{ "memoryGib": 1, "cpus": 0.5 }
+```
 
-The image copies no application code, and it is deliberately not specific to any target repository. A
-package some repository needs but the image lacks shows up as a failing setup command inside that
-session: add it to the toolchain layer, rebuild under a new date tag, and move
-`FACTORY_SANDBOX_IMAGE` forward.
+A project's `sandbox.json` may hold `memoryGib`, `cpus` and `secrets`. Each field is optional. A
+missing field takes the shared value. `{}` is valid. An unknown field is an error, so a typo does not
+pass silently. Example:
+
+```json
+{ "memoryGib": 4, "cpus": 2, "secrets": ["EXPO_TOKEN", "VERCEL_TOKEN"] }
+```
+
+`npm run build` reads these files, checks them and writes the result into the build output as
+`sandbox-catalog.json` (`src/build/sandbox-images.ts`). The server reads that file from its cwd, which
+is the output folder. Thus a release carries its own catalog, and a rollback restores the catalog
+that the release was built with. A bad file fails the build, so it cannot reach a release.
+
+## Ceilings
+
+`memoryGib` is the hard memory ceiling of one session container, in gibibytes. `cpus` is the hard CPU
+ceiling, in cores, applied as a CFS quota against a 100 ms period that the server pins: `0.5` is 50 ms
+of every 100 ms. Both may have up to 2 decimal places. The least values are `0.25` GiB and `0.01`
+cores. They are ceilings, not reservations: a container that goes above its memory ceiling is OOM-killed, not the
+host. Swap is disabled (the swap ceiling equals the memory ceiling), so `memoryGib` is the whole memory
+budget of the container.
+
+The largest values are **10** GiB and **6** cores. The Colima VM has 12 GiB and 6 CPUs
+(`colima list`). 10 GiB is the share that sandboxes get after Postgres and the VM itself take about
+2 GiB. 6 cores is every core of the VM. A container above them cannot run even as the only session. These bounds are not settings: they are `HOST_MAX_MEMORY_GIB` and
+`HOST_MAX_CPUS` in `src/mastra/config/sandbox-catalog.ts`. To raise them, grow the VM and change the
+constants in the same commit.
+
+**How to choose them.** The shared values are `1` GiB and `0.5` cores. 10 sessions at 1 GiB use the
+10 GiB budget exactly, and 10 sessions at 0.5 cores use 5 of the 6 cores. Give a project more only when
+its sessions need it, for example a large install or test suite. Each running container counts against
+the same VM, so a project at 4 GiB takes the room of 4 shared containers. A CPU overcommit is safe: a
+busy container is throttled, not killed. A memory overcommit is not: the VM kills containers.
+
+Two more limits apply to every container and are not settable:
+
+- **Process limit: 4096.** A fork-bomb or a runaway parallel build gets "resource temporarily
+  unavailable" and the VM stays up. An init process reaps exited children.
+- **Command timeout: 15 minutes.** A dependency install or a test suite that stops at almost exactly 15
+  minutes hit this limit. It is not a hang.
+
+Every ceiling is fixed when a session's container is **created**. A session reattaches to its existing
+container. Thus a new ceiling reaches only sessions whose containers are created after the deploy.
+
+## Project secrets
+
+A project's containers get exactly the secrets its `sandbox.json` lists, under the same names. Nothing
+else from the host reaches a container, and no secret goes to every session.
+
+Each secret is an AWS SSM Parameter Store parameter at:
+
+```
+<FACTORY_SSM_PARAMETER_PATH>/projects/<owner>/<name>/<NAME>
+```
+
+For example `/mastra-factory/projects/koval-yurko/eleven-labs-english-agent/VERCEL_TOKEN`. Use the
+`SecureString` type. Write the slug in lower case. The server loads this subtree at boot, beside the
+other parameters, with the same credentials (`README.md` owns them). There is no `.env` override for a
+project secret, and the `parameter_store` agent tool does not list or read this subtree.
+
+**Rules:**
+
+- Only SSM. Without `FACTORY_SSM_PARAMETER_PATH`, a session of a project that lists secrets is refused.
+- A listed secret with no value refuses the session before a container is created. The error names the
+  parameter. An agent whose CLI is not logged in fails later and far from the cause, so it does not
+  start.
+- A parameter that `sandbox.json` does not list is not forwarded.
+- The server reads SSM at boot. After you change a parameter, restart the server.
+- A secret is applied when the container is **created**. An existing session keeps its old value until
+  its container is removed.
+
+**What a secret may be.** Anything in the container can read it: the agent, and every script in a
+repository it clones. Use tokens scoped to that one project. Prefer a robot account, or an account that
+only this deployment uses. Treat a token as given to the agent, not kept from it.
+
+The secrets of `koval-yurko/eleven-labs-english-agent`:
+
+| Name | What it is | How to obtain it |
+|---|---|---|
+| `EXPO_TOKEN` | Expo access token; the EAS CLI logs in with it (`eas whoami`) | expo.dev → account settings → Access tokens |
+| `VERCEL_TOKEN` | Vercel access token; the Vercel CLI logs in with it. It must reach every project below | vercel.com → Account Settings → Tokens |
+| `VERCEL_ORG_ID` | the id of the Vercel team (or user) that owns the projects | team Settings → General → Team ID |
+| `VERCEL_PROJECT_API_ID` | the id of the API project | project Settings → General → Project ID |
+
+The repository has several Vercel projects, and one CLI works with all of them. Thus the container
+never holds `VERCEL_PROJECT_ID`: with `VERCEL_ORG_ID`, the CLI would work only with that one project.
+The agent sets `VERCEL_PROJECT_ID` for one command (the `vercel-cli` skill). A project command
+without it stops with the CLI error "You specified `VERCEL_ORG_ID` but you forgot to specify
+`VERCEL_PROJECT_ID`", so it cannot reach the wrong project; team commands (`vercel project ls`) work
+without it. Do not use the name `VERCEL_TEAM_ID`: the CLI reads it too and adds it to every API call.
+
+To add another project, add a parameter `VERCEL_PROJECT_<NAME>_ID` (for example
+`VERCEL_PROJECT_WEB_ID`), add the name to `secrets` in that project's `sandbox.json`, and restart the
+server after the deploy. All projects must be in the `VERCEL_ORG_ID` team, and the token must reach
+them; a project in another team needs its own pair of names.
+
+## Images
+
+**The shared image** (`factory-sandbox.Dockerfile`) is `node:22-bookworm-slim` plus `git`,
+`ca-certificates`, `curl`, `gnupg`, `openssh-client`, `less` and the GitHub CLI (`gh`, from
+`https://cli.github.com/packages` under its own `signed-by` keyring). A second layer adds a generic
+toolchain: `build-essential`, `python3`, `python3-pip`, `python3-venv`, `ripgrep`, `jq`, `unzip`. On
+bookworm, `python3-pip` is an externally-managed environment (PEP 668), so a session must use
+`python3 -m venv`. `corepack enable` makes `npm`, `pnpm` and `yarn` resolve. It is built with an empty
+build context and copies nothing.
+
+**A project image** (`projects/<owner>/<name>/Dockerfile`) is written from scratch for that repository.
+It does not use `FROM` with the shared image, so it holds only the tools its sessions use. Its build
+context is its own folder, so a `COPY` can reach only the files in that folder. The image for
+`koval-yurko/eleven-labs-english-agent` adds the EAS CLI (`eas-cli`) and the Vercel CLI, each at a
+pinned version. The `eas-cli` skill under `src/mastra/public/factory-skills/` tells the agent how to use
+`eas` where it is installed.
+
+**The session contract.** Every image must have these. The image pipeline checks them on the finished
+image and removes an image that fails:
+
+- `git` and `gh` — the repository is cloned **inside** the container, and pull requests are opened from it;
+- `node` and `corepack` — a checkout picks its own package manager;
+- `WORKDIR /workspace` — the clone path; see `MASTRACODE_SANDBOX_WORKDIR`;
+- a `CMD` or `ENTRYPOINT` that keeps running, conventionally `sleep infinity` — the runtime gives no
+  command, so an image with nothing to run stops before the agent types anything;
+- the `arm64` architecture — another architecture runs under emulation, slowly enough to look like a hang.
+
+Images define no user, so session commands run as root.
+
+**Rules for a Dockerfile.** Each `FROM` must name its base by digest (`image@sha256:…`), or an earlier
+stage. Do not put a credential in `ENV`, `ARG` or a file: secrets arrive from SSM when the container is
+created. The build refuses an `.env` file or a symbolic link in a build context.
+
+## Tags
+
+Every tag has the form `YYYY-MM-DD-<hash>`:
+
+- the shared image is `factory-sandbox:<date>-<hash>`;
+- a project image is `factory-sandbox/<owner>/<name>:<date>-<hash>`.
+
+`<hash>` is the first 12 hex digits of a SHA-256 over the image inputs: the Dockerfile and every file of
+the build context, without `sandbox.json`. `<date>` is the commit date of the last commit that touched
+those inputs. Thus the same commit gives the same tags on every machine. `npm run build` writes the tags
+into the catalog, and the image pipeline builds them, and the two steps do not need to talk.
+
+Results:
+
+- A change to a Dockerfile or to a file in a build context gives a new tag, and the pipeline builds it.
+- A change to `sandbox.json` only (ceilings, secrets) builds nothing.
+- Without a change, nothing is built. A tag never moves to another image.
+- To take a base-image update, change the digest in `FROM`. To rebuild with no other change, edit the
+  Dockerfile (for example, a version).
+- Files that git does not track yet have no commit date. Then the date is today (UTC), so a local tag
+  can differ from the tag after the commit.
+
+## The image pipeline
+
+`.github/workflows/sandbox-images.yml` builds every tag that the commit names and that the engine does
+not have. `deploy.yml` calls it as its first job on each push to `main`, so a release never names an
+image that is not built. You can also run it by hand: Actions → sandbox-images → Run workflow. The
+runner's job-started hook (`actions-runner/hooks/job-started.sh`) accepts this workflow only from `main`.
+
+By hand, on this host, from the repository root:
+
+```bash
+node src/build/sandbox-images.ts plan                      # every tag, and whether the engine has it
+npm run sandbox:build                                      # build every missing tag
+npm run sandbox:build -- koval-yurko/eleven-labs-english-agent   # one project only
+```
+
+Each build adds these labels: `factory.sandbox.inputs` (the hash), `factory.sandbox.slug` and
+`org.opencontainers.image.revision` (the commit).
+
+## The image check at deploy
+
+When `FACTORY_SANDBOX_PROVIDER=docker`, `ops/release-lib.sh` checks every tag in the release's
+`sandbox-catalog.json` before it activates the release. This includes a deploy, a deploy of a stored
+release from GitHub, and `ops/rollback.sh`. A missing tag stops the activation and names the tag. A
+release built before the catalog existed has none, and is not checked.
+
+## Rollback
+
+A release rollback is a sandbox rollback: the older release carries its older catalog and tags. It works
+only while the older images are still on the engine.
+
+**Warning:** do not delete an image that a stored release names. `docker image prune -a` removes every
+image that no container uses, which includes the rollback targets. To see which tags the stored
+releases need:
+
+```bash
+jq -r '.default.image, (.projects[].image // empty)' releases/*/output/sandbox-catalog.json | sort -u
+docker images 'factory-sandbox*'
+```
+
+Existing session containers keep the image they were created from. A rollback reaches sessions whose
+containers are created after it.
 
 ## `FACTORY_SANDBOX_PROVIDER`
 
-**What the value must contain.** The literal string `docker` to run sessions in the per-session
-containers this image serves, or `local` to run them as the server process on this host instead.
+**What the value must contain.** The literal string `docker` to run sessions in per-session containers,
+or `local` to run them as the server process on this host.
 
 **How to choose it.** `docker` is the value this host is built for; `local` is a diagnostic fallback
 that gives up isolation. `docker` is checked ahead of every cloud provider, so it keeps work on this
 host structurally: a stray `MASTRA_PROJECT_ID`, `MASTRA_ENVIRONMENT_ID` or `E2B_API_KEY` left in `.env`
-cannot relocate a session off this machine while it is set. Anything else — unset, `DOCKER`, `podman` —
-is not a selection: `src/mastra/config/sandbox.ts` falls through to automatic selection, meaning Mastra
-Platform first, then direct E2B, then local — the off-host relocation the Docker sandbox replaces. The
-value is matched after trimming, so surrounding spaces are harmless, but the case must be exact.
-
-## `FACTORY_SANDBOX_IMAGE`
-
-**What the value must contain.** A date-stamped image reference of the form
-`factory-sandbox:YYYY-MM-DD`, naming an image that exists in the local image store of the engine
-`DOCKER_HOST` points at. Never `latest` — a moving tag makes a bad image impossible to roll back from.
-
-A value that is neither blank nor of that form stops the **server** at startup, before any session
-exists: `npm start` and `npm run dev` both refuse to come up and the error names this key. That is a
-different failure from the blank case below — nothing is running, so there is no session view to open
-and no container to look for. Fix the line in `.env` and start the server again.
-
-**How to obtain it.** Build the image (below) and use the tag you built. The tag history table at the
-bottom of this file records which ones exist. There is no default and none is invented: with
-`FACTORY_SANDBOX_PROVIDER=docker` and this key blank, the first session refuses to start and the error
-names this key. That refusal is deliberate — the sandbox package's own default is `node:22-slim`, which
-carries neither `git` nor `gh`, so falling back to it would trade a named error for a session that only
-fails once the agent reaches for git.
-
-## `FACTORY_SANDBOX_MEMORY_GIB`
-
-**What the value must contain.** A whole number of gibibytes — the hard memory ceiling for one
-session's container. It is a cap, not a reservation: exceeding it OOM-kills that container instead of
-the host. Whole gibibytes only — there is no way to express a fraction of one here, and anything that
-is not a run of digits — `-1`, `2.5`, `1e3`, `abc` — falls back to the default, `10`, rather than
-being rounded into something plausible. So do `0` and a run of digits too long for the server to hold
-exactly, which is anything past sixteen or so digits: those fall back as well rather than being
-refused, so a number that absurd gets a 10 GiB container and no error.
-
-Within the range the server can hold, the most this key may ask for is **30**: the 10 GiB per container
-below times the three concurrent sessions this host is sized for, which is the entire share of the VM's
-32 GiB that sandboxes get — a container above it could not be served even as the only live session. A
-larger number in that range is not capped or rounded down — the session that would use it is refused
-before any container is created, with an error naming this key, its value and that 30. Nothing is
-relocated: a refused session does not fall back to this host or to a cloud provider.
-
-That 30 is not a setting. It is compiled into `src/mastra/config/sandbox.ts` as the product of the
-default ceiling below and the default concurrency count, so raising it is a code edit there, and a code
-edit alone would only move the number past what the VM can serve: growing the VM and raising the two
-constants are both required, in the same change.
-
-**How to choose it.** `10` on this host. The Colima VM has 32 GiB, Postgres takes roughly 2 GiB, and
-three concurrent sandboxes at 10 GiB each come to 32 exactly — a deliberate full commit, not headroom.
-That is safe only because caps are ceilings and not reservations: three sandboxes simultaneously at
-their ceiling would leave the VM itself nothing.
-
-The three in that arithmetic is the concurrency this host is sized for, and `MASTRACODE_MAX_SANDBOXES`
-below is what holds sessions to it — a fourth concurrent session is refused rather than given its own
-10 GiB ceiling. The two numbers are one decision: raising this ceiling without lowering that count, or
-raising that count without growing the VM, oversubscribes the host in exactly the way the arithmetic
-above rules out. Raise this number only by growing the VM.
-
-## `FACTORY_SANDBOX_CPUS`
-
-**What the value must contain.** A whole number of cores — the hard CPU ceiling for one session's
-container, applied as a CFS quota against the 100 ms period the server pins alongside it. Whole cores
-only — a fraction of a core cannot be expressed here, and anything that is not a run of digits — `-1`,
-`2.5`, `1e3`, `abc` — falls back to the default, `4`, rather than being rounded into something
-plausible. So do `0` and a run of digits too long for the server to hold exactly, exactly as for the
-memory ceiling above: those fall back rather than being refused.
-
-Within the range the server can hold, the most this key may ask for is **12**: the 4 cores per container
-below times the three concurrent sessions this host is sized for, which is every core the VM has. A
-larger number in that range is refused the same way the memory ceiling above is — the session is refused
-before any container is created, with an error naming this key, its value and that 12, and nothing is
-relocated. And like that one, the 12 is compiled into `src/mastra/config/sandbox.ts` as the product of
-the default below and the default concurrency count, so raising it means editing those constants and
-growing the VM together, not either on its own.
-
-**How to choose it.** `4` on this host. The Colima VM has 12 cores and Postgres takes roughly one, so
-three sandboxes at 4 cores each is a mild, deliberate overcommit. The three is the same concurrency
-`MASTRACODE_MAX_SANDBOXES` holds sessions to. Overcommitting CPU is the benign case: caps are ceilings,
-contending containers are throttled rather than killed, and the memory number is the one that actually
-binds — which is why the concurrency count is chosen against memory and not against cores.
+cannot move a session off this machine while it is set. Anything else — unset, `DOCKER`, `podman` — is
+not a selection: `src/mastra/config/sandbox.ts` falls through to automatic selection, meaning Mastra
+Platform first, then direct E2B, then local. The value is matched after trimming, but the case must be
+exact.
 
 ## `MASTRACODE_MAX_SANDBOXES`
 
 **What the value must contain.** A whole number of concurrent docker-provider session containers — the
-most this server process will run at once. Anything that is not a run of digits — `-1`, `2.5`, `1e3`,
-`abc` — stops `npm start` before the server boots, naming this key, rather than being quietly ignored
-or rounded into something plausible. Blank and `0` are the two values that reach the code, and both
-fall back to the default, `3`. There is no value meaning "unlimited" and no way to turn the cap off.
-The key only applies to `FACTORY_SANDBOX_PROVIDER=docker`; `local` and the cloud providers are
-uncapped, because the number is sized against this host's memory, which they do not consume.
+most this server process runs at once. Anything that is not a run of digits stops `npm start` before
+the server boots, naming this key. Blank and `0` fall back to the default, `3`. There is no value for
+"unlimited". The key applies only to `FACTORY_SANDBOX_PROVIDER=docker`.
 
-**How to choose it.** `10` on this host, a deliberate oversubscription chosen on 2026-10-11 for
-Slack-driven parallel sessions. The sizing arithmetic from `FACTORY_SANDBOX_MEMORY_GIB` above still
-says three: 32 GiB in the VM, roughly 2 for Postgres, 10 GiB ceiling per session container. Ten
-containers at that ceiling are 100 GiB against a 32 GiB VM, so it holds only while most sessions sit
-well under their ceiling. Several busy sessions at once get OOM-killed, and a container the VM kills
-loses its session state. Go back to `3` if that starts happening, or grow the VM. Change it only together with that
-ceiling — the pair has to keep multiplying out to what the VM has. Raising it is the supported move
-when the host has memory for another container; there is nothing to lower on the per-container side
-that buys concurrency for free, because those are ceilings a busy session will actually reach.
+**How to choose it.** `10` on this host, chosen on 2026-10-11 for Slack-driven parallel sessions. 10
+containers at the shared 1 GiB ceiling use the 10 GiB budget exactly. A project with a higher
+`memoryGib` makes this an overcommit: when several busy sessions run at once, the VM kills containers,
+and a killed container loses its session state. If that happens, lower this key, lower the project
+ceilings, or grow the VM.
 
-What the cap does when it binds: the session that would be the fourth is refused before any container
-is created, with an error naming this key and its current value. Nothing is relocated — a refused
-session does not fall back to running on this host or on a cloud provider. A session that already has
-a container is reattaching, not claiming a new slot, so a resumed session is admitted even at the cap.
+When the cap binds, the next session is refused before a container is created, with an error that
+names this key and its value. Nothing is relocated. A session that already has a container is
+reattaching and is admitted even at the cap.
 
-What frees a slot is narrower than it looks. Closing a session's view in the browser does nothing —
-only two things release a sandbox: the session's work item reaching a terminal stage (the server
-retires the session), and deleting the session outright. Neither is instant: the slot is released when
-the container stop actually completes, which takes as long as stopping that container takes. And a
-slot whose sandbox failed to start, or failed to tear down, is not released at all — those end up in
-an `error` state that deliberately keeps its slot, because a container may well still be running under
-it, so only restarting the server clears them.
+Only 2 things free a slot: the session's work item reaches a terminal stage, or the session is deleted.
+Closing the view in the browser does nothing. The slot is released when the container stop completes.
+A sandbox whose start or teardown failed keeps its slot (state `error`) until the server restarts,
+because a container may still run under it.
 
-The count is **per server process**, and that is the one place it is inexact. Session containers have
-no idle teardown and a resumed session finds its container by asking the engine, so containers outlive
-a server restart while the count does not — restart with three containers still up and three more
-sessions are admissible, for six containers on a host sized for three. After a restart that left
-containers behind, check `docker ps --filter label=mastra.sandbox=true` and remove the ones whose
-sessions are finished.
+The count is **per server process**. Containers outlive a server restart, but the count does not. After
+a restart that left containers behind, run `docker ps --filter label=mastra.sandbox=true` and remove the
+ones whose sessions are finished.
 
 ## `MASTRACODE_SANDBOX_WORKDIR`
 
-**What the value must contain.** An absolute path **inside** the container, under which each
-repository gets one directory named after the repository alone — `/workspace/mastra-factory`, not
-`/workspace/<owner>/mastra-factory`. The owner is not part of the path, so two repositories with the
-same name under different owners would collide here. `/workspace`.
+**What the value must contain.** An absolute path **inside** the container. Each repository gets one
+directory under it, named after the repository alone — `/workspace/mastra-factory`, not
+`/workspace/<owner>/mastra-factory`. Two repositories with the same name under different owners collide
+here. `/workspace`.
 
-**How to choose it.** Keep it equal to the `WORKDIR` in `factory-sandbox.Dockerfile`. They are two
-statements of the same directory and there is no reason to move either; if one ever changes, change
-both in the same commit. This path never refers to anything on this host.
+**How to choose it.** Keep it `/workspace`. The image pipeline checks that every image has
+`WORKDIR /workspace`; if you ever change one, change all images, the check in
+`src/build/sandbox-images.ts` and this key in the same commit. This path never refers to this host.
 
 ## `MASTRACODE_LOCAL_SANDBOX_ROOT`
 
-**What the value must contain.** An absolute path **on this host** under which the local provider
-checks repositories out, one directory per repository. Unset it defaults to
-`~/.mastracode/web/sandboxes`. This is the one key on this page that names a directory on this
-machine rather than inside a container.
+**What the value must contain.** An absolute path **on this host** under which the local provider checks
+repositories out, one directory per repository. Unset, it defaults to `~/.mastracode/web/sandboxes`.
 
-**How to choose it.** Leave it unset. It is read only when `FACTORY_SANDBOX_PROVIDER=local`, which
-this host does not run outside a diagnostic — and setting it does not make the local provider safer:
-the checkout still runs as the server process on the shared host filesystem, with no isolation
-between sessions, wherever this points. If a diagnostic does need the local provider, point this
-somewhere outside this repository, because the checkout and its `node_modules` would otherwise land
-inside the tree the Factory Server is running from.
+**How to choose it.** Leave it unset. It is read only when `FACTORY_SANDBOX_PROVIDER=local`, which this
+host does not run outside a diagnostic. It does not make the local provider safer: the checkout still
+runs as the server process on the shared host filesystem. For a diagnostic, point it outside this
+repository, because the checkout and its `node_modules` would otherwise land inside the tree the server
+runs from.
 
 ## `E2B_API_KEY`
 
 **What the value must contain.** Nothing — it must stay **unset** on this deployment.
 
-**How to choose it.** It is a credential for E2B's cloud VMs, and a set value is not a selection you
-make here: it is reached only when `FACTORY_SANDBOX_PROVIDER` is neither `docker` nor `local` and the
-Mastra Platform variables are incomplete, and then it silently runs sessions on someone else's
-machine. That is the off-host relocation this whole subject exists to replace. With
-`FACTORY_SANDBOX_PROVIDER=docker` the docker branch is evaluated first, so a stray value here cannot
-move work off this host — a structural guarantee rather than a matter of keeping `.env` tidy, and the
-reason the key is listed at all rather than left out and forgotten.
-
-## `EXPO_TOKEN`
-
-**What the value must contain.** An Expo access token, or nothing. When set, it is forwarded into every
-docker-provider session container as `EXPO_TOKEN`, which is how the EAS CLI in the image authenticates
-— `eas whoami` then prints the account instead of `Not logged in`. Blank forwards nothing. No other
-host variable reaches a session container; this is the only one.
-
-**How to obtain it.** expo.dev → account settings → Access tokens → create a token. Prefer a robot
-user's token or one from an account that only this deployment uses: the token is readable by
-anything running in the container, which includes the agent and any script in a repository it
-clones, so treat it as handed to the agent rather than kept from it.
-
-Like the ceilings below, it is applied when a session's container is **created**. Setting, changing
-or revoking it and restarting the server reaches only sessions whose containers are created after the
-restart; an existing session keeps the value it started with until its container is removed.
-
-## Ceilings with no key
-
-Two more limits apply to every session container and neither is settable from `.env` — the server fixes
-both, so changing one is a code edit:
-
-- **Process limit: 4096.** The maximum number of processes a session container may have at once. A
-  fork-bomb or a runaway parallel build hits this as "resource temporarily unavailable" rather than
-  taking the VM down. The container runs an init process that reaps exited children, so processes
-  abandoned by a killed command do not accumulate against it.
-- **Command timeout: 15 minutes.** The default ceiling on a single command. A dependency install or a
-  full test suite that is killed at almost exactly 15 minutes has hit this and not a hang — that is the
-  only symptom it produces, and the number appears nowhere in the session's own output.
-
-Swap is also disabled: the swap ceiling is pinned equal to the memory ceiling, so
-`FACTORY_SANDBOX_MEMORY_GIB` is the container's whole memory budget. Left unset, Docker would allow a
-further equal amount of swap and the cap would be half of what it claims.
-
-Every ceiling on this page is fixed when a session's container is **created**, and a session reattaches
-to its existing container rather than replacing it. So editing `FACTORY_SANDBOX_MEMORY_GIB` or
-`FACTORY_SANDBOX_CPUS` and restarting the server changes nothing for a session that already has a
-container — it keeps the numbers it was created with, and the server logs a warning saying the
-requested values cannot be applied. The new ceilings reach only sessions whose containers are created
-after the restart, the same way a retag reaches only new containers. To move an existing session onto
-new numbers its container has to be removed, which ends that session's state; there is no in-place
-resize.
+**How to choose it.** It is a credential for E2B's cloud VMs. It is reached only when
+`FACTORY_SANDBOX_PROVIDER` is neither `docker` nor `local` and the Mastra Platform variables are
+incomplete, and then it silently runs sessions on someone else's machine. With
+`FACTORY_SANDBOX_PROVIDER=docker` the docker branch is evaluated first, so a stray value cannot move work
+off this host.
 
 ## If a session fails to start
 
-- **The error names `FACTORY_SANDBOX_IMAGE`.** The key is unset or blank while
-  `FACTORY_SANDBOX_PROVIDER=docker`. There is no default to fall back to; set it to a tag from the
-  history table below and restart. A non-blank value that is not a date-stamped `factory-sandbox:`
-  tag never reaches this point — it stops the server at startup instead — so a session reaching this
-  error means the key is blank. A tag of the right shape that this engine does not hold is not caught
-  at startup either, and surfaces as the registry error below rather than as this one.
-- **The error names `MASTRACODE_MAX_SANDBOXES`.** This server process is already holding sandboxes for
-  as many sessions as that key allows, so this one was refused before a container was created —
-  nothing is wrong with the image or the engine. Free a slot by letting a running session's work item
-  reach a terminal stage or by deleting one of those sessions (closing the view does not), and expect
-  the slot back when that container's stop completes rather than at once; or raise the key and restart
-  if this host has memory for another container (see the section above). Restarting also clears slots
-  held by sandboxes whose start or teardown failed, which nothing else releases. Note the count is per
-  server process: if the server was restarted while session containers were running, the ones it does
-  not know about are still holding memory even though they are not counted —
-  `docker ps --filter label=mastra.sandbox=true` is what the engine actually has.
+- **The error names `sandbox-catalog.json`.** The server did not start from a build. `npm run build`
+  writes the file into the build output; `npm run start:release` and `npm run start` run from an output
+  folder. `npm run dev` does not run from a build, so it cannot use the docker sandbox.
+- **The error says a project "lists the sandbox secret(s)".** A listed secret has no value in SSM, or
+  `FACTORY_SSM_PARAMETER_PATH` is not set. Create the parameter that the error names and restart the
+  server. Values are never printed.
+- **The error names `MASTRACODE_MAX_SANDBOXES`.** This process already holds as many sandboxes as that
+  key allows. See the section above.
 - **A registry error — "pull access denied", "repository does not exist", or a timeout reaching
-  `docker.io`.** This is the misleading one. When the tag is not in the local image store the sandbox
-  tries to **pull** it, and `factory-sandbox:YYYY-MM-DD` exists on no registry, so the failure is
-  reported against Docker Hub and names no local cause. It means the tag is missing locally — usually
-  pruned, or never built on this engine, or built against a different `DOCKER_HOST` than the server is
-  using. Confirm with `docker images factory-sandbox`, then either rebuild that tag or point
-  `FACTORY_SANDBOX_IMAGE` at one the list actually shows.
+  `docker.io`.** The tag is not on this engine, so Docker tried to pull it from a registry where it does
+  not exist. The deploy check normally stops this. Run `node src/build/sandbox-images.ts plan` from a
+  checkout of the deployed commit, then `npm run sandbox:build`. Also check that the server uses the
+  same `DOCKER_HOST` as your shell.
 - **A connection error reaching the daemon.** The engine is not running, or the server process does not
-  have `DOCKER_HOST` in its environment — note that the server is a different process from your shell,
-  so exporting it in a terminal does not give it to a `launchd`-started server. `ops/README.md` owns
-  that value and the bring-up procedure.
+  have `DOCKER_HOST`. The server is a different process from your shell. `ops/README.md` owns that value.
 
-## Build
+## If a build fails
 
-Run from the repository root, in a shell where `DOCKER_HOST` is exported.
-
-```bash
-TAG=$(date +%F)                      # e.g. 2026-09-23 — the form is factory-sandbox:YYYY-MM-DD
-docker build --platform linux/arm64 -f sandbox/factory-sandbox.Dockerfile -t "factory-sandbox:$TAG" .
-```
-
-`npm run sandbox:build` runs that build, the smoke test below and the `arm64` check in one go. If they
-all pass, it sets `FACTORY_SANDBOX_IMAGE` in `.env` to the new tag. The line must already exist there.
-Rebuilding on the same date replaces that day's tag. Afterwards, record the tag in the table below
-and restart the server.
-
-`--platform linux/arm64` matches the Apple-silicon VM; an image built for another architecture runs
-under emulation and is slow enough to look like a hang.
-
-The trailing `.` is the build context, and it is the repository root because that is the command this
-subject pins — `-f` and the context are independent arguments, so the context is a choice, not a
-consequence of the `-f` path. The image copies nothing out of it. There is no `.dockerignore`, so the
-whole tree — `node_modules/` and `.env` included — is still transferred to the engine before the first
-instruction runs, which is why the first build spends a visible stretch on "transferring context".
-
-## Smoke test
-
-```bash
-docker run --rm "factory-sandbox:$TAG" sh -c 'git --version && gh --version'
-docker image inspect --format '{{.Architecture}}' "factory-sandbox:$TAG"
-```
-
-Expected: a `git version …` line, then `gh version …` — both must print — and then `arm64`. The
-architecture line is the half the version checks cannot catch: an image built for `amd64` answers
-`git --version` perfectly well and only then runs every session under emulation. The equivalent pinned
-form is `docker run --rm factory-sandbox:<YYYY-MM-DD> sh -c 'git --version && gh --version'`, the same
-command with the date written out.
-
-Record the tag in the table below once this passes, then point `FACTORY_SANDBOX_IMAGE` at it and
-restart the server. Sessions started after the restart are created from that tag.
-
-## If the build fails
-
+- **The plan fails before any build.** A file in this folder is invalid, and the error names it. The
+  same check runs in `npm run build`.
 - **`docker build` cannot connect to the daemon.** The engine is not running or `DOCKER_HOST` is not
-  exported in this shell. Neither is fixed here: see `ops/README.md`.
-- **The `gh` layer fails.** Two causes. The `curl` fetching `githubcli-archive-keyring.gpg` needs
-  `https://cli.github.com` to be reachable from inside the build — a proxy or a blocked egress stops it
-  there, and the layer fails before any `gh` package is seen. Or the write to
-  `/usr/share/keyrings/githubcli-archive-keyring.gpg` fails because the directory does not exist in the
-  base image, which a future base-image change could cause; the fix is an explicit `mkdir -p` ahead of
-  the `curl` in that same chain. A failure at `apt-get install gh` *after* both of those means the
-  source list was written but the repository did not resolve.
-- **The build is killed part-way, or `apt-get` fails writing.** The VM is out of disk. Reclaim with
-  `docker image prune` and `docker system df`, or grow the VM — checkouts plus `node_modules` in
-  long-lived session containers are what fill it over months.
+  exported. See `ops/README.md`.
+- **The `gh` layer fails.** The `curl` of `githubcli-archive-keyring.gpg` needs `https://cli.github.com`
+  from inside the build. Or `/usr/share/keyrings/` does not exist in a new base image; add `mkdir -p`
+  before the `curl`. A failure at `apt-get install gh` after both means the source list did not resolve.
+- **"failed its smoke test and was removed".** The image breaks the session contract above. The message
+  says which part.
+- **The build stops part-way, or `apt-get` fails to write.** The VM is out of disk. Check
+  `docker system df`. Remove only images that no stored release names (see Rollback), or grow the VM.
 
-## Retag and rollback
+## Moving from the old keys
 
-There is no in-place update. Extending the toolchain means editing `factory-sandbox.Dockerfile`,
-building again on a new date, smoke-testing it, and moving `FACTORY_SANDBOX_IMAGE` forward:
+Before this change, `FACTORY_SANDBOX_IMAGE`, `FACTORY_SANDBOX_MEMORY_GIB`, `FACTORY_SANDBOX_CPUS` and a
+global `EXPO_TOKEN` configured every container. The server does not read them now.
 
-```bash
-TAG=$(date +%F)
-docker build --platform linux/arm64 -f sandbox/factory-sandbox.Dockerfile -t "factory-sandbox:$TAG" .
-docker run --rm "factory-sandbox:$TAG" sh -c 'git --version && gh --version'
-docker image inspect --format '{{.Architecture}}' "factory-sandbox:$TAG"
-# then set FACTORY_SANDBOX_IMAGE in .env with the tag written out in full —
-# factory-sandbox:2026-09-23, not "$TAG" — because nothing expands a shell variable
-# in .env; then restart the server
-```
+1. Create the 4 parameters in the table under "Project secrets", under
+   `projects/koval-yurko/eleven-labs-english-agent/`.
+2. Push to `main`. The pipeline builds the images, and the deploy checks them before activation.
+3. Keep the old keys in `.env` and the old `EXPO_TOKEN` parameter until no stored release is older than
+   this change. A rollback to such a release still reads them. Then remove them.
 
-A rebuild with no Dockerfile edit is not automatically a fresh image: the layer cache will reuse
-everything and `FROM node:22-bookworm-slim` is itself a moving tag, so add `--pull` to pick up a new
-base and `--no-cache` when you want every layer genuinely rebuilt — otherwise the new date tag asserts
-a freshness the tag history then records.
-
-Two tags on the same calendar day are one tag: a second build re-points `factory-sandbox:YYYY-MM-DD`
-and leaves the first image dangling, so a rollback to that date returns the image you are rolling back
-*from*. To keep both, suffix the second — `factory-sandbox:2026-09-23b`.
-
-Rolling back is the same edit in reverse: point `FACTORY_SANDBOX_IMAGE` at the previous row's tag and
-restart. That works only while the older image is still in the local store, and nothing guarantees it —
-`docker image prune -a` removes any image no container references, which is exactly the shape of a
-known-good rollback target. Never prune the tag in use or the last known-good one. Keep at least one
-known-good tag; existing session containers keep running on the image they were created from, so a
-rollback takes effect for sessions started after it.
-
-List what the engine actually holds with:
-
-```bash
-docker images factory-sandbox
-```
-
-## Tag history
-
-Newest first. A tag earns a row once its build has passed the smoke test above; the tag in the top row
-is normally the one `FACTORY_SANDBOX_IMAGE` points at, and the rows under it are the rollback targets.
-
-| Tag                        | Built                | Change        |
-|----------------------------|----------------------|---------------|
-| factory-sandbox:2026-10-11 | 2026-10-11 | Rebuild with `--pull --no-cache` after the @mastra/factory 0.20.0 upgrade; no Dockerfile change |
-| factory-sandbox:2026-10-03c | 2026-10-03 | Replace rtk with eas-cli 24.10.0 |
-| factory-sandbox:2026-10-03b | 2026-10-03 | Add rtk 0.51.0 |
-| factory-sandbox:2026-09-23 | 2026-09-23T12:34:56Z | Initial build |
+**Warning:** do step 1 before step 2. If you do not, every session of that project is refused after the
+deploy.

@@ -89,6 +89,27 @@ check_release() {
   is_release_id "$id" || { fail "not a release id: $id"; return 1; }
   [[ -f $RELEASES_DIR/$id/output/index.mjs ]] || { fail "release $id has no output/index.mjs"; return 1; }
   [[ -f $RELEASES_DIR/$id/output/factory/index.html ]] || { fail "release $id has no Factory UI (output/factory/index.html)"; return 1; }
+  check_sandbox_images "$id"
+}
+
+# With the docker sandbox selected, every image the release's sandbox catalog
+# names must exist on this engine: a missing one fails each session that needs
+# it, and only after the release is live. The image pipeline
+# (.github/workflows/sandbox-images.yml) builds them; a rollback needs the old
+# tags, so never prune an image a stored release names (sandbox/README.md).
+# A release built before the catalog existed has none and is not checked.
+check_sandbox_images() {
+  local id=$1 catalog=$RELEASES_DIR/$1/output/sandbox-catalog.json tag missing=()
+  [[ $(env_value FACTORY_SANDBOX_PROVIDER) == docker ]] || return 0
+  [[ -f $catalog ]] || { say "release $id has no sandbox-catalog.json — not checking images"; return 0; }
+  for tag in $(jq -r '[.default.image, (.projects[] | .image // empty)] | unique | .[]' "$catalog"); do
+    DOCKER_HOST=${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock} docker image inspect "$tag" >/dev/null 2>&1 \
+      || missing+=("$tag")
+  done
+  (( ${#missing} == 0 )) || {
+    fail "release $id names sandbox image(s) this engine does not have: ${missing[*]} — run the sandbox-images workflow"
+    return 1
+  }
 }
 
 # Point a link at a release in one rename: a reader sees the old or the new
@@ -307,18 +328,29 @@ restore_database() {
 # Pruning
 # ---------------------------------------------------------------------------
 
-prune_releases() {
+# The releases pruning would delete, oldest first: all but the newest
+# KEEP_RELEASES, never current, previous or a pinned one.
+releases_to_prune() {
   local -a ids keep
-  local id current previous
+  local id start
   ids=($(release_ids))
-  current=$(link_target current)
-  previous=$(link_target previous)
-  keep=(${ids[-$KEEP_RELEASES,-1]} $current $previous)
+  # Not ${ids[-KEEP_RELEASES,-1]}: with fewer ids than that, zsh returns an
+  # empty slice, and every release but current and previous would be deleted.
+  start=$(( ${#ids} > KEEP_RELEASES ? ${#ids} - KEEP_RELEASES + 1 : 1 ))
+  keep=(${ids[$start,-1]} $(link_target current) $(link_target previous))
   for id in $ids; do
     (( ${keep[(Ie)$id]} )) && continue
     [[ -e $RELEASES_DIR/pinned/$id ]] && continue
+    print -r -- "$id"
+  done
+}
+
+prune_releases() {
+  local id
+  for id in $(releases_to_prune); do
     rm -rf -- "$RELEASES_DIR/$id"
     say "pruned $id"
+    record "pruned $id"
   done
 }
 

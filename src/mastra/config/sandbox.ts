@@ -16,16 +16,20 @@
  * operator-facing record of the same guarantee.
  *
  * This module is the one first-party read site for every key below (AD-7). See
- * `README.md` in this directory.
+ * `README.md` in this directory. Images, ceilings and secret lists are not keys:
+ * they come from the sandbox catalog the build put in the output folder, read on
+ * the first Docker session (`loadSandboxCatalog`).
  */
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { LocalSandbox } from '@mastra/core/workspace';
 import { DockerSandbox, type DockerSandboxOptions } from '@mastra/docker';
 import { PlatformSandbox, createRepoTemplate as createPlatformRepoTemplate } from '@mastra/platform-workspace';
 import { E2BSandbox, createRepoTemplate as createE2BRepoTemplate } from '@mastra/e2b';
-import { env } from './env';
+import { env, projectSecretName, projectSecrets } from './env';
 import { positiveInt } from './positive-int';
+import { SANDBOX_CATALOG_FILE, normalizeSlug, parseSandboxCatalog, type SandboxCatalog } from './sandbox-catalog';
 import type { MastraSandbox } from '@mastra/core/workspace';
 import type { FactorySandboxContext } from '@mastra/factory';
 
@@ -63,58 +67,106 @@ export function localSandboxEnv(): Record<string, string> {
 }
 
 /**
- * Host env forwarded into every Docker session container. Unlike the local
- * allow-list above, which keeps a host-run sandbox working, each entry here is
- * a credential deliberately handed to the agent: anything in the container —
- * the agent, or a repo it has cloned — can read it, so only keys scoped for
- * that belong here. `sandbox/README.md` is the record.
- *
- * Docker applies it when the container is CREATED, so a session reattaching to
- * an existing container keeps the environment it was created with.
+ * Where a project's secrets come from: the SSM subtree `./env` loaded at boot.
+ * A parameter so a test can hand in its own; production passes nothing.
  *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxEnv(): Record<string, string> {
-  const forwarded: Record<string, string> = {};
-  const expoToken = env.EXPO_TOKEN?.trim();
-  if (expoToken) forwarded.EXPO_TOKEN = expoToken;
-  return forwarded;
+export interface ProjectSecretSource {
+  /** The loaded secrets of `slug` (lower-case `owner/name`). */
+  values(slug: string): Readonly<Record<string, string>>;
+  /** The SSM parameter a secret must be stored as, or undefined without Parameter Store. */
+  parameter(slug: string, key: string): string | undefined;
 }
 
-// Hard ceilings for one Docker-sandbox session container. They are ceilings,
-// not reservations: `sandbox/README.md` explains why the numbers for this host
-// are what they are. That sizing assumes a concurrent-session count, and
-// `MASTRACODE_MAX_SANDBOXES` is that count — applied by `admitDockerSession`
-// below, which is the only place it can be applied: no installed package caps
-// concurrent sessions (`maxSandboxes` went away with the sandbox fleet — there
-// is one sandbox per session and no pool to cap), and the `sandbox:` slot is
-// the one piece of first-party code that runs before a session's container is
-// created.
-//
+const ssmProjectSecrets: ProjectSecretSource = { values: projectSecrets, parameter: projectSecretName };
+
+/**
+ * The env a project's Docker session containers get: exactly the secrets its
+ * catalog entry lists, under the same names. Nothing else from the host reaches
+ * a container — there is no secret every session gets. Anything in the
+ * container (the agent, or a repo it has cloned) can read these, so a project
+ * lists only credentials scoped for that. `sandbox/README.md` is the record.
+ *
+ * A listed secret with no value refuses the session rather than starting it
+ * without: an agent whose CLI is not logged in fails later, far from the cause.
+ *
+ * Docker applies the env when the container is CREATED, so a session
+ * reattaching to an existing container keeps the environment it was created with.
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export function projectSandboxEnv(
+  slug: string,
+  names: readonly string[],
+  secrets: ProjectSecretSource = ssmProjectSecrets,
+): Record<string, string> {
+  const values = secrets.values(slug);
+  const forwarded: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const name of names) {
+    const value = values[name]?.trim();
+    if (value) forwarded[name] = value;
+    else missing.push(name);
+  }
+  if (missing.length === 0) return forwarded;
+
+  const where = missing.map(name => secrets.parameter(slug, name));
+  if (where.some(parameter => parameter === undefined)) {
+    throw new Error(
+      `${slug} lists the sandbox secret(s) ${missing.join(', ')}, which come only from AWS SSM Parameter Store, ` +
+        'and FACTORY_SSM_PARAMETER_PATH is not set, so this session was refused before a container was created. ' +
+        'See sandbox/README.md.',
+    );
+  }
+  throw new Error(
+    `${slug} lists the sandbox secret(s) ${missing.join(', ')}, but Parameter Store has no value for ` +
+      `${where.join(', ')}, so this session was refused before a container was created. Set them and restart ` +
+      'the server (sandbox/README.md).',
+  );
+}
+
+/**
+ * The sandbox catalog this server was built with (`./sandbox-catalog`):
+ * `npm run build` writes it into the output folder, which is the server's cwd
+ * under `mastra start`. Read once, on the first Docker session, and kept; a
+ * failed read is not kept, so the next session tries again.
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export function loadSandboxCatalog(dir: string = process.cwd()): SandboxCatalog {
+  const path = join(dir, SANDBOX_CATALOG_FILE);
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    throw new Error(
+      `${path} is missing, so the docker sandbox has no image to run. \`npm run build\` writes it into the build ` +
+        'output; start the server from a build (see sandbox/README.md).',
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${path} is not valid JSON. Rebuild with \`npm run build\`.`);
+  }
+  return parseSandboxCatalog(parsed, path);
+}
+
+let builtCatalog: SandboxCatalog | undefined;
+const productionCatalog = (): SandboxCatalog => (builtCatalog ??= loadSandboxCatalog());
+
 // Docker's CPU limit is a CFS quota, which only means "N cores" relative to the
 // period it is divided by — so the period is pinned here rather than left to
 // the daemon's default, and the quota is always derived from it.
 const DOCKER_SANDBOX_CPU_PERIOD_US = 100_000;
-const DOCKER_SANDBOX_DEFAULT_CPUS = 4;
-const DOCKER_SANDBOX_DEFAULT_MEMORY_GIB = 10;
-// The third leg of the same arithmetic as the two ceilings above: 3 × 10 GiB is
-// this host's whole memory budget. Like them it is a default, not a switch —
-// there is no value meaning "unlimited", and a malformed one falls back here.
+// The cap when `MASTRACODE_MAX_SANDBOXES` is unset: a conservative number, below
+// what the 10 GiB sandbox budget holds at the 1 GiB default in
+// `sandbox/sandbox.json`. A default, not a switch — there is no value meaning
+// "unlimited", and a malformed one falls back here. Applied by
+// `admitDockerSession` below.
 const DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES = 3;
-// The upper bound each per-container knob is held to: this host's whole sandbox
-// budget, written as the product of the per-container default and the
-// concurrency it was sized against so the derivation cannot drift from either.
-// The two products are 30 GiB — the share of the 32 GiB VM that sandboxes get
-// once Postgres has its couple — and 12 cores, which is every core the VM has.
-// Two different derivations landing on two numbers `sandbox/README.md` states,
-// not one whole-VM figure.
-// A knob above its bound cannot be served even as the only live session, and
-// nothing downstream would say so: the value is multiplied into
-// `HostConfig.Memory` / a CFS quota, and Docker takes the number and fails the
-// container inside the daemon instead of at the knob. Inclusive — a value equal
-// to the bound is accepted.
-const DOCKER_SANDBOX_MAX_MEMORY_GIB = DOCKER_SANDBOX_DEFAULT_MEMORY_GIB * DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
-const DOCKER_SANDBOX_MAX_CPUS = DOCKER_SANDBOX_DEFAULT_CPUS * DOCKER_SANDBOX_DEFAULT_MAX_SANDBOXES;
 const BYTES_PER_GIB = 1024 ** 3;
 // `HostConfig.PidsLimit`. An init process (`HostConfig.Init`, pinned below)
 // reaps the zombies an aborted command leaves behind, which is what keeps this
@@ -127,6 +179,13 @@ const DOCKER_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
 /**
  * Build the Docker sandbox options for one session.
  *
+ * `repoFullName` picks the session's project in the catalog; a project's own
+ * image and ceilings win field by field over the shared defaults, and its listed
+ * secrets are its container's whole env. A session with no repository, or one
+ * the catalog does not name, gets the shared image and ceilings and no secrets.
+ * The catalog was validated when it was read — tags, and ceilings inside the
+ * host bounds — so nothing here can hand Docker an over-bound number.
+ *
  * Extracted from the `sandbox:` callback because these numbers are the part of
  * the Docker branch that can silently be wrong — a quota computed against the
  * wrong period, or gibibytes passed where bytes were meant, is invisible until
@@ -136,50 +195,21 @@ const DOCKER_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
  *
  * Exported for `sandbox.test.ts` only — nothing else imports it.
  */
-export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
-  // No honest default exists. `DockerSandboxOptions.image` falls back to
-  // `node:22-slim`, which carries neither `git` nor `gh`, so a session started
-  // on it fails at first use with Factory's `git-missing` — the exact failure
-  // the purpose-built image exists to prevent. The only correct value is a tag
-  // someone built on this host, so refuse and name the key. The slot is called
-  // per session, so this surfaces at the first session rather than at boot.
-  const image = env.FACTORY_SANDBOX_IMAGE?.trim();
-  if (!image) {
-    throw new Error(
-      'FACTORY_SANDBOX_IMAGE is required when the docker sandbox provider is selected. Set it to an image ' +
-        'built on this host that carries git and the GitHub CLI (see sandbox/README.md); there is no safe default.',
-    );
-  }
+export function dockerSandboxOptions(
+  sessionId: string,
+  repoFullName?: string,
+  catalog: SandboxCatalog = productionCatalog(),
+  secrets: ProjectSecretSource = ssmProjectSecrets,
+): DockerSandboxOptions {
+  const slug = normalizeSlug(repoFullName);
+  const project = slug ? catalog.projects[slug] : undefined;
 
-  const memoryGib = positiveInt(env.FACTORY_SANDBOX_MEMORY_GIB) ?? DOCKER_SANDBOX_DEFAULT_MEMORY_GIB;
-  const cpus = positiveInt(env.FACTORY_SANDBOX_CPUS) ?? DOCKER_SANDBOX_DEFAULT_CPUS;
-
-  // Refuse a knob raised past what this host can serve, before it is multiplied
-  // into a byte count or a CFS quota. Clamping to the bound or falling back to
-  // the default would both hide the mistake — a `.env` asking for 64 GiB would
-  // quietly get 30 or 10 — while Docker accepts any number it is handed and
-  // fails the container inside the daemon, far from the key that caused it. So
-  // this throws and names the key, exactly as the missing image above does, and
-  // for the same reason: leaving the docker branch by throwing is what keeps a
-  // refusal from falling through to the Platform or E2B arms in `selectSandbox`.
-  if (memoryGib > DOCKER_SANDBOX_MAX_MEMORY_GIB) {
-    throw new Error(
-      `FACTORY_SANDBOX_MEMORY_GIB is ${memoryGib}, which is more than the ${DOCKER_SANDBOX_MAX_MEMORY_GIB} GiB ` +
-        'this host can give one session container, so this session was refused before a container was created. ' +
-        'Lower it to that number or below; the bound itself is not a setting — sandbox/README.md says what ' +
-        'raising it takes.',
-    );
-  }
-  if (cpus > DOCKER_SANDBOX_MAX_CPUS) {
-    throw new Error(
-      `FACTORY_SANDBOX_CPUS is ${cpus}, which is more than the ${DOCKER_SANDBOX_MAX_CPUS} cores this host can ` +
-        'give one session container, so this session was refused before a container was created. Lower it to ' +
-        'that number or below; the bound itself is not a setting — sandbox/README.md says what raising it takes.',
-    );
-  }
-
-  const memoryBytes = memoryGib * BYTES_PER_GIB;
-  const containerEnv = dockerSandboxEnv();
+  const image = project?.image ?? catalog.default.image;
+  // Rounded: a ceiling may have two decimal places, and Docker takes whole bytes
+  // and whole microseconds.
+  const memoryBytes = Math.round((project?.memoryGib ?? catalog.default.memoryGib) * BYTES_PER_GIB);
+  const cpus = project?.cpus ?? catalog.default.cpus;
+  const containerEnv = slug && project ? projectSandboxEnv(slug, project.secrets, secrets) : {};
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -192,7 +222,7 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     // RAM plus 10 GiB of swap — double the budget this host is sized against.
     memorySwap: memoryBytes,
     cpuPeriod: DOCKER_SANDBOX_CPU_PERIOD_US,
-    cpuQuota: cpus * DOCKER_SANDBOX_CPU_PERIOD_US,
+    cpuQuota: Math.round(cpus * DOCKER_SANDBOX_CPU_PERIOD_US),
     pidsLimit: DOCKER_SANDBOX_PIDS_LIMIT,
     // `HostConfig.Init`. Pinned rather than left to the package's own default:
     // Docker's `--init` is off by default and only `@mastra/docker` turns it
@@ -204,8 +234,7 @@ export function dockerSandboxOptions(sessionId: string): DockerSandboxOptions {
     // The base-class option, NOT the package's deprecated same-named alias
     // (`sandbox.test.ts` pins that the alias is absent).
     workingDirectory: env.MASTRACODE_SANDBOX_WORKDIR.trim(),
-    // Omitted rather than `{}` when nothing is forwarded, so an unset key
-    // leaves the options exactly as they were before forwarding existed.
+    // Omitted rather than `{}` when nothing is forwarded.
     ...(Object.keys(containerEnv).length > 0 ? { env: containerEnv } : {}),
     // No `dockerOptions`: dockerode reads DOCKER_HOST itself, and ops/README.md
     // owns that key — re-reading it here would be a second source of truth.
@@ -275,8 +304,8 @@ function admitDockerSession(sessionId: string, liveSessions: Map<string, MastraS
     `MASTRACODE_MAX_SANDBOXES is ${maxSandboxes} and this server process already holds sandboxes for ` +
       `${liveSessions.size} live sessions, so this session cannot be given one. Let a running session's work ` +
       'item reach a terminal stage, or delete one of those sessions, to free a slot. Raise ' +
-      'MASTRACODE_MAX_SANDBOXES only if this host has memory for another container at ' +
-      'FACTORY_SANDBOX_MEMORY_GIB (see sandbox/README.md); there is no value that disables the cap.',
+      'MASTRACODE_MAX_SANDBOXES only if this host has memory for another container at the memoryGib in ' +
+      'sandbox/sandbox.json (see sandbox/README.md); there is no value that disables the cap.',
   );
 }
 
@@ -310,14 +339,17 @@ export function selectSandbox(
   // provider never turns into a boot failure.
   const sandboxProvider = env.FACTORY_SANDBOX_PROVIDER?.trim();
   if (sandboxProvider === 'docker') {
-    // Order matters twice here. The image is resolved FIRST: a missing image
-    // breaks every session on this deployment, while the cap only refuses this
+    // Order matters twice here. The options are resolved FIRST: a missing
+    // catalog breaks every session on this deployment and a missing project
+    // secret every session of that project, while the cap only refuses this
     // one, so the more general failure is the one to report. And the sandbox is
     // registered only after construction succeeded, so a throw never burns a
-    // slot. Both failures leave the docker branch by throwing rather than
+    // slot. Every failure leaves the docker branch by throwing rather than
     // returning, which is what keeps a refusal from falling through to the
     // Platform or E2B arms below and relocating the work off this host.
-    const options = dockerSandboxOptions(ctx.sessionId);
+    // `ctx.repoFullName` picks the session's project in the catalog; Factory
+    // leaves it undefined for a session with no repository.
+    const options = dockerSandboxOptions(ctx.sessionId, ctx.repoFullName);
     admitDockerSession(ctx.sessionId, liveSessions);
     const sandbox = new DockerSandbox(options);
     liveSessions.set(ctx.sessionId, sandbox);

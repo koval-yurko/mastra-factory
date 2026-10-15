@@ -18,6 +18,7 @@ vi.mock('./logic', async importOriginal => ({
 vi.mock('../../secrets/parameter-store', async importOriginal => ({
   ...(await importOriginal<typeof import('../../secrets/parameter-store')>()),
   loadParameters: vi.fn(async () => ({})),
+  loadProjectParameters: vi.fn(async () => ({})),
 }));
 
 const store = { prefix: '/factory', client: { send: vi.fn() } } as unknown as ParameterStore;

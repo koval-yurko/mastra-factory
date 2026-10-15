@@ -99,8 +99,13 @@ names in `companions:` — there is no PRD.
   is the second link of the OAuth/link `state` signer chain in
   `src/mastra/config/integrations.ts`, so clearing it drops the deployment back to a per-process
   random secret and invalidates every `state` in flight across a restart.
-- Tag sandbox images by date (`factory-sandbox:YYYY-MM-DD`), never `latest`, so a bad image is a
-  `FACTORY_SANDBOX_IMAGE` rollback.
+- Sandbox images are tagged `YYYY-MM-DD-<input hash>` by `src/build/sandbox-images.ts` and built
+  only by the image pipeline (`.github/workflows/sandbox-images.yml`), never tagged by hand and
+  never `latest`; each release carries its tags in `sandbox-catalog.json`, so a bad image is a
+  release rollback. Never prune an image that a stored release names.
+- Sandbox credentials are per project and SSM-only (`<prefix>/projects/<owner>/<name>/<NAME>`,
+  listed in `sandbox/projects/<owner>/<name>/sandbox.json`); never forward a host credential to
+  every session container.
 - Operator-plane directories hold no first-party code and reach the code plane only through
   environment variables and CLI invocation, never an import.
 

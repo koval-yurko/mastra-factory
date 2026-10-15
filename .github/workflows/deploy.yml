@@ -28,7 +28,18 @@ permissions:
   contents: read
 
 jobs:
+  # Every image the release will name exists before the release is built.
+  sandbox-images:
+    if: >-
+      github.repository == 'koval-yurko/mastra-factory' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'koval-yurko' &&
+      github.triggering_actor == 'koval-yurko' &&
+      !inputs.release
+    uses: ./.github/workflows/sandbox-images.yml
+
   build:
+    needs: sandbox-images
     if: >-
       github.repository == 'koval-yurko/mastra-factory' &&
       github.ref == 'refs/heads/main' &&
@@ -43,6 +54,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # `npm run build` dates the sandbox image tags from git history.
+          fetch-depth: 0
 
       - name: Node is the server's Node
         run: |

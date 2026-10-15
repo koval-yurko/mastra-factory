@@ -20,10 +20,12 @@ readonly SHA=$1
 readonly SOURCE=$PWD/.mastra/output
 [[ -f $SOURCE/index.mjs ]] || { print -u2 "[release] no build at $SOURCE — run npm run build first"; exit 1; }
 
-# `npm run build` places the Factory UI and the skill overrides in the output
-# (src/build/complete-output.ts). A build without them would serve the repo
-# root's UI copy and no override, so refuse it rather than store it.
+# `npm run build` places the Factory UI, the skill overrides and the sandbox
+# catalog in the output (src/build/complete-output.ts). A build without them
+# would serve the repo root's UI copy, no override and no sandbox image, so
+# refuse it rather than store it.
 [[ -f $SOURCE/factory/index.html ]] || { print -u2 "[release] the build has no Factory UI ($SOURCE/factory/index.html) — was it built with npm run build?"; exit 1; }
+[[ -f $SOURCE/sandbox-catalog.json ]] || { print -u2 "[release] the build has no sandbox-catalog.json — was it built with npm run build?"; exit 1; }
 if [[ -d $PWD/src/mastra/public/factory-skills && ! -d $SOURCE/factory-skills ]]; then
   print -u2 "[release] the build has no factory-skills/ although src/mastra/public/factory-skills exists"
   exit 1

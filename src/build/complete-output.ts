@@ -21,18 +21,27 @@
  * the server's cwd, the output folder. This step does the three things the CLI
  * would have done, in the same order, and checks the result.
  *
+ * It then writes the sandbox catalog (`./sandbox-images`) into the output, for
+ * the same reason: the server reads it from its cwd, so a release and a rollback
+ * carry the image tags, ceilings and secret lists they were built with.
+ *
  * Run as `node src/build/complete-output.ts` (Node strips the types). It uses
- * only `node:` modules, so it runs without a build of its own.
+ * only `node:` modules and import-free first-party ones, so it runs without a
+ * build of its own.
  */
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SANDBOX_CATALOG_FILE } from '../mastra/config/sandbox-catalog.ts';
+import { readSandboxSources, type InputDate } from './sandbox-images.ts';
 
 export interface CompleteOutputPaths {
   /** The repo root: holds `node_modules/` and `src/mastra/`. */
   root: string;
   /** Where `mastra build` wrote the server. Default `<root>/.mastra/output`. */
   output?: string;
+  /** How image tags get their date. Default: the git commit date of the inputs. */
+  inputDate?: InputDate;
 }
 
 export interface CompleteOutputResult {
@@ -40,9 +49,15 @@ export interface CompleteOutputResult {
   ui: string;
   /** What was copied from `src/mastra/public/` into the output, by top-level name. */
   publicEntries: string[];
+  /** Every image the catalog names, shared image first. */
+  sandboxImages: string[];
 }
 
-export function completeOutput({ root, output = join(root, '.mastra', 'output') }: CompleteOutputPaths): CompleteOutputResult {
+export function completeOutput({
+  root,
+  output = join(root, '.mastra', 'output'),
+  inputDate,
+}: CompleteOutputPaths): CompleteOutputResult {
   if (!existsSync(join(output, 'index.mjs'))) {
     throw new Error(`No server build at ${output}/index.mjs — run \`mastra build\` first.`);
   }
@@ -74,11 +89,17 @@ export function completeOutput({ root, output = join(root, '.mastra', 'output') 
     throw new Error(`The output has no factory/index.html after the copy (${output}).`);
   }
 
-  return { ui: `mastra@${cliVersion}`, publicEntries };
+  // 4. The sandbox catalog. A bad sandbox/ source fails the build here, before
+  //    a release could carry it.
+  const { catalog, images } = readSandboxSources(root, inputDate);
+  writeFileSync(join(output, SANDBOX_CATALOG_FILE), `${JSON.stringify(catalog, null, 2)}\n`);
+
+  return { ui: `mastra@${cliVersion}`, publicEntries, sandboxImages: images.map(image => image.tag) };
 }
 
 // Run directly: `node src/build/complete-output.ts` from the repo root.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = completeOutput({ root: process.cwd() });
   console.log(`[build] Factory UI from ${result.ui}; copied src/mastra/public/{${result.publicEntries.join(',')}} into .mastra/output`);
+  console.log(`[build] sandbox catalog names ${result.sandboxImages.join(', ')}`);
 }

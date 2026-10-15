@@ -100,11 +100,10 @@ Expect one row: `personal-<user id>`, `owner`, your email. Empty means the boots
 
 ```dotenv
 FACTORY_SANDBOX_PROVIDER=docker
-FACTORY_SANDBOX_IMAGE=factory-sandbox:<YYYY-MM-DD>
 MASTRACODE_MAX_SANDBOXES=10
 ```
 
-Build the image first — `sandbox/README.md`. Unset `FACTORY_SANDBOX_PROVIDER` runs sessions on this host with no isolation.
+Images, ceilings and per-project secrets live in `sandbox/` and in Parameter Store; the image pipeline builds the images on each deploy — `sandbox/README.md`. Unset `FACTORY_SANDBOX_PROVIDER` runs sessions on this host with no isolation.
 
 Then go to production: `ops/README.md` ("Supervision — LaunchAgents"), then `actions-runner/README.md` ("Install").
 
@@ -179,13 +178,13 @@ While `releases/HOLD` exists a push still builds and stores a release, but does 
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | Local server with UI and API, rebuilds on save |
-| `npm run build` | `mastra build`, then add the Factory UI and `src/mastra/public/` (skill overrides) to `.mastra/output` |
+| `npm run build` | `mastra build`, then add the Factory UI, `src/mastra/public/` (skill overrides) and the sandbox catalog to `.mastra/output` |
 | `npm run start` | Run the local build in `.mastra/output` |
 | `npm run start:release` | Run `releases/current` — what the Factory LaunchAgent starts |
 | `npm run check` / `npm test` | Typecheck / `vitest run --dir src` |
 | `npm run studio` | Studio at `http://127.0.0.1:3000` against the server on 4111 |
 | `npm run db:up` / `db:down` | Start / stop Postgres (the volume survives `db:down`) |
-| `npm run sandbox:build` | Build the session image (`sandbox/README.md`) |
+| `npm run sandbox:build` | Build the missing sandbox images on this engine (`sandbox/README.md`) |
 
 ## Traces and Studio
 
@@ -203,7 +202,7 @@ Then `npm run studio` and open **Observability**. Studio agent pages need `MASTR
 ## Troubleshooting
 
 - **Sign-in:** `403 Invalid origin`, `503 auth_unavailable`, `organization_required`, or only a **Sign in with Mastra Platform** button — steps 1–4.
-- **Sessions:** errors naming `FACTORY_SANDBOX_IMAGE` or a checkout on this host — `sandbox/README.md`.
+- **Sessions:** errors naming `sandbox-catalog.json`, a sandbox secret, or a checkout on this host — `sandbox/README.md`.
 - **Server down / crash loop:** `~/Library/Logs/mastra-factory/err.log`; `ops/README.md` ("Supervision checkpoints").
 - **Deploy failed:** the Actions log, then `releases/deploy.log`; runner problems — `actions-runner/README.md` ("Troubleshooting").
 - More: [Troubleshooting](https://factory.mastra.ai/troubleshooting), [Environment variables](https://factory.mastra.ai/reference/configuration).

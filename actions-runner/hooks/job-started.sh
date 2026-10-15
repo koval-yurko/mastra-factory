@@ -1,5 +1,6 @@
 #!/bin/bash
-# Runner job-started hook: refuse every job that is not the owner's deploy.
+# Runner job-started hook: refuse every job that is not the owner's deploy or
+# sandbox image build.
 #
 # The runner runs this before each job (ACTIONS_RUNNER_HOOK_JOB_STARTED in the
 # runner's own .env, which is outside git). A non-zero exit fails the job
@@ -17,7 +18,12 @@ set -u
 
 readonly OWNER=koval-yurko
 readonly REPOSITORY=koval-yurko/mastra-factory
-readonly WORKFLOW_REF=$REPOSITORY/.github/workflows/deploy.yml@refs/heads/main
+# A job of a called workflow carries its caller's ref, so the sandbox-images
+# jobs a deploy calls match the first; the second is a run of it by hand.
+readonly WORKFLOW_REFS=(
+  "$REPOSITORY/.github/workflows/deploy.yml@refs/heads/main"
+  "$REPOSITORY/.github/workflows/sandbox-images.yml@refs/heads/main"
+)
 
 refuse() {
   printf '[runner-guard] refused: %s\n' "$1" >&2
@@ -29,7 +35,11 @@ refuse() {
 
 [[ ${GITHUB_REPOSITORY:-} == "$REPOSITORY" ]] || refuse "not $REPOSITORY"
 [[ ${GITHUB_REF:-} == refs/heads/main ]] || refuse "not the main branch"
-[[ ${GITHUB_WORKFLOW_REF:-} == "$WORKFLOW_REF" ]] || refuse "not .github/workflows/deploy.yml on main"
+workflow_ok=false
+for ref in "${WORKFLOW_REFS[@]}"; do
+  [[ ${GITHUB_WORKFLOW_REF:-} == "$ref" ]] && workflow_ok=true
+done
+$workflow_ok || refuse "not .github/workflows/deploy.yml or sandbox-images.yml on main"
 [[ ${GITHUB_ACTOR:-} == "$OWNER" ]] || refuse "actor is not $OWNER"
 [[ ${GITHUB_TRIGGERING_ACTOR:-} == "$OWNER" ]] || refuse "triggering actor is not $OWNER"
 case ${GITHUB_EVENT_NAME:-} in

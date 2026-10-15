@@ -5,8 +5,10 @@ description: Run the Expo EAS CLI (`eas`) in the sandbox. Use when asked about E
 
 # EAS CLI
 
-`eas` (eas-cli 24.10.0) is installed globally in the sandbox. Run it with `execute_command`, like
-any other shell command. Docs: https://docs.expo.dev/eas/cli/
+`eas` (eas-cli 24.10.0) is installed only in the sandbox images of projects that use Expo. Check
+with `command -v eas` first; if it prints nothing, say that this project's sandbox has no EAS CLI,
+and do not try to install it. Run it with `execute_command`, like any other shell command.
+Docs: https://docs.expo.dev/eas/cli/
 
 ## Which account is logged in
 

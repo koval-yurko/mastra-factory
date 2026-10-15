@@ -2,13 +2,14 @@
 
 This folder holds the self-hosted runner that builds and deploys this repository on a push to
 `main`. The design, and the reasons for it, are in `docs/ci-deploy-research.md`. The pipeline is
-`.github/workflows/deploy.yml`. The release scripts are in `ops/`.
+`.github/workflows/deploy.yml`; it first calls `.github/workflows/sandbox-images.yml`, which builds
+the sandbox images (`sandbox/README.md`). The release scripts are in `ops/`.
 
 | Path | In git | What it is |
 | --- | --- | --- |
 | `register.sh` | yes | Downloads the runner, checks its SHA-256, registers it, writes its job environment. |
 | `ai.mastra.runner.plist` | yes | The LaunchAgent that keeps the runner running. `ops/install.sh` links it. |
-| `hooks/job-started.sh` | yes | Runs before every job (as `/bin/bash -e`, so plain bash only). Fails every job that is not the owner's deploy. |
+| `hooks/job-started.sh` | yes | Runs before every job (as `/bin/bash -e`, so plain bash only). Fails every job that is not the owner's deploy or sandbox image build. |
 | `runner/` | no | The runner program, its credentials (`.runner`, `.credentials*`), its `.env`, `.path` and `_work/`. |
 
 Warning: `git clean -fdx` deletes `runner/`, including the registration. Use `git clean -fd`.
@@ -153,7 +154,7 @@ Four layers keep other people's code off it.
 - If it stays public: Settings > Actions > General > "Approval for running fork pull request
   workflows from contributors" = **Require approval for all external contributors**, and never
   approve a run you did not read. The hook (layer 3) then still refuses every job that is not
-  `deploy.yml` on `main` by the owner, before any step runs.
+  `deploy.yml` or `sandbox-images.yml` on `main` by the owner, before any step runs.
 - Settings > Collaborators: nobody.
 - Settings > Deploy keys: no key with write access.
 - Account Settings > Applications: remove every app with access to this repo that does not need it.
@@ -182,7 +183,8 @@ Settings > Actions > Runners: one runner, `factory-mac`. No repository secrets.
 ### 3. The hook
 
 `hooks/job-started.sh` fails a job unless the repository, `refs/heads/main`, the workflow file
-`deploy.yml` on `main`, the actor, the triggering actor (`koval-yurko`) and the event (`push` or
+(`deploy.yml` or `sandbox-images.yml` on `main`; a job that `deploy.yml` calls carries the ref of
+`deploy.yml`), the actor, the triggering actor (`koval-yurko`) and the event (`push` or
 `workflow_dispatch`) all match. Its path is in `runner/.env`, outside git, so a pushed commit cannot
 switch it off. A changed hook takes effect only after a pull into this checkout.
 

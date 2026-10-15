@@ -11,12 +11,20 @@
  * Unlike `./auth` and `./integrations` this module has no load-time side effect,
  * so the environment is arranged per case with `vi.stubEnv`. The preamble still
  * sweeps first, and it has to: these blocks rely on an empty environment rather
- * than on exhaustive stubbing, so an inherited `FACTORY_SANDBOX_MEMORY_GIB`
+ * than on exhaustive stubbing, so an inherited `MASTRACODE_MAX_SANDBOXES`
  * would silently configure the default-value cases into passing against the
  * wrong number. Keys are set with `vi.stubEnv` and never assigned, so no key
  * name appears here as a literal `process.env` read, which the verify gate
  * counts.
+ *
+ * Images, ceilings and secret lists come from the sandbox catalog, not from the
+ * environment. `dockerSandboxOptions` takes one by argument; the blocks that go
+ * through `selectSandbox` read the catalog file written below, because the slot
+ * reads it from the server's cwd.
  */
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // Type-only, so it is erased before the sweep below matters: a static VALUE
 // import would run ahead of it and let an inherited variable configure the
@@ -27,7 +35,7 @@ import type { MastraSandbox } from '@mastra/core/workspace';
 // space keeps an inherited value from configuring a case; PATH/HOME and the rest
 // of the shell are untouched, because `localSandboxEnv` below is about exactly
 // those and stubs them itself.
-const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_', 'EXPO_'];
+const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_', 'EXPO_', 'VERCEL_'];
 // DOCKER_HOST is swept even though this module never reads it: the docker tests
 // below construct a real `DockerSandbox`, whose `new Docker()` makes
 // docker-modem read DOCKER_HOST itself and throw on a value it cannot parse.
@@ -41,6 +49,33 @@ for (const key of Object.keys(process.env)) {
   }
 }
 
+/** The catalog every case below uses: a shared image and two projects. */
+const SHARED_IMAGE = 'factory-sandbox:2026-09-23-0123456789ab';
+const APP_IMAGE = 'factory-sandbox/owner/app:2026-10-01-abcdefabcdef';
+const CATALOG = {
+  version: 1 as const,
+  default: { image: SHARED_IMAGE, memoryGib: 1, cpus: 0.5 },
+  projects: {
+    'owner/app': { image: APP_IMAGE, memoryGib: 4, cpus: 2, secrets: ['VERCEL_TOKEN', 'EXPO_TOKEN'] },
+    'owner/ceilings-only': { memoryGib: 2.5, cpus: 1.25, secrets: [] },
+  },
+};
+
+// The slot reads `sandbox-catalog.json` from the server's cwd. Point the cwd at a
+// folder that holds this catalog, so the blocks that go through `selectSandbox`
+// see it; `loadSandboxCatalog` takes its folder by argument.
+const catalogDir = mkdtempSync(join(tmpdir(), 'sandbox-catalog-'));
+writeFileSync(join(catalogDir, 'sandbox-catalog.json'), JSON.stringify(CATALOG));
+const emptyDir = mkdtempSync(join(tmpdir(), 'sandbox-no-catalog-'));
+vi.spyOn(process, 'cwd').mockReturnValue(catalogDir);
+
+/** A secret source with these values for `owner/app`, under the parameter names SSM would use. */
+const secretsFor = (values: Record<string, string>, store = true) => ({
+  values: (slug: string) => (slug === 'owner/app' ? values : {}),
+  parameter: (slug: string, key: string) => (store ? `/factory/projects/${slug}/${key}` : undefined),
+});
+const NO_SECRETS = secretsFor({});
+
 // Static `import` statements are evaluated before any module body statement, so
 // the module under test is pulled in with `await import(...)` once the sweep
 // above has run. The cap block reads the module-level `liveDockerSandboxes` the
@@ -51,10 +86,11 @@ for (const key of Object.keys(process.env)) {
 // needs a generation of its own. It runs last for exactly that reason.
 const {
   LOCAL_SANDBOX_ENV_KEYS,
-  dockerSandboxEnv,
   dockerSandboxOptions,
   liveDockerSandboxes,
+  loadSandboxCatalog,
   localSandboxEnv,
+  projectSandboxEnv,
   selectSandbox,
 } = await import('./sandbox');
 // Deferred for the same reason as the module under test: a static import runs
@@ -150,27 +186,26 @@ describe('localSandboxEnv', () => {
  * whatever that arithmetic becomes.
  */
 describe('dockerSandboxOptions', () => {
-  const IMAGE = 'factory-sandbox:2026-09-23';
-
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('carries the session id, the configured image and every documented default', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', undefined);
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', undefined);
+  const options = (repoFullName?: string, secrets = NO_SECRETS) =>
+    dockerSandboxOptions('session-abc', repoFullName, CATALOG, secrets);
+
+  it('gives a session with no project the shared image, the shared ceilings and no env', () => {
     vi.stubEnv('MASTRACODE_SANDBOX_WORKDIR', undefined);
 
-    expect(dockerSandboxOptions('session-abc')).toEqual({
+    expect(options()).toEqual({
       id: 'session-abc',
-      image: IMAGE,
-      memory: 10 * 1024 * 1024 * 1024,
-      // Equal to `memory`. Omitted, Docker would allow another 10 GiB of swap
+      image: SHARED_IMAGE,
+      memory: 1024 * 1024 * 1024,
+      // Equal to `memory`. Omitted, Docker would allow another 1 GiB of swap
       // on top, so the documented cap would be half the real ceiling.
-      memorySwap: 10 * 1024 * 1024 * 1024,
+      memorySwap: 1024 * 1024 * 1024,
       cpuPeriod: 100_000,
-      cpuQuota: 400_000,
+      // Half a core: half of every 100 ms period.
+      cpuQuota: 50_000,
       pidsLimit: 4096,
       // Pinned, not inherited: Docker's own `--init` is off by default and the
       // package's `init` default is what turns it on, so leaving it out would
@@ -180,185 +215,155 @@ describe('dockerSandboxOptions', () => {
       timeout: 900_000,
       workingDirectory: '/workspace',
     });
+    // A repository the catalog does not name is the same as none.
+    expect(options('owner/unlisted')).toEqual(options());
   });
 
   it('uses `workingDirectory`, never the package\'s deprecated `workingDir` alias', () => {
     // Both exist on DockerSandboxOptions and `workingDirectory` wins when both
     // are set, so passing the deprecated one would work until it is removed.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    const built = options();
 
-    const options = dockerSandboxOptions('session-abc');
-
-    expect(options).toHaveProperty('workingDirectory');
-    expect(options).not.toHaveProperty('workingDir');
+    expect(built).toHaveProperty('workingDirectory');
+    expect(built).not.toHaveProperty('workingDir');
 
     // The property check above only sees the object. The constructor is what
     // resolves option, deprecated alias and built-in default into one value, so
     // read the getter it narrows to `string` and confirm ours is what won.
-    expect(new DockerSandbox(options).workingDirectory).toBe('/workspace');
+    expect(new DockerSandbox(built).workingDirectory).toBe('/workspace');
   });
 
   it('passes no dockerOptions, leaving dockerode to read DOCKER_HOST itself', () => {
     // ops/README.md owns DOCKER_HOST; re-reading it here would be a second
     // source of truth that silently disagrees with the documented one.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-
-    expect(dockerSandboxOptions('session-abc')).not.toHaveProperty('dockerOptions');
+    expect(options()).not.toHaveProperty('dockerOptions');
   });
 
-  it('derives the CPU quota from the pinned period, so the number means whole cores', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', '2');
+  it('gives a project its own image and ceilings, in the units Docker expects', () => {
+    const built = options('owner/app', secretsFor({ VERCEL_TOKEN: 'v', EXPO_TOKEN: 'e' }));
 
-    const options = dockerSandboxOptions('session-abc');
-
-    expect(options.cpuPeriod).toBe(100_000);
-    expect(options.cpuQuota).toBe(200_000);
+    expect(built.image).toBe(APP_IMAGE);
+    // Not 4 — HostConfig.Memory is in bytes.
+    expect(built.memory).toBe(4 * 1024 * 1024 * 1024);
+    expect(built.memorySwap).toBe(4 * 1024 * 1024 * 1024);
+    // The quota is derived from the pinned period, so the number means cores.
+    expect(built.cpuPeriod).toBe(100_000);
+    expect(built.cpuQuota).toBe(200_000);
   });
 
-  it('converts the memory ceiling from gibibytes to the bytes Docker expects', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '4');
+  it('falls back to the shared image, and turns decimal ceilings into whole bytes and microseconds', () => {
+    const built = options('owner/ceilings-only');
 
-    // Not 4 — HostConfig.Memory is in bytes, and 4 bytes is not a memory limit
-    // any container can start under.
-    expect(dockerSandboxOptions('session-abc').memory).toBe(4294967296);
+    expect(built.image).toBe(SHARED_IMAGE);
+    expect(built.memory).toBe(2684354560);
+    expect(built.cpuQuota).toBe(125_000);
+    expect(built).not.toHaveProperty('env');
   });
 
-  it('forwards EXPO_TOKEN into the container, trimmed, and nothing else from the host', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('EXPO_TOKEN', '  expo-token-value  ');
+  it('falls back to the shared ceilings field by field', () => {
+    const catalog = { ...CATALOG, projects: { 'owner/app': { image: APP_IMAGE, cpus: 3, secrets: [] } } };
+    const built = dockerSandboxOptions('session-abc', 'owner/app', catalog, NO_SECRETS);
+
+    expect(built.memory).toBe(1024 * 1024 * 1024);
+    expect(built.cpuQuota).toBe(300_000);
+  });
+
+  it('matches the slug Factory reports in any case and with padding', () => {
+    expect(options(' Owner/App ', secretsFor({ VERCEL_TOKEN: 'v', EXPO_TOKEN: 'e' })).image).toBe(APP_IMAGE);
+  });
+
+  it('does not address a project through a slug that walks out of its folder', () => {
+    for (const slug of ['owner/..', '../app', 'owner/app/extra', 'owner', '']) {
+      expect(options(slug).image).toBe(SHARED_IMAGE);
+    }
+  });
+
+  it('forwards exactly the listed secrets, trimmed, under their own names, and nothing from the host', () => {
+    vi.stubEnv('EXPO_TOKEN', 'host-expo-token');
     vi.stubEnv('DATABASE_URL', 'postgres://secret');
     vi.stubEnv('GITHUB_APP_PRIVATE_KEY', 'secret');
+    const secrets = secretsFor({ VERCEL_TOKEN: ' vercel-value ', EXPO_TOKEN: 'expo-value', UNLISTED_TOKEN: 'never' });
 
-    expect(dockerSandboxEnv()).toEqual({ EXPO_TOKEN: 'expo-token-value' });
-    expect(dockerSandboxOptions('session-abc').env).toEqual({ EXPO_TOKEN: 'expo-token-value' });
+    expect(options('owner/app', secrets).env).toEqual({ VERCEL_TOKEN: 'vercel-value', EXPO_TOKEN: 'expo-value' });
+    // No project: no secret at all, even with EXPO_TOKEN in the host env.
+    expect(options()).not.toHaveProperty('env');
   });
 
-  it('omits `env` entirely when EXPO_TOKEN is unset or blank', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    for (const value of [undefined, '', '   ']) {
-      vi.stubEnv('EXPO_TOKEN', value);
-      expect(dockerSandboxEnv()).toEqual({});
-      expect(dockerSandboxOptions('session-abc')).not.toHaveProperty('env');
+  it('refuses a session whose listed secret has no value, naming the parameter', () => {
+    for (const blank of [undefined, '', '   ']) {
+      const values: Record<string, string> = { VERCEL_TOKEN: 'v' };
+      if (blank !== undefined) values.EXPO_TOKEN = blank;
+
+      expect(() => options('owner/app', secretsFor(values))).toThrow(
+        /owner\/app lists the sandbox secret\(s\) EXPO_TOKEN[\s\S]*\/factory\/projects\/owner\/app\/EXPO_TOKEN/,
+      );
     }
   });
 
-  it('trims the image, so a padded .env value still names a real tag', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', `  ${IMAGE}  `);
-
-    expect(dockerSandboxOptions('session-abc').image).toBe(IMAGE);
-  });
-
-  it('refuses rather than falling back when the image is unset or blank', () => {
-    // The package default is `node:22-slim`, which carries neither git nor gh:
-    // defaulting would trade a named boot-time error for a `git-missing`
-    // failure after a session has already started.
-    for (const value of [undefined, '', '   ']) {
-      vi.stubEnv('FACTORY_SANDBOX_IMAGE', value);
-      expect(() => dockerSandboxOptions('session-abc')).toThrow(/FACTORY_SANDBOX_IMAGE/);
-    }
-  });
-
-  it('falls back to the documented defaults for malformed or non-positive ceilings', () => {
-    // '0x10' through ' 3 ' are the spellings bare `Number` would turn into a
-    // different valid number (16, 3, 1000, 5, 3) rather than into "use the
-    // default", which is why the parser demands a run of digits:
-    // `FACTORY_SANDBOX_MEMORY_GIB=1e3` must be a 10 GiB container, not a 1000 GiB
-    // one. The last one is a run of digits past the safe-integer range, and it
-    // FALLS BACK rather than being refused by the bound below — the parser sees
-    // it first and returns undefined, so the bound never sees a number at all.
-    for (const bad of ['abc', '0', '-2', '2.5', '', '0x10', '0b11', '1e3', '+5', ' 3 ', '99999999999999999999']) {
-      vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-      vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', bad);
-      vi.stubEnv('FACTORY_SANDBOX_CPUS', bad);
-
-      const options = dockerSandboxOptions('session-abc');
-
-      expect(options.memory).toBe(10 * 1024 * 1024 * 1024);
-      expect(options.cpuQuota).toBe(400_000);
-    }
-  });
-
-  it('honours positive whole-number ceilings', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '16');
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', '8');
-
-    const options = dockerSandboxOptions('session-abc');
-
-    expect(options.memory).toBe(16 * 1024 * 1024 * 1024);
-    expect(options.cpuQuota).toBe(800_000);
-  });
-
-  it('accepts a ceiling equal to the whole sandbox budget of this host', () => {
-    // The bound is inclusive, and these are its two numbers written out: 10 GiB
-    // and 4 cores per container times the 3 concurrent sessions the host is
-    // sized for. Literals rather than arithmetic against the module's constants,
-    // which catches exactly one direction: LOWERING either default, or the
-    // concurrency count, lowers the bound and turns this case into a refusal.
-    // Raising one lifts the bound and leaves the stubbed 30 and 12 accepted with
-    // the same expected numbers, so this is not a pin on the bound's value — the
-    // two refusal cases below are.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '30');
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', '12');
-
-    const options = dockerSandboxOptions('session-abc');
-
-    expect(options.memory).toBe(30 * 1024 * 1024 * 1024);
-    expect(options.memorySwap).toBe(30 * 1024 * 1024 * 1024);
-    expect(options.cpuQuota).toBe(1_200_000);
-  });
-
-  it('refuses a memory ceiling above what this host can serve, rather than handing Docker the number', () => {
-    // `HostConfig.Memory` takes any integer, so an oversized knob becomes a
-    // container the daemon fails to create — a failure that names no key. The
-    // refusal happens here instead, and by throwing rather than returning, so it
-    // cannot fall through to the Platform or E2B arms of `selectSandbox`.
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '31');
-
-    // Key, offending value, the bound, and where the bound is documented: an
-    // operator reading only the error has to be able to act on it. One regex
-    // across all four rather than a match each, because the value and the bound
-    // are both small integers — asserted separately, a message that had swapped
-    // them ("is 30, which is more than the 31 GiB") would satisfy every match.
-    expect(() => dockerSandboxOptions('session-abc')).toThrow(
-      /FACTORY_SANDBOX_MEMORY_GIB is 31, which is more than the 30 GiB[\s\S]*sandbox\/README\.md/,
-    );
-  });
-
-  it('refuses a CPU ceiling above what this host can serve', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_CPUS', '13');
-
-    expect(() => dockerSandboxOptions('session-abc')).toThrow(
-      /FACTORY_SANDBOX_CPUS is 13, which is more than the 12 cores[\s\S]*sandbox\/README\.md/,
-    );
+  it('refuses a session whose project lists secrets when there is no Parameter Store', () => {
+    expect(() => options('owner/app', secretsFor({}, false))).toThrow(/VERCEL_TOKEN, EXPO_TOKEN[\s\S]*FACTORY_SSM_PARAMETER_PATH/);
   });
 
   it('falls back to /workspace for a blank or unset workdir, and trims a set one', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-
     vi.stubEnv('MASTRACODE_SANDBOX_WORKDIR', undefined);
-    expect(dockerSandboxOptions('session-abc').workingDirectory).toBe('/workspace');
+    expect(options().workingDirectory).toBe('/workspace');
 
     vi.stubEnv('MASTRACODE_SANDBOX_WORKDIR', '');
-    expect(dockerSandboxOptions('session-abc').workingDirectory).toBe('/workspace');
+    expect(options().workingDirectory).toBe('/workspace');
 
     vi.stubEnv('MASTRACODE_SANDBOX_WORKDIR', '   ');
-    expect(dockerSandboxOptions('session-abc').workingDirectory).toBe('/workspace');
+    expect(options().workingDirectory).toBe('/workspace');
 
     vi.stubEnv('MASTRACODE_SANDBOX_WORKDIR', ' /srv/checkouts ');
-    expect(dockerSandboxOptions('session-abc').workingDirectory).toBe('/srv/checkouts');
+    expect(options().workingDirectory).toBe('/srv/checkouts');
   });
 
   it('keys the sandbox on the session id, so a reconnect reattaches instead of provisioning a second container', () => {
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
+    expect(dockerSandboxOptions('session-one', undefined, CATALOG).id).toBe('session-one');
+    expect(dockerSandboxOptions('session-two', undefined, CATALOG).id).toBe('session-two');
+  });
+});
 
-    expect(dockerSandboxOptions('session-one').id).toBe('session-one');
-    expect(dockerSandboxOptions('session-two').id).toBe('session-two');
+describe('projectSandboxEnv', () => {
+  it('is empty for a project that lists no secrets', () => {
+    expect(projectSandboxEnv('owner/app', [], secretsFor({ VERCEL_TOKEN: 'v' }))).toEqual({});
+  });
+
+  it('names every missing secret at once', () => {
+    expect(() => projectSandboxEnv('owner/app', ['A_TOKEN', 'B_TOKEN'], NO_SECRETS)).toThrow(
+      '/factory/projects/owner/app/A_TOKEN, /factory/projects/owner/app/B_TOKEN',
+    );
+  });
+
+  it('never puts a secret value in the refusal', () => {
+    const error = (() => {
+      try {
+        projectSandboxEnv('owner/app', ['VERCEL_TOKEN', 'EXPO_TOKEN'], secretsFor({ VERCEL_TOKEN: 'vercel-value' }));
+      } catch (caught) {
+        return caught as Error;
+      }
+    })();
+    expect(error?.message).toContain('EXPO_TOKEN');
+    expect(error?.message).not.toContain('vercel-value');
+  });
+});
+
+describe('loadSandboxCatalog', () => {
+  it('reads and validates the catalog in the given folder', () => {
+    expect(loadSandboxCatalog(catalogDir)).toEqual(CATALOG);
+  });
+
+  it('names the file and the build step when the catalog is missing', () => {
+    expect(() => loadSandboxCatalog(emptyDir)).toThrow(/sandbox-catalog\.json is missing[\s\S]*npm run build/);
+  });
+
+  it('refuses a file that is not JSON, or not a valid catalog', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sandbox-bad-catalog-'));
+    writeFileSync(join(dir, 'sandbox-catalog.json'), '{');
+    expect(() => loadSandboxCatalog(dir)).toThrow(/is not valid JSON/);
+
+    writeFileSync(join(dir, 'sandbox-catalog.json'), JSON.stringify({ ...CATALOG, default: { ...CATALOG.default, image: 'factory-sandbox:latest' } }));
+    expect(() => loadSandboxCatalog(dir)).toThrow(/image must be factory-sandbox:YYYY-MM-DD-<12 hex>/);
   });
 });
 
@@ -374,7 +379,6 @@ describe('dockerSandboxOptions', () => {
  * importing the module.
  */
 describe('selectSandbox', () => {
-  const IMAGE = 'factory-sandbox:2026-09-23';
   const ctx = {
     sessionId: 'session-abc',
     repoFullName: undefined,
@@ -388,7 +392,6 @@ describe('selectSandbox', () => {
 
   it('returns a Docker sandbox for the `docker` provider', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
 
     const sandbox = selectSandbox(ctx, false);
 
@@ -400,7 +403,6 @@ describe('selectSandbox', () => {
     // The story's whole claim. With the branch order reversed this returns a
     // PlatformSandbox — or throws on the absent platform credentials — instead.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     vi.stubEnv('MASTRA_PLATFORM_ACCESS_TOKEN', 'stray-token');
     vi.stubEnv('MASTRA_PROJECT_ID', 'stray-project');
     vi.stubEnv('MASTRA_ENVIRONMENT_ID', 'stray-environment');
@@ -409,44 +411,34 @@ describe('selectSandbox', () => {
     expect(selectSandbox(ctx, true).name).toBe('DockerSandbox');
   });
 
-  it('refuses the session rather than falling through when the image is unset', () => {
+  it('gives a session its project\'s image from the catalog in the cwd', () => {
+    // No Parameter Store in this process, so a project that lists secrets is
+    // refused; `owner/ceilings-only` lists none.
+    vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
+
+    const sandbox = selectSandbox({ ...ctx, sessionId: 'session-project', repoFullName: 'owner/ceilings-only' }, false);
+
+    expect(sandbox.name).toBe('DockerSandbox');
+  });
+
+  it('refuses the session rather than falling through when a project secret is missing', () => {
     // The refusal has to be observable HERE, not only against
     // `dockerSandboxOptions` in isolation. Making the docker branch conditional
-    // on a resolvable image — or wrapping it in a try/catch — would leave every
+    // on resolvable options — or wrapping it in a try/catch — would leave every
     // other test in this file green while silently restoring the off-host
     // fall-through this story exists to remove, so the platform and E2B
     // variables are set to make that fall-through visible if it returns.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', undefined);
     vi.stubEnv('MASTRA_PLATFORM_ACCESS_TOKEN', 'stray-token');
     vi.stubEnv('MASTRA_PROJECT_ID', 'stray-project');
     vi.stubEnv('MASTRA_ENVIRONMENT_ID', 'stray-environment');
     vi.stubEnv('E2B_API_KEY', 'stray-key');
 
-    expect(() => selectSandbox(ctx, true)).toThrow(/FACTORY_SANDBOX_IMAGE/);
-  });
-
-  it('refuses the session rather than falling through when a knob is above its bound', () => {
-    // Same shape and same reason as the image case above: `sandbox/README.md`
-    // promises an over-bound knob relocates nothing, and that claim is about THIS
-    // function, not about `dockerSandboxOptions` in isolation. With the platform
-    // and E2B variables set, a bound check that returned — or that was caught —
-    // instead of throwing would hand the session to a cloud VM and leave every
-    // other test green.
-    vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-    vi.stubEnv('FACTORY_SANDBOX_MEMORY_GIB', '31');
-    vi.stubEnv('MASTRA_PLATFORM_ACCESS_TOKEN', 'stray-token');
-    vi.stubEnv('MASTRA_PROJECT_ID', 'stray-project');
-    vi.stubEnv('MASTRA_ENVIRONMENT_ID', 'stray-environment');
-    vi.stubEnv('E2B_API_KEY', 'stray-key');
-
-    expect(() => selectSandbox(ctx, true)).toThrow(/FACTORY_SANDBOX_MEMORY_GIB/);
+    expect(() => selectSandbox({ ...ctx, repoFullName: 'owner/app' }, true)).toThrow(/FACTORY_SSM_PARAMETER_PATH/);
   });
 
   it('trims the provider value, so a padded .env line still selects Docker', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', '  docker  ');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
 
     expect(selectSandbox(ctx, false).name).toBe('DockerSandbox');
   });
@@ -491,7 +483,6 @@ describe('selectSandbox', () => {
  * session in it.
  */
 describe('selectSandbox concurrent-session cap', () => {
-  const IMAGE = 'factory-sandbox:2026-09-23';
   const ctxFor = (sessionId: string) => ({
     sessionId,
     repoFullName: undefined,
@@ -513,7 +504,6 @@ describe('selectSandbox concurrent-session cap', () => {
 
   it('admits the first session and registers it under its session id', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = new Map<string, MastraSandbox>();
 
     const sandbox = selectSandbox(ctxFor('session-0'), false, live);
@@ -526,7 +516,6 @@ describe('selectSandbox concurrent-session cap', () => {
 
   it('refuses the fourth distinct session at the documented default, naming the key and the number', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = registryWith(3);
 
     // The operator sees only this message, so both halves are pinned: the key
@@ -541,7 +530,6 @@ describe('selectSandbox concurrent-session cap', () => {
 
   it('admits exactly the cap before refusing', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = new Map<string, MastraSandbox>();
 
     // An off-by-one here is the difference between a host sized for three
@@ -552,7 +540,6 @@ describe('selectSandbox concurrent-session cap', () => {
 
   it('honours a raised cap', () => {
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     vi.stubEnv('MASTRACODE_MAX_SANDBOXES', '5');
     const live = registryWith(4);
 
@@ -565,7 +552,6 @@ describe('selectSandbox concurrent-session cap', () => {
     // calls this slot again for a session whose sandbox it no longer has
     // memoized, and the container is already out there under the same id.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = registryWith(3);
 
     expect(selectSandbox(ctxFor('session-1'), false, live).name).toBe('DockerSandbox');
@@ -577,8 +563,7 @@ describe('selectSandbox concurrent-session cap', () => {
     // release path — there is no eviction hook and no timer.
     for (const released of ['stopped', 'destroyed'] as const) {
       vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-      vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-      const live = registryWith(3);
+        const live = registryWith(3);
 
       const retired = live.get('session-0');
       if (!retired) throw new Error('expected session-0 to be registered');
@@ -596,7 +581,6 @@ describe('selectSandbox concurrent-session cap', () => {
     // — so an errored sandbox usually still owns a container. Freeing its slot
     // would overcommit the host precisely when something is already wrong.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = registryWith(3);
 
     const failed = live.get('session-0');
@@ -612,23 +596,22 @@ describe('selectSandbox concurrent-session cap', () => {
     // malformed. There is no value that turns the cap off.
     for (const bad of ['0', '-1', '2.5', 'abc', '', '   ']) {
       vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-      vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
-      vi.stubEnv('MASTRACODE_MAX_SANDBOXES', bad);
+        vi.stubEnv('MASTRACODE_MAX_SANDBOXES', bad);
       const live = registryWith(3);
 
       expect(() => selectSandbox(ctxFor('session-3'), false, live)).toThrow(/MASTRACODE_MAX_SANDBOXES is 3/);
     }
   });
 
-  it('reports the missing image ahead of the cap', () => {
-    // An unset image breaks every session on this deployment; the cap refuses
+  it('reports a missing project secret ahead of the cap', () => {
+    // A missing secret breaks every session of that project; the cap refuses
     // only this one. The more general cause is the one worth naming.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = registryWith(3);
 
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', undefined);
-    expect(() => selectSandbox(ctxFor('session-3'), false, live)).toThrow(/FACTORY_SANDBOX_IMAGE/);
+    expect(() => selectSandbox({ ...ctxFor('session-3'), repoFullName: 'owner/app' }, false, live)).toThrow(
+      /FACTORY_SSM_PARAMETER_PATH/,
+    );
   });
 
   it('refuses rather than relocating the session to a configured cloud provider', () => {
@@ -637,7 +620,6 @@ describe('selectSandbox concurrent-session cap', () => {
     // configuration exists to prevent. Setting every cloud variable makes that
     // fall-through visible here if the refusal ever becomes a `return`.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     const live = registryWith(3);
 
     vi.stubEnv('MASTRA_PLATFORM_ACCESS_TOKEN', 'stray-token');
@@ -649,8 +631,8 @@ describe('selectSandbox concurrent-session cap', () => {
   });
 
   it('caps only the docker provider, leaving the others untouched', () => {
-    // The number is sized from this host's memory against
-    // FACTORY_SANDBOX_MEMORY_GIB, which no other provider reads — a cloud VM or
+    // The number is sized from this host's memory against the memoryGib in
+    // sandbox/sandbox.json, which no other provider reads — a cloud VM or
     // a `local` run is not competing for it.
     vi.stubEnv('MASTRACODE_MAX_SANDBOXES', '1');
     const live = new Map<string, MastraSandbox>();
@@ -679,7 +661,6 @@ describe('selectSandbox concurrent-session cap', () => {
     // while leaving `tsc` and all of them green. This one takes the default by
     // passing only two arguments, exactly as the exported `sandbox` slot does.
     vi.stubEnv('FACTORY_SANDBOX_PROVIDER', 'docker');
-    vi.stubEnv('FACTORY_SANDBOX_IMAGE', IMAGE);
     // `describe('selectSandbox')` above already registered `session-abc` here.
     liveDockerSandboxes.clear();
 
@@ -711,7 +692,6 @@ describe('selectSandbox concurrent-session cap', () => {
  * inverts exactly those two cases and nothing else.
  */
 describe('the exported sandbox slot', () => {
-  const IMAGE = 'factory-sandbox:2026-09-23';
   const ctx = {
     sessionId: 'slot-session',
     repoFullName: undefined,
@@ -726,7 +706,6 @@ describe('the exported sandbox slot', () => {
   /** Every key the slot resolves at load, stubbed, then a fresh generation of it. */
   async function loadSlot(env: {
     FACTORY_SANDBOX_PROVIDER?: string;
-    FACTORY_SANDBOX_IMAGE?: string;
     E2B_API_KEY?: string;
     MASTRA_PLATFORM_ACCESS_TOKEN?: string;
     MASTRA_PLATFORM_SECRET_KEY?: string;
@@ -735,7 +714,6 @@ describe('the exported sandbox slot', () => {
   }) {
     for (const key of [
       'FACTORY_SANDBOX_PROVIDER',
-      'FACTORY_SANDBOX_IMAGE',
       'E2B_API_KEY',
       'MASTRA_PLATFORM_ACCESS_TOKEN',
       'MASTRA_PLATFORM_SECRET_KEY',
@@ -749,9 +727,29 @@ describe('the exported sandbox slot', () => {
   }
 
   it('hands a Docker sandbox to the factory for the `docker` provider', async () => {
-    const { sandbox } = await loadSlot({ FACTORY_SANDBOX_PROVIDER: 'docker', FACTORY_SANDBOX_IMAGE: IMAGE });
+    const { sandbox } = await loadSlot({ FACTORY_SANDBOX_PROVIDER: 'docker' });
 
     expect(sandbox(ctx).name).toBe('DockerSandbox');
+  });
+
+  it('refuses every docker session when the cwd has no catalog, rather than falling through', async () => {
+    // A server started from somewhere other than a build has no catalog. With
+    // the whole platform group set, a refusal that returned would relocate the
+    // session to a cloud VM.
+    vi.mocked(process.cwd).mockReturnValue(emptyDir);
+    try {
+      const { sandbox } = await loadSlot({
+        FACTORY_SANDBOX_PROVIDER: 'docker',
+        MASTRA_PLATFORM_ACCESS_TOKEN: 'stray-token',
+        MASTRA_PLATFORM_SECRET_KEY: 'stray-key',
+        MASTRA_ENVIRONMENT_ID: 'stray-environment',
+        MASTRA_PROJECT_ID: 'stray-project',
+      });
+
+      expect(() => sandbox(ctx)).toThrow(/sandbox-catalog\.json is missing/);
+    } finally {
+      vi.mocked(process.cwd).mockReturnValue(catalogDir);
+    }
   });
 
   it('takes the platform arm when the whole group is set and no provider is selected', async () => {

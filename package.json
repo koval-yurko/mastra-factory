@@ -11,7 +11,7 @@
     "studio": "mastra studio -p 3000 -h 127.0.0.1 -s 4111",
     "db:up": "docker compose up -d --wait --wait-timeout 120",
     "db:down": "docker compose down",
-    "sandbox:build": "sh sandbox/build.sh",
+    "sandbox:build": "node src/build/sandbox-images.ts build",
     "check": "tsc --noEmit",
     "test": "vitest run --dir src",
     "build": "mastra build --dir src/mastra && node src/build/complete-output.ts",

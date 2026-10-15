@@ -216,6 +216,10 @@ that administers the Factory organization; `chmod 600 .env`), plus `jq`, `curl` 
 Docker engine. A deploy never removes sandbox containers. After changing `NODE_BIN`, re-run
 `actions-runner/register.sh` and restart both agents.
 
+Before any activation (deploy or rollback), with `FACTORY_SANDBOX_PROVIDER=docker`, every sandbox
+image that the release's `output/sandbox-catalog.json` names must exist on the engine, or the
+activation stops and names the tag (`sandbox/README.md`, "The image check at deploy").
+
 ## Supervision — LaunchAgents
 
 | File | Job |

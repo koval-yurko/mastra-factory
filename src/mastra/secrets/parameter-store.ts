@@ -28,9 +28,24 @@ export function parameterName(prefix: string, key: string): string {
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * Where per-project sandbox secrets live: `<prefix>/projects/<owner>/<name>/<KEY>`.
+ * Each project may hold its own `VERCEL_TOKEN`, so this subtree is never part of
+ * the flat env load (where two such names would collide) and is not listed by the
+ * `parameter_store` tool.
+ */
+export function projectsPath(prefix: string): string {
+  return parameterName(prefix, 'projects');
+}
+
+function isUnder(name: string, path: string): boolean {
+  return name.startsWith(`${path}/`);
+}
+
+/**
  * Load every parameter under `prefix` (recursively, `SecureString` values
  * decrypted, every page followed) and key each value by the LAST segment of its
- * name: `/mastra-factory/GITHUB_APP_ID` becomes `GITHUB_APP_ID`.
+ * name: `/mastra-factory/GITHUB_APP_ID` becomes `GITHUB_APP_ID`. The
+ * `projects/` subtree is skipped (`loadProjectParameters` reads it).
  *
  * A parameter whose last segment is not a valid env key name is skipped with a
  * warning that names it. Two parameters with the same last segment (for example
@@ -46,7 +61,7 @@ export async function loadParameters(client: Pick<SSMClient, 'send'>, prefix: st
       new GetParametersByPathCommand({ Path: prefix, Recursive: true, WithDecryption: true, NextToken: nextToken }),
     );
     for (const { Name: name, Value: value } of page.Parameters ?? []) {
-      if (!name || value === undefined) continue;
+      if (!name || value === undefined || isUnder(name, projectsPath(prefix))) continue;
       const key = name.slice(name.lastIndexOf('/') + 1);
       if (!ENV_KEY.test(key)) {
         console.warn(`[parameter-store] skipping ${name}: "${key}" is not a valid environment key name.`);
@@ -64,8 +79,46 @@ export async function loadParameters(client: Pick<SSMClient, 'send'>, prefix: st
 }
 
 /**
- * The env key names under the store's prefix (recursive), sorted, with the full
- * parameter name of each. No value is requested or returned.
+ * Load `<prefix>/projects/<owner>/<name>/<KEY>` into `{ "owner/name": { KEY: value } }`,
+ * the slug in lower case (GitHub compares slugs that way). A name of any other
+ * shape is skipped with a warning; two names that differ only in the case of the
+ * slug are an error. Values never appear in a log line or an error message.
+ */
+export async function loadProjectParameters(
+  client: Pick<SSMClient, 'send'>,
+  prefix: string,
+): Promise<Record<string, Record<string, string>>> {
+  const root = projectsPath(prefix);
+  const projects: Record<string, Record<string, string>> = {};
+  const sources: Record<string, string> = {};
+  let nextToken: string | undefined;
+  do {
+    const page = await client.send(
+      new GetParametersByPathCommand({ Path: root, Recursive: true, WithDecryption: true, NextToken: nextToken }),
+    );
+    for (const { Name: name, Value: value } of page.Parameters ?? []) {
+      if (!name || value === undefined) continue;
+      const parts = name.slice(root.length + 1).split('/');
+      const [owner, repo, key] = parts;
+      if (parts.length !== 3 || !owner || !repo || !key || !ENV_KEY.test(key)) {
+        console.warn(`[parameter-store] skipping ${name}: not ${root}/<owner>/<name>/<KEY>.`);
+        continue;
+      }
+      const slug = `${owner}/${repo}`.toLowerCase();
+      const id = `${slug}/${key}`;
+      if (id in sources) throw new Error(`Parameters ${sources[id]} and ${name} are the same project secret.`);
+      sources[id] = name;
+      (projects[slug] ??= {})[key] = value;
+    }
+    nextToken = page.NextToken;
+  } while (nextToken);
+  return projects;
+}
+
+/**
+ * The env key names under the store's prefix (recursive, without the
+ * `projects/` subtree), sorted, with the full parameter name of each. No value
+ * is requested or returned.
  */
 export async function listParameterNames(store: ParameterStore): Promise<{ key: string; name: string }[]> {
   const entries: { key: string; name: string }[] = [];
@@ -75,7 +128,7 @@ export async function listParameterNames(store: ParameterStore): Promise<{ key: 
       new GetParametersByPathCommand({ Path: store.prefix, Recursive: true, WithDecryption: false, NextToken: nextToken }),
     );
     for (const { Name: name } of page.Parameters ?? []) {
-      if (name) entries.push({ key: name.slice(name.lastIndexOf('/') + 1), name });
+      if (name && !isUnder(name, projectsPath(store.prefix))) entries.push({ key: name.slice(name.lastIndexOf('/') + 1), name });
     }
     nextToken = page.NextToken;
   } while (nextToken);

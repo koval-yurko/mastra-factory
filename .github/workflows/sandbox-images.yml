@@ -1,0 +1,52 @@
+# Build every sandbox image that the commit names and this engine does not have.
+# Design: sandbox/README.md ("Images").
+#
+# The tags come from the image inputs (src/build/sandbox-images.ts), so a run
+# with no changed Dockerfile or build context builds nothing and takes seconds.
+# deploy.yml calls this before it builds the release, so a release never names
+# an image that was not built. Run it by hand (Actions > sandbox-images > Run
+# workflow) to build images without a deploy.
+#
+# The runner's job-started hook accepts this file only from main
+# (actions-runner/hooks/job-started.sh). Never add pull_request,
+# pull_request_target, issue_comment or workflow_run: this runner runs jobs as
+# the deployment user.
+name: sandbox-images
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    if: >-
+      github.repository == 'koval-yurko/mastra-factory' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'koval-yurko' &&
+      github.triggering_actor == 'koval-yurko'
+    runs-on: [self-hosted, macOS, ARM64, factory-mac]
+    # One image build at a time on this engine, whether called by a deploy or run by hand.
+    concurrency:
+      group: sandbox-images
+      cancel-in-progress: false
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Each tag carries the date of the last commit that touched its inputs.
+          fetch-depth: 0
+
+      - name: Node is the server's Node
+        run: |
+          echo "node $(node --version), expected $FACTORY_NODE_VERSION"
+          test "$(node --version)" = "$FACTORY_NODE_VERSION"
+
+      - name: Plan
+        run: node src/build/sandbox-images.ts plan
+
+      - name: Build the missing images
+        run: node src/build/sandbox-images.ts build

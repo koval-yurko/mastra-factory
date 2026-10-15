@@ -20,6 +20,10 @@
  *   - ADDITIONAL keys are secrets and app credentials only our config reads;
  *     they belong in Parameter Store.
  *
+ * Project secrets are not keys: `<prefix>/projects/<owner>/<name>/<KEY>` is
+ * loaded at boot into a map of its own, read only through `projectSecrets`, and
+ * has no `.env` override (`sandbox/README.md`).
+ *
  * `env` is a live view: each read re-merges the sources, so tests that stub
  * `process.env` per case see their stub. In a running server nothing changes
  * after boot, so every read returns the validated value.
@@ -27,7 +31,13 @@
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { populate } from 'dotenv';
 import { EnvMissingError, cleanEnv, makeValidator, str, url, type ReporterOptions } from 'envalid';
-import { loadParameters, type ParameterStore } from '../secrets/parameter-store';
+import {
+  loadParameters,
+  loadProjectParameters,
+  parameterName,
+  projectsPath,
+  type ParameterStore,
+} from '../secrets/parameter-store';
 
 /** A string that must match `pattern` in full. */
 const matching = (pattern: RegExp, description: string) =>
@@ -80,14 +90,8 @@ const systemSpecs = {
   POSTGRES_PASSWORD: optional,
   POSTGRES_DB: optional,
 
-  // Sandbox (sandbox/README.md).
+  // Sandbox (sandbox/README.md). Images and ceilings are in sandbox/, not here.
   FACTORY_SANDBOX_PROVIDER: optional,
-  FACTORY_SANDBOX_IMAGE: matching(
-    /^factory-sandbox:[0-9]{4}-[0-9]{2}-[0-9]{2}[A-Za-z0-9._-]*$/,
-    'a date-tagged image, factory-sandbox:YYYY-MM-DD',
-  )({ default: undefined }),
-  FACTORY_SANDBOX_MEMORY_GIB: optional,
-  FACTORY_SANDBOX_CPUS: optional,
   MASTRACODE_SANDBOX_WORKDIR: str({ default: DEFAULTS.MASTRACODE_SANDBOX_WORKDIR }),
   MASTRACODE_LOCAL_SANDBOX_ROOT: optional,
   MASTRACODE_MAX_SANDBOXES: matching(/^[0-9]+$/, 'a whole number')({ default: undefined }),
@@ -149,8 +153,6 @@ const additionalSpecs = {
   SLACK_APP_BOT_TOKEN: optional,
   SLACK_APP_CLIENT_ID: optional,
   SLACK_APP_CLIENT_SECRET: optional,
-
-  EXPO_TOKEN: optional,
 };
 
 export const envSpecs = { ...systemSpecs, ...additionalSpecs };
@@ -181,7 +183,6 @@ export const SENSITIVE_KEYS: ReadonlySet<EnvKey> = new Set<EnvKey>([
   'SLACK_APP_SIGNING_SECRET',
   'SLACK_APP_BOT_TOKEN',
   'SLACK_APP_CLIENT_SECRET',
-  'EXPO_TOKEN',
 ]);
 
 /**
@@ -226,11 +227,17 @@ export const parameterStore: ParameterStore | undefined = bootstrap.FACTORY_SSM_
     }
   : undefined;
 
-async function loadFromParameterStore(store: ParameterStore | undefined): Promise<Record<string, string>> {
-  if (!store) return {};
+async function loadFromParameterStore(
+  store: ParameterStore | undefined,
+): Promise<{ loaded: Record<string, string>; projects: Record<string, Record<string, string>> }> {
+  if (!store) return { loaded: {}, projects: {} };
   let loaded: Record<string, string>;
+  let projects: Record<string, Record<string, string>>;
   try {
-    loaded = await loadParameters(store.client, store.prefix);
+    [loaded, projects] = await Promise.all([
+      loadParameters(store.client, store.prefix),
+      loadProjectParameters(store.client, store.prefix),
+    ]);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Loading environment values from AWS SSM Parameter Store under ${store.prefix} failed: ${reason}`, {
@@ -239,10 +246,14 @@ async function loadFromParameterStore(store: ParameterStore | undefined): Promis
   }
   for (const key of Object.keys(bootstrapSpecs)) delete loaded[key];
   console.log(`[env] loaded ${Object.keys(loaded).length} value(s) from AWS SSM Parameter Store under ${store.prefix}.`);
-  return loaded;
+  const projectCount = Object.values(projects).reduce((count, secrets) => count + Object.keys(secrets).length, 0);
+  if (projectCount > 0) {
+    console.log(`[env] loaded ${projectCount} project secret(s) for ${Object.keys(projects).length} project(s) under ${projectsPath(store.prefix)}.`);
+  }
+  return { loaded, projects };
 }
 
-const parameters = await loadFromParameterStore(parameterStore);
+const { loaded: parameters, projects: projectParameters } = await loadFromParameterStore(parameterStore);
 
 /** Whether `.env` or the shell holds a non-blank value for `key`, which then wins over Parameter Store. */
 export function isSetLocally(key: string): boolean {
@@ -284,11 +295,31 @@ export const env: EnvView = Object.freeze(
   ),
 ) as EnvView;
 
-/** `[key, value]` for every sensitive key that holds a value now; what `../logger` masks. */
-export function secretValues(): [EnvKey, string][] {
+/**
+ * The SSM secrets of one project, keyed by name, as loaded at boot. `slug` is
+ * the lower-case `owner/name`. Empty without Parameter Store.
+ */
+export function projectSecrets(slug: string): Readonly<Record<string, string>> {
+  return projectParameters[slug] ?? {};
+}
+
+/** The parameter name a project secret must have, or undefined without Parameter Store. */
+export function projectSecretName(slug: string, key: string): string | undefined {
+  return parameterStore ? parameterName(projectsPath(parameterStore.prefix), `${slug}/${key}`) : undefined;
+}
+
+/**
+ * `[label, value]` for every sensitive key that holds a value now, and for every
+ * project secret (labelled `owner/name/KEY`); what `../logger` masks.
+ */
+export function secretValues(): [string, string][] {
   const merged = readMerged();
-  return [...SENSITIVE_KEYS].flatMap(key => {
+  const keys = [...SENSITIVE_KEYS].flatMap(key => {
     const value = merged[key]?.trim();
-    return value ? [[key, value] as [EnvKey, string]] : [];
+    return value ? [[key, value] as [string, string]] : [];
   });
+  const projects = Object.entries(projectParameters).flatMap(([slug, secrets]) =>
+    Object.entries(secrets).flatMap(([key, value]) => (value.trim() ? [[`${slug}/${key}`, value.trim()] as [string, string]] : [])),
+  );
+  return [...keys, ...projects];
 }
