@@ -136,7 +136,7 @@ The secrets of `koval-yurko/eleven-labs-english-agent`:
 
 The repository has several Vercel projects, and one CLI works with all of them. Thus the container
 never holds `VERCEL_PROJECT_ID`: with `VERCEL_ORG_ID`, the CLI would work only with that one project.
-The agent sets `VERCEL_PROJECT_ID` for one command (the `vercel-cli` skill). A project command
+The agent sets `VERCEL_PROJECT_ID` for one command (a skill in the repository's `.claude/skills/`). A project command
 without it stops with the CLI error "You specified `VERCEL_ORG_ID` but you forgot to specify
 `VERCEL_PROJECT_ID`", so it cannot reach the wrong project; team commands (`vercel project ls`) work
 without it. Do not use the name `VERCEL_TEAM_ID`: the CLI reads it too and adds it to every API call.
@@ -160,8 +160,8 @@ build context and copies nothing.
 It does not use `FROM` with the shared image, so it holds only the tools its sessions use. Its build
 context is its own folder, so a `COPY` can reach only the files in that folder. The image for
 `koval-yurko/eleven-labs-english-agent` adds the EAS CLI (`eas-cli`) and the Vercel CLI, each at a
-pinned version. The `eas-cli` skill under `src/mastra/public/factory-skills/` tells the agent how to use
-`eas` where it is installed.
+pinned version. A skill that tells the agent how to use a project's tools belongs in that
+repository's `.claude/skills/`: a Factory session reads it from the clone once the container runs.
 
 **The session contract.** Every image must have these. The image pipeline checks them on the finished
 image and removes an image that fails:
