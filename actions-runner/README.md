@@ -139,6 +139,47 @@ the Node in `.path`, the same one as the Factory server.
 
 The runner updates itself. A runner update restarts the runner process only, not the Factory server.
 
+## Slack messages
+
+After every `deploy` run, the `notify` job runs `ops/deploy-notify.sh`. It posts 1 message to a
+Slack channel, with the time, the commit, the release id and a link to the run:
+
+| Message | When |
+| --- | --- |
+| :white_check_mark: Deployed | The new release is live. |
+| :double_vertical_bar: Deploy held | Local mode (`releases/HOLD`) is on. The release is stored, not live. |
+| :warning: Deploy rolled back | The new release failed its health check. The previous release is live again. |
+| :rotating_light: Factory is down | The health check failed, and no older release is healthy either. |
+| :x: Deploy failed | A sandbox image, the build or the deploy failed before the switch. Production is unchanged. |
+
+The webhook URL is a secret. It stays in `.env` on this Mac, not in GitHub ("No repository secrets"
+below). Set it up once:
+
+1. Open `https://api.slack.com/apps` > Create New App > From scratch. Give it a name, for example
+   `Factory deploys`, and pick the workspace. Use a separate app, not the Factory Slack app
+   (`apps/slack/`): a webhook there needs a new scope and a reinstall of that app.
+2. Features > Incoming Webhooks: turn it on. Click "Add New Webhook", pick the channel and allow.
+3. Copy the URL (`https://hooks.slack.com/services/...`) into `.env`:
+
+   ```sh
+   # in .env
+   FACTORY_DEPLOY_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+   ```
+
+4. Test it without a deploy. Expected: `[release] posted to Slack: Deployed`, and a message in the
+   channel.
+
+   ```sh
+   GITHUB_SHA=$(git rev-parse HEAD) GITHUB_SERVER_URL=https://github.com \
+   GITHUB_REPOSITORY=koval-yurko/mastra-factory GITHUB_RUN_ID=0 GITHUB_EVENT_PATH=/dev/null \
+   DEPLOY_OUTCOME=live ops/deploy-notify.sh
+   ```
+
+With the key empty, the job posts nothing and passes. If Slack refuses the message, the `notify` job
+fails, and the run shows red although the deploy itself is fine. A message that does not come at
+all means that the runner did not run the job: GitHub's own e-mail for a failed run is then the
+only alert.
+
 Facts that shape the pipeline: a job can run 5 days; a queued job is cancelled after 24 hours
 without a runner; the connection is outbound HTTPS only.
 

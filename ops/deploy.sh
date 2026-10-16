@@ -47,9 +47,18 @@ esac
 (( $# == 1 )) || usage
 readonly ID=$1
 
+# For the workflow's Slack message (ops/deploy-notify.sh): outcome is live,
+# held, rolled-back, down (no healthy server) or failed (nothing switched).
+report() {
+  [[ -n ${GITHUB_OUTPUT:-} ]] || return 0
+  print -r -- "outcome=$1" >> "$GITHUB_OUTPUT"
+  print -r -- "detail=${2:-}" >> "$GITHUB_OUTPUT"
+}
+
 if [[ -e $HOLD_FILE ]]; then
   say "held: releases/HOLD exists (local mode). $ID stays stored; run ops/deploy.sh $ID later."
   record "deploy $ID held"
+  report held
   [[ -n ${GITHUB_STEP_SUMMARY:-} ]] && print "Deploy held (local mode). Release \`$ID\` is stored." >> "$GITHUB_STEP_SUMMARY"
   exit 0
 fi
@@ -63,7 +72,15 @@ if sha=$(jq -r '.sha // empty' "$RELEASES_DIR/$ID/release.json" 2>/dev/null) && 
   fi
 fi
 
-activate "$ID" deploy || exit 1
+if ! activate "$ID" deploy; then
+  case $ACTIVATE_OUTCOME in
+    *"ALSO FAILED"*|"FAILED health") report down "$ACTIVATE_OUTCOME" ;;
+    *"rolled back"*) report rolled-back "$ACTIVATE_OUTCOME" ;;
+    *) report failed "${ACTIVATE_OUTCOME:-the release check refused $ID}" ;;
+  esac
+  exit 1
+fi
+report live "$ACTIVATE_OUTCOME"
 prune_releases
 [[ -n ${GITHUB_STEP_SUMMARY:-} ]] && print "Release \`$ID\` is live." >> "$GITHUB_STEP_SUMMARY"
 exit 0

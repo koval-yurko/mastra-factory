@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Shared routines for ops/deploy.sh, ops/rollback.sh and ops/local-mode.sh.
+# Shared routines for ops/deploy.sh, ops/rollback.sh, ops/local-mode.sh and
+# ops/deploy-notify.sh.
 # Sourced, never run. Design: docs/ci-deploy-research.md.
 #
 # Supervision and file placement only (AGENTS.md, the ops/*.sh carve-out):
@@ -364,8 +365,12 @@ prune_releases() {
 # database, so the new server comes up paused and nothing starts before the
 # health check. It is restored afterwards, on whichever server then runs. A
 # cancel (INT/TERM, e.g. from the runner) restores it before exiting.
+#
+# Leaves the outcome it records in ACTIVATE_OUTCOME, empty when the release
+# check refused before anything changed.
 activate() {
   local id=$1 mode=$2 old_current outcome
+  ACTIVATE_OUTCOME=
 
   check_release "$id" || return 1
   old_current=$(link_target current)
@@ -373,7 +378,7 @@ activate() {
 
   trap 'resume_automation; exit 143' INT TERM
   if health_ok; then
-    quiesce || { resume_automation; trap - INT TERM; record "$mode $id FAILED quiesce"; return 1; }
+    quiesce || { resume_automation; trap - INT TERM; ACTIVATE_OUTCOME="FAILED quiesce"; record "$mode $id $ACTIVATE_OUTCOME"; return 1; }
   else
     say "the server is not answering — nothing to quiesce"
   fi
@@ -381,7 +386,7 @@ activate() {
   if [[ $mode == deploy ]]; then
     say "dumping the database to releases/$id/db.dump"
     if ! dump_database "$RELEASES_DIR/$id/db.dump"; then
-      resume_automation; trap - INT TERM; record "$mode $id FAILED dump"; return 1
+      resume_automation; trap - INT TERM; ACTIVATE_OUTCOME="FAILED dump"; record "$mode $id $ACTIVATE_OUTCOME"; return 1
     fi
   fi
 
@@ -413,6 +418,7 @@ activate() {
   # Restored once a server answers; otherwise .quiesce.json stays for the next run.
   if health_ok; then resume_automation; fi
   trap - INT TERM
+  ACTIVATE_OUTCOME=$outcome
   record "$mode $id $outcome"
   [[ $outcome == ok* ]]
 }

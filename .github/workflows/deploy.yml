@@ -83,8 +83,35 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, factory-mac]
     # Up to 6 h waiting for Factory work to finish, plus the restart; the default is 360.
     timeout-minutes: 420
+    outputs:
+      outcome: ${{ steps.activate.outputs.outcome }}
+      detail: ${{ steps.activate.outputs.detail }}
     steps:
       - name: Activate the release
+        id: activate
         env:
           RELEASE: ${{ inputs.release || needs.build.outputs.release }}
         run: '"$REPO_ROOT/ops/deploy.sh" "$RELEASE"'
+
+  # One Slack message per run: deployed, held, rolled back, down or failed.
+  # Webhook and setup: actions-runner/README.md ("Slack messages").
+  notify:
+    needs: [sandbox-images, build, deploy]
+    if: >-
+      always() &&
+      github.repository == 'koval-yurko/mastra-factory' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'koval-yurko' &&
+      github.triggering_actor == 'koval-yurko'
+    runs-on: [self-hosted, macOS, ARM64, factory-mac]
+    timeout-minutes: 5
+    steps:
+      - name: Post the result to Slack
+        env:
+          IMAGES_RESULT: ${{ needs.sandbox-images.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          DEPLOY_OUTCOME: ${{ needs.deploy.outputs.outcome }}
+          DEPLOY_DETAIL: ${{ needs.deploy.outputs.detail }}
+          RELEASE: ${{ inputs.release || needs.build.outputs.release }}
+        run: '"$REPO_ROOT/ops/deploy-notify.sh"'

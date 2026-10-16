@@ -117,6 +117,9 @@ const systemSpecs = {
   // scripts read them, from `.env`; the server never does.
   FACTORY_DEPLOY_EMAIL: optional,
   FACTORY_DEPLOY_PASSWORD: optional,
+  // Slack incoming webhook for deploy results (`ops/deploy-notify.sh`), read
+  // from `.env` by that script only.
+  FACTORY_DEPLOY_SLACK_WEBHOOK_URL: optional,
 
   // Keep UNSET (AGENTS.md): each one hands this deployment back to Mastra's
   // platform, a cloud sandbox, or no authentication.
@@ -170,6 +173,7 @@ export const SENSITIVE_KEYS: ReadonlySet<EnvKey> = new Set<EnvKey>([
   'OPENAI_API_KEY',
   'WORKOS_COOKIE_PASSWORD',
   'FACTORY_DEPLOY_PASSWORD',
+  'FACTORY_DEPLOY_SLACK_WEBHOOK_URL',
   'MASTRA_PLATFORM_ACCESS_TOKEN',
   'MASTRA_PLATFORM_SECRET_KEY',
   'E2B_API_KEY',
