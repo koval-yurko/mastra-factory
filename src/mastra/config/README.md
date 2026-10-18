@@ -139,7 +139,7 @@ through a public member, so a second read that drifted to a different origin is 
 
 None of that is visible to any other check. `tsc` accepts either arm of every branch; the entry's own
 boot in `../index.test.ts` only ever exercises the no-database, no-integration arms, because
-the verify gate has neither a Postgres nor any credential. So `infrastructure.test.ts`
+the test run has neither a Postgres nor any credential. So `infrastructure.test.ts`
 stubs the backend packages rather than connecting to them — the question those modules answer is
 *which class with which options*, and a stub is what makes the options readable. It also keeps the
 suite from dialling. The auth, integration and sandbox suites deliberately do NOT stub their packages:
@@ -180,8 +180,8 @@ produces the artifact that gets deployed.
    named `mastra` built by a literal `new Mastra(...)` in that file — the deployer's
    `checkConfigExport` plugin inspects the entry's source, so a refactor that moves the constructor
    into a helper builds green and fails at deploy (AD-2).
-6. Update the two version lines and, if a concern moved, the module layout above. Then run the
-   verify gate.
+6. Update the two version lines and, if a concern moved, the module layout above. Then run
+   `npm run check`, `npm test` and `npm run build`.
 7. Append a dated line to the history below — one per reconciliation, naming the commit that took
    it and what was taken. The fork commit above never changes; this is how the record says when it
    was last checked, so a stale base is visible rather than merely assumed.
@@ -189,5 +189,5 @@ produces the artifact that gets deployed.
 ## Reconciliation history
 
 Format: `YYYY-MM-DD — <commit that took the reconciliation> — <what upstream changed and what was
-applied>`. None yet: the extraction in Story 5.4 is the first pass over this code and took no
+applied>`. None yet: the extraction of the entry is the first pass over this code and took no
 upstream update.

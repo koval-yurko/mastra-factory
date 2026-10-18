@@ -614,9 +614,8 @@ The hook file itself is in the repo root checkout. A push changes it only after 
 | `.gitignore` | Add `releases/` and `actions-runner/runner/`. |
 | `src/mastra/config/env.ts`, `.env.example` | Add `FACTORY_DEPLOY_EMAIL`, `FACTORY_DEPLOY_PASSWORD` (sensitive). |
 | `src/mastra/ops/live-sessions.ts`, `config/integrations.ts` | The all-sessions route, with tests, registered as the `live-sessions` integration. |
-| `ARCHITECTURE-SPINE.md` AD-3 (not done; BMAD framework only) | Add `.github/`, `actions-runner/` and `releases/` to the root directory set. |
-| `ARCHITECTURE-SPINE.md` AD-4 (not done), `AGENTS.md` (done) | Extend the shell carve-out to `actions-runner/*.sh` and `actions-runner/hooks/*.sh`. Production entry is `start:release`. |
-| `.bmad-loop/policy.toml` (not done; bmad-loop only) | Append guards for the new layout. Never rewrite the array. |
+| `docs/architecture.md` AD-3 (done) | Add `.github/`, `actions-runner/` and `releases/` to the root directory set. |
+| `docs/architecture.md` AD-4, `AGENTS.md` (done) | Extend the shell carve-out to `actions-runner/*.sh` and `actions-runner/hooks/*.sh`. Production entry is `start:release`. |
 | `README.md`, `ops/README.md` | "Rebuild: stop, build, start" becomes "deploy, rollback, local mode". |
 
 ## 13. Status and first run
@@ -632,7 +631,7 @@ The hook file itself is in the repo root checkout. A push changes it only after 
 | Rollback test: `ops/rollback.sh`, then `ops/deploy.sh <new id>` | To do after the first deploy. Also the first run of the live-sessions route. |
 | Parked session across a restart (D6) | Open. |
 | Sandbox re-created after a destroy (section 7.3) | Open. |
-| Spine record (`ARCHITECTURE-SPINE.md`) and bmad-loop guards | Open. Only the BMAD framework edits them. Two guards now fail: the root-directory set, and "`factory-start.sh` execs `npm run start`". |
+| Architecture record and verify guards | Done on 2026-10-18. BMAD was removed; `docs/architecture.md` records the new root set, and the bmad-loop guards were deleted. |
 
 ### 13.1 Defects found in testing, and fixed
 

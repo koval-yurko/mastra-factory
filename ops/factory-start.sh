@@ -74,7 +74,7 @@ while (( EPOCHSECONDS < deadline )); do
   if (( announced == 0 )); then
     # Name the branch that is actually blocking: "no socket yet" and "socket is
     # there, engine does not answer" are different faults, and this line is what
-    # Story 4.3 reads out of out.log.
+    # the supervision checkpoints in ops/README.md read out of out.log.
     if (( last_info_rc < 0 )); then
       print "[factory] waiting up to ${WAIT_SECONDS}s for the Colima docker socket at $DOCKER_SOCKET"
     else

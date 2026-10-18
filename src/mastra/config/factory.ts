@@ -15,9 +15,9 @@
  * `prepare()`, the literal `Mastra` construction the deployer's
  * `checkConfigExport` plugin reads, and `finalize()`.
  *
- * The call below is written out as a literal object argument and stays one: the
- * verify gate parses its top-level properties, and the nested `platform: { … }`
- * with them, to check that every extracted concern actually reaches a slot.
+ * The call below is written out as a literal object argument and stays one, so
+ * one read of its top-level properties, and the nested `platform: { … }` with
+ * them, shows that every extracted concern actually reaches a slot.
  *
  * See `README.md` in this directory for what the entry was forked from and how
  * these modules are reconciled with an upstream template update.

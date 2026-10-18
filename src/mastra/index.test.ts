@@ -9,7 +9,7 @@
  * `config/positive-int.test.ts` sit beside the modules they cover. What is left
  * here is the pair of questions only the entry can answer.
  *
- * These run inside the verify gate (`.bmad-loop/policy.toml` `[verify].commands`),
+ * These run in `npm test`, which the deploy workflow runs before each release,
  * so a change that breaks environment parsing fails there rather than at boot,
  * where the only witness is a crash-looping supervisor.
  *

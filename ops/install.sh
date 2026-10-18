@@ -2,7 +2,8 @@
 # Place the supervision artifacts where the OS reads them.
 #
 # Safe to re-run, and it starts nothing: bootstrapping the agents, the pmset
-# settings and the newsyslog dry run are Story 4.2's operator steps.
+# settings and the newsyslog dry run are operator steps in ops/README.md
+# ("Supervision — LaunchAgents").
 #
 # Supervision and file placement only (AGENTS.md, the ops/*.sh carve-out).
 
@@ -14,7 +15,7 @@ readonly SCRIPT_DIR="${0:A:h}"
 readonly REPO_ROOT="${SCRIPT_DIR:h}"
 
 # Every path in both plists is absolute and baked to this root. Running the
-# installer from a copy of the repo elsewhere — a bmad-loop worktree, say —
+# installer from a copy of the repo elsewhere — a git worktree, say —
 # would link plists pointing at a different tree, and launchd would report
 # nothing wrong. Refuse instead.
 readonly EXPECTED_ROOT=/Users/koval/dev/test/mastra-factory
@@ -106,4 +107,4 @@ done
 sudo install -o root -g wheel -m 644 "$REPO_ROOT/ops/newsyslog/$CONF_NAME" "$NEWSYSLOG_DIR/$CONF_NAME"
 print "[install] installed $NEWSYSLOG_DIR/$CONF_NAME (root:wheel 644)"
 
-print "[install] done. Nothing was started — bootstrap the agents per Story 4.2."
+print "[install] done. Nothing was started — bootstrap the agents per ops/README.md."

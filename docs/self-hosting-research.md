@@ -52,7 +52,7 @@ so even a stray var can't move sandboxes off this machine.
 
 ## 1. Architecture
 
-Non-normative — the record is the AD-12 deployment envelope diagram in `ARCHITECTURE-SPINE.md`.
+Non-normative — the record is the deployment envelope diagram in `docs/architecture.md`.
 ```
                     ┌──────────────── this machine, 24/7 ──────────────────────┐
   Internet          │  LaunchDaemon: cloudflared ──┐                           │
@@ -451,7 +451,7 @@ Accepted.
 
 One pass, loopback first, public last. Each step has a checkpoint; don't move on until it holds.
 
-The eleven-step **order** below is normative — `epics.md` treats it as a hard sequence and `AGENTS.md`
+The eleven-step **order** below is normative — the original plan treated it as a hard sequence and `AGENTS.md`
 counts §2–§11 as normative operational detail, and this section is where that order is recorded. The
 commands inside the block are not, which is what the marker covers:
 

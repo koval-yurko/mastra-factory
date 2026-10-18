@@ -1,11 +1,11 @@
 /**
  * The sandbox selection, its container ceilings and its concurrent-session cap,
- * Story 5.5 lifted out of the entry.
+ * lifted out of the entry.
  *
  * These assertions moved here unchanged from `../index.test.ts`. Three things in
  * them are invisible to every other check in this repository: the branch ORDER
  * that keeps agent work on this host, the `DockerSandboxOptions` numbers — no
- * container is ever created in the verify gate, and nothing else can observe
+ * container is ever created in a test run, and nothing else can observe
  * that object — and the cap, which no installed package enforces.
  *
  * Unlike `./auth` and `./integrations` this module has no load-time side effect,
@@ -14,8 +14,8 @@
  * than on exhaustive stubbing, so an inherited `MASTRACODE_MAX_SANDBOXES`
  * would silently configure the default-value cases into passing against the
  * wrong number. Keys are set with `vi.stubEnv` and never assigned, so no key
- * name appears here as a literal `process.env` read, which the verify gate
- * counts.
+ * name appears here as a literal `process.env` read, which AD-7
+ * (`docs/architecture.md`) limits.
  *
  * Images, ceilings and secret lists come from the sandbox catalog, not from the
  * environment. `dockerSandboxOptions` takes one by argument; the blocks that go
@@ -39,7 +39,7 @@ const CONFIG_ENV_PREFIXES = ['FACTORY_', 'MASTRA_', 'MASTRACODE_', 'E2B_', 'EXPO
 // DOCKER_HOST is swept even though this module never reads it: the docker tests
 // below construct a real `DockerSandbox`, whose `new Docker()` makes
 // docker-modem read DOCKER_HOST itself and throw on a value it cannot parse.
-// Inherited from an operator's shell, that would fail the verify gate for a
+// Inherited from an operator's shell, that would fail `npm test` for a
 // reason having nothing to do with the code under test.
 const CONFIG_ENV_EXACT = ['DOCKER_HOST'];
 
@@ -178,7 +178,7 @@ describe('localSandboxEnv', () => {
 /**
  * The ceilings handed to a session's Docker container. Nothing else in this
  * repository can observe a `DockerSandboxOptions` — the slot hands it straight
- * to the constructor, and no container is ever created in the verify gate — so
+ * to the constructor, and no container is ever created in a test run — so
  * these assertions are the only place a quota computed against the wrong period,
  * or a memory limit passed in gibibytes where Docker wants bytes, is visible.
  * The numbers are written out as literals rather than recomputed from the
@@ -470,7 +470,7 @@ describe('selectSandbox', () => {
  * `@mastra/factory` removed `maxSandboxes` with the sandbox fleet, and its
  * session registry constructs unconditionally — so this behaviour exists only in
  * this module, and `tsc` cannot see a capacity rule. No container is ever
- * created in the verify gate either, which leaves these assertions as the only
+ * created in a test run either, which leaves these assertions as the only
  * automated witness that a fourth concurrent session is refused rather than
  * handed its own 10 GiB ceiling on a host sized for three.
  *

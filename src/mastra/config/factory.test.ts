@@ -11,8 +11,7 @@
  * no longer matches, a CORS origin the SPA is refused from, a dispatcher running
  * at the wrong width, or an App that stops recognising its own comments.
  *
- * The call has to stay a literal object argument — the verify gate parses its
- * top-level properties — so the config cannot be extracted to a named export and
+ * The call stays a literal object argument (see `./factory.ts`), so the config cannot be extracted to a named export and
  * read directly. Instead `@mastra/factory` is mocked with `importOriginal`
  * spread and only `MastraFactory` swapped for a class that records its argument:
  * `createFactorySecretEncryption`, which `./auth` imports from the same module,
@@ -25,8 +24,8 @@
  * included, which is what lets one stubbed `MASTRACODE_PUBLIC_URL` be observed
  * reaching both of its consumers in a single case. Environment is arranged with
  * `vi.stubEnv` only, never by assignment, so no key name appears here as a
- * literal `process.env` read: the gate counts those, and after Story 5.6 every
- * declared key has at most one read site across `src/`.
+ * literal `process.env` read: every declared key has exactly one read site,
+ * `env.ts` (AD-7 in `docs/architecture.md`).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -83,8 +82,8 @@ for (const key of Object.keys(process.env)) {
 // Whichever case runs first here pays the cold transform of the whole `./factory`
 // graph plus `@mastra/factory` — about 0.9s warm, the slowest case in the repo and
 // roughly twice the next one. Vitest's 5s default leaves too little headroom for
-// that on a loaded machine: the verify gate runs `npm test` a few entries after
-// `npm ci`, and this file timed out there once while every case took 1-2ms on a
+// that on a loaded machine: CI runs `npm test` straight after `npm ci`,
+// and this file timed out in that position once while every case took 1-2ms on a
 // re-run. The ceiling is raised for the file rather than for the one case that
 // happens to be first today, since the cost belongs to the first import, not to
 // any particular assertion.

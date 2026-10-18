@@ -7,12 +7,6 @@ node_modules/
 src/mastra/public/factory/
 *.log
 .DS_Store
-.bmad-loop/runs/
-.bmad-loop/cache/
-# .bmad-loop/policy.toml is deliberately TRACKED: Story 1.2 must extend
-# [verify].commands, and a gitignored file cannot be committed or merged back
-# out of a story worktree. It holds configuration only, never secrets.
-_bmad/render/
 # Release store and runner program (docs/ci-deploy-research.md). Never `git clean -x` here.
 releases/
 actions-runner/runner/

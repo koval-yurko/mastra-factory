@@ -1,5 +1,5 @@
 /**
- * The env-knob parser Story 5.5 lifted out of the entry along with its only two
+ * The env-knob parser lifted out of the entry along with its only two
  * consumers.
  *
  * These assertions moved here unchanged from `../index.test.ts`. What they pin

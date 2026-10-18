@@ -2,10 +2,10 @@
  * Which backend each of the two extracted infrastructure concerns is, and with
  * which options.
  *
- * That pairing is the whole of what Story 5.4 moved, and no other check in this
+ * That pairing is the whole of what the extraction moved, and no other check in this
  * repository can see it: `tsc` is happy with either arm of either branch, and the
  * entry's own boot in `index.test.ts` only ever exercises the no-database arm,
- * because the verify gate has no Postgres. So the Postgres pair and the libSQL
+ * because the test run has no Postgres. So the Postgres pair and the libSQL
  * fallback are asserted here or nowhere.
  *
  * The three backend packages are stubbed, deliberately and not as a convenience:

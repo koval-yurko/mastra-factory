@@ -1,15 +1,9 @@
-<!-- bmad:context -->
-<!-- Verified 2026-09-25 against 4c176b4f84cdc16cd322c840c0d10d3d27d44596. Managed by
-     bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want
-     preserved outside the markers. -->
-
 ## mastra-factory
 
 A self-hosted Mastra Factory deployment: one operator, one Mac, own GitHub/Linear/Slack apps,
 own identity, own Docker sandboxes, own Postgres, and no dependency on Mastra's platform.
-TypeScript on Node 22.19+ or 24 (`engines.node` in `package.json`), npm, one package. The
-requirements contract is `_bmad-output/specs/spec-self-hosted-factory/SPEC.md` plus the files it
-names in `companions:` — there is no PRD.
+TypeScript on Node 22.19+ or 24 (`engines.node` in `package.json`), npm, one package. Goals,
+constraints and architecture decisions are in `docs/architecture.md`.
 
 ## Policy
 
@@ -19,8 +13,9 @@ names in `companions:` — there is no PRD.
   `actions-runner/`, limited to process supervision and file placement, never application logic.
 - Never add `workspaces` to `package.json`, add a second package, or switch package managers.
   One root `package.json` + `package-lock.json`, npm.
-- Never add a root directory — root is a closed set and changing it is an architecture-spine
-  change. Provider and app subjects go under `apps/`. `.github/`, `actions-runner/` and the
+- Never add a root directory or root file — root is a closed set (AD-3 in
+  `docs/architecture.md`), and changing it means recording it there first. Provider and app
+  subjects go under `apps/`. `.github/`, `actions-runner/` and the
   gitignored `releases/` were added for CI/CD (`docs/ci-deploy-research.md`).
 - Never `git clean -x`: it deletes `releases/` (every stored build and database dump) and
   `actions-runner/runner/` (the runner registration).
@@ -28,7 +23,7 @@ names in `companions:` — there is no PRD.
   breaks the hash or is overwritten. Repo-local skill overrides go to
   `src/mastra/public/factory-skills/<skill-name>/SKILL.md`.
 - Never renumber sections in `docs/self-hosting-research.md` — the numbers are cited as stable
-  anchors across the spec and stories.
+  anchors across `docs/`.
 - Keep secrets out of the repo: `.env` is gitignored; `src/mastra/config/env.ts` and `.env.example`
   carry key names and shapes only.
 - Treat every dependency bump as one-way and read the changelog first — there are no backups, and
@@ -43,24 +38,14 @@ names in `companions:` — there is no PRD.
   reconcile it: `src/mastra/config/` (`README.md` there; storage, vector, pubsub, auth, the three
   integrations and the sandbox branch are all constructed in that directory, not in the entry, and
   so is the `new MastraFactory({…})` call that assembles them — `config/factory.ts`)
-- Architecture decisions AD-1…AD-13, cited by ID throughout the stories:
-  `_bmad-output/planning-artifacts/architecture/architecture-mastra-factory-2026-09-22/ARCHITECTURE-SPINE.md`
-- Epics and stories: `_bmad-output/planning-artifacts/epics.md`
+- Goals, constraints, non-goals and architecture decisions AD-1…AD-13: `docs/architecture.md`
+- Known open issues: `docs/open-issues.md`
 - Normative operational detail in §2–§11, not background: `docs/self-hosting-research.md`
 
 ## Running and verifying
 
-- Verify with `npm run check`, `npm test` and `npm run build` — the bmad-loop gate runs each of
+- Verify with `npm run check`, `npm test` and `npm run build` — the deploy workflow runs each of
   them, so a change that only typechecks is not verified.
-- The bmad-loop verify gate runs every entry of `[verify].commands` in `.bmad-loop/policy.toml`, in
-  order, starting with `npm ci`, in a worktree holding tracked files only (no `node_modules/`, no
-  `.env`). Those entries reconcile the layout rules (no first-party code outside `src/`, root a
-  closed set), the vendored `.agents/skills/` tree, the environment-key split, the `ops/` and
-  `sandbox/` artifacts, the compose project and this block's own prose against the files they
-  describe — read the array rather than restating the guard list or its length anywhere. A story
-  that adds a check APPENDS it there and never rewrites or reorders the array, because the guards
-  already in it are enforced nowhere else; gating a new `npm run <script>` also obliges naming it
-  in this section. `.bmad-loop/policy.toml` is tracked, so a story worktree has it.
 - `npm run start:release` is the production entry point (`ops/factory-start.sh` execs it; it
   serves `releases/current`), and `npm run start` runs the local build in `.mastra/output`; both
   must keep working with the repo root as cwd. Renaming either script, or moving the repo, requires
@@ -108,5 +93,3 @@ names in `companions:` — there is no PRD.
   every session container.
 - Operator-plane directories hold no first-party code and reach the code plane only through
   environment variables and CLI invocation, never an import.
-
-<!-- /bmad:context -->

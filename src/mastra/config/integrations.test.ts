@@ -1,6 +1,6 @@
 /**
- * The three direct integrations and the OAuth-state signer Story 5.5 lifted out
- * of the entry.
+ * The three direct integrations and the OAuth-state signer lifted out of the
+ * entry.
  *
  * Unlike its sibling suites this file is not a relocation: none of this was
  * tested anywhere before, and three separate things about it are invisible to
@@ -22,7 +22,7 @@
  * reads is stubbed on every case — including to `undefined` — so no case can
  * inherit a value from the operator's shell, and keys are set with `vi.stubEnv`
  * rather than assigned, so no key name appears here as a literal `process.env`
- * read: the verify gate counts those, and this module is meant to be the only
+ * read: AD-7 (`docs/architecture.md`) limits those, and this module is meant to be the only
  * read site for fifteen of the sixteen. The exception is `MASTRACODE_PUBLIC_URL`,
  * which has consumers in two concerns and is therefore read once in
  * `./public-url`; this module imports it from there.
@@ -362,7 +362,7 @@ describe('the Slack group', () => {
 
   it('mounts them on MASTRACODE_CHANNELS_PUBLIC_URL when that is the only origin', async () => {
     // The other arm of the `??`, and the half that says WHICH local feeds
-    // `oidcRedirectBaseUrl`. Story 5.5 collapsed two reads of
+    // `oidcRedirectBaseUrl`. The extraction collapsed two reads of
     // `MASTRACODE_PUBLIC_URL` into one local sitting beside this key's read,
     // and the two are interchangeable to `tsc` — both `string | undefined`.
     // Swap them and a tunnelled deployment builds its Slack `redirect_uri`

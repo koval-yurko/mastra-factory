@@ -1,6 +1,6 @@
 /**
- * The identity-provider chain and the credential-key decoder Story 5.5 lifted
- * out of the entry.
+ * The identity-provider chain and the credential-key decoder lifted out of
+ * the entry.
  *
  * These assertions moved here unchanged from `../index.test.ts`. What they pin
  * is the branch ORDER of `selectAuth`, which nothing else in the repository can

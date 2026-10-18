@@ -1,5 +1,5 @@
 /**
- * The connection-string resolution Story 5.4 lifted out of the entry.
+ * The connection-string resolution lifted out of the entry.
  *
  * Two things here are load-bearing and neither is visible to `tsc`: how the
  * value is trimmed, and whether a deployment with no database refuses to boot
