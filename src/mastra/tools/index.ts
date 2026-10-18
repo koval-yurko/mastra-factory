@@ -15,12 +15,15 @@
  * fails the boot.
  */
 import type { FactoryIntegration } from '@mastra/factory';
-import { isSetLocally, parameterStore } from '../config/env';
+import { env, isSetLocally, parameterStore } from '../config/env';
+import { createContext7Tools } from './context7/definition';
 import { createParameterStoreTool } from './parameter-store/definition';
 import { getWeatherTool } from './weather/definition';
 
 const TOOLS = {
   get_weather: getWeatherTool,
+  // Unset CONTEXT7_API_KEY → anonymous requests, at the anonymous rate limit.
+  ...createContext7Tools(env.CONTEXT7_API_KEY),
   // Only with FACTORY_SSM_PARAMETER_PATH set: without a prefix there is no store to manage.
   ...(parameterStore ? { parameter_store: createParameterStoreTool(parameterStore, isSetLocally) } : {}),
 };

@@ -156,6 +156,9 @@ const additionalSpecs = {
   SLACK_APP_BOT_TOKEN: optional,
   SLACK_APP_CLIENT_ID: optional,
   SLACK_APP_CLIENT_SECRET: optional,
+
+  // Context7 docs tools (`src/mastra/tools/context7/`). Unset = anonymous limits.
+  CONTEXT7_API_KEY: optional,
 };
 
 export const envSpecs = { ...systemSpecs, ...additionalSpecs };
@@ -187,6 +190,7 @@ export const SENSITIVE_KEYS: ReadonlySet<EnvKey> = new Set<EnvKey>([
   'SLACK_APP_SIGNING_SECRET',
   'SLACK_APP_BOT_TOKEN',
   'SLACK_APP_CLIENT_SECRET',
+  'CONTEXT7_API_KEY',
 ]);
 
 /**

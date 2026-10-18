@@ -117,6 +117,7 @@ Models, issue sources and Slack are configured in the UI; server settings live i
 | GitHub / Linear / Slack app keys | `apps/github/README.md`, `apps/linear/README.md`, `apps/slack/README.md` |
 | Sandbox keys | `sandbox/README.md` |
 | Server, origin, Docker and tunnel keys | `ops/README.md` |
+| `CONTEXT7_API_KEY` (optional, for the `context7_*` agent tools) | `src/mastra/tools/context7/logic.ts` |
 | Every key, with a comment | `src/mastra/config/env.ts` (`envSpecs`) and `.env.example` |
 
 Postgres (pgvector, `127.0.0.1:54329` only) reads `POSTGRES_PASSWORD` (required, `openssl rand -hex 32`), `POSTGRES_USER` (`factory`) and `POSTGRES_DB` (`mastracode_web`) from `.env`, only when the data volume is first created.

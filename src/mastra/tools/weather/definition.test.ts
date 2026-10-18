@@ -37,9 +37,11 @@ describe('get_weather', () => {
 });
 
 describe('customTools', () => {
-  it('offers get_weather to the agent and nothing over HTTP', async () => {
+  it('offers get_weather and the Context7 tools to the agent and nothing over HTTP', async () => {
     expect(customTools.id).toBe('custom-tools');
     expect(customTools.routes({} as never)).toEqual([]);
-    expect(await customTools.agentTools!({ requestContext: {} as never })).toEqual({ get_weather: getWeatherTool });
+    const tools = await customTools.agentTools!({ requestContext: {} as never });
+    expect(Object.keys(tools)).toEqual(['get_weather', 'context7_resolve_library_id', 'context7_query_docs']);
+    expect(tools.get_weather).toBe(getWeatherTool);
   });
 });

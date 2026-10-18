@@ -60,14 +60,23 @@ describe('registration', () => {
   }
 
   it('is absent without FACTORY_SSM_PARAMETER_PATH', async () => {
-    expect(Object.keys(await loadTools({ FACTORY_SSM_PARAMETER_PATH: undefined }))).toEqual(['get_weather']);
+    expect(Object.keys(await loadTools({ FACTORY_SSM_PARAMETER_PATH: undefined }))).toEqual([
+      'get_weather',
+      'context7_resolve_library_id',
+      'context7_query_docs',
+    ]);
   });
 
   it('is offered with FACTORY_SSM_PARAMETER_PATH set', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const tools = await loadTools({ FACTORY_SSM_PARAMETER_PATH: '/factory/', AWS_SECRETS_MANAGER_REGION: 'eu-central-1' });
 
-    expect(Object.keys(tools).sort()).toEqual(['get_weather', 'parameter_store']);
+    expect(Object.keys(tools).sort()).toEqual([
+      'context7_query_docs',
+      'context7_resolve_library_id',
+      'get_weather',
+      'parameter_store',
+    ]);
     expect(tools.parameter_store!.description).toContain('under /factory.');
   });
 });
