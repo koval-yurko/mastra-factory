@@ -1,0 +1,46 @@
+diff --git a/node_modules/@mastra/core/dist/agent-controller-C_6RbJaM.cjs b/node_modules/@mastra/core/dist/agent-controller-C_6RbJaM.cjs
+index 2a8ed2f..0360669 100644
+--- a/node_modules/@mastra/core/dist/agent-controller-C_6RbJaM.cjs
++++ b/node_modules/@mastra/core/dist/agent-controller-C_6RbJaM.cjs
+@@ -7241,7 +7241,17 @@ var AgentController = class {
+ 				const metadata = t.metadata ?? {};
+ 				return scopeEntries.every(([key, value]) => metadata[key] === value);
+ 			});
+-			if (candidates.length === 0 && overrides?.createInitialThread !== false) await session.thread.create({ requestContext });
++			if (candidates.length === 0 && overrides?.createInitialThread !== false) {
++				// Name an unscoped session's first thread after its resource, as the web UI
++				// does: a later request for that thread then finds it current and does not
++				// create or switch a thread, which would supersede the run binding and
++				// cancel a first message still in startup ("Session startup cancelled").
++				const ownId = overrides?.scope === void 0 && !await session.thread.getById({ threadId: effectiveResourceId }) ? effectiveResourceId : void 0;
++				await session.thread.create({
++					...ownId ? { id: ownId } : {},
++					requestContext
++				});
++			}
+ 			else if (candidates.length > 0) {
+ 				const mostRecent = [...candidates].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+ 				await this.config.threadLock?.acquire(mostRecent.id);
+diff --git a/node_modules/@mastra/core/dist/agent-controller-DRiP9C5v.js b/node_modules/@mastra/core/dist/agent-controller-DRiP9C5v.js
+index 933216f..b5de846 100644
+--- a/node_modules/@mastra/core/dist/agent-controller-DRiP9C5v.js
++++ b/node_modules/@mastra/core/dist/agent-controller-DRiP9C5v.js
+@@ -7241,7 +7241,17 @@ var AgentController = class {
+ 				const metadata = t.metadata ?? {};
+ 				return scopeEntries.every(([key, value]) => metadata[key] === value);
+ 			});
+-			if (candidates.length === 0 && overrides?.createInitialThread !== false) await session.thread.create({ requestContext });
++			if (candidates.length === 0 && overrides?.createInitialThread !== false) {
++				// Name an unscoped session's first thread after its resource, as the web UI
++				// does: a later request for that thread then finds it current and does not
++				// create or switch a thread, which would supersede the run binding and
++				// cancel a first message still in startup ("Session startup cancelled").
++				const ownId = overrides?.scope === void 0 && !await session.thread.getById({ threadId: effectiveResourceId }) ? effectiveResourceId : void 0;
++				await session.thread.create({
++					...ownId ? { id: ownId } : {},
++					requestContext
++				});
++			}
+ 			else if (candidates.length > 0) {
+ 				const mostRecent = [...candidates].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+ 				await this.config.threadLock?.acquire(mostRecent.id);

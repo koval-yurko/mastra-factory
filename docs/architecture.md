@@ -125,7 +125,7 @@ Root directories:
 | `apps/`, `docs/`, `ops/`, `sandbox/`, `src/` | The two planes |
 | `.github/` | GitHub reads workflows only from this path |
 | `actions-runner/` | The self-hosted runner: plist, hooks, registration script. `actions-runner/runner/` is gitignored |
-| `patches/` | `patch-package` reads patches from this path (`postinstall`) |
+| `patches/` | `patch-package` reads patches from this path (`postinstall`); `npm run build` also applies them to the build output (`src/build/complete-output.ts`) |
 | `.agents/`, `.claude/` | Tool trees, see AD-13 |
 | `node_modules/`, `releases/`, `.mastra/` | Gitignored. `releases/` is the release store; never `git clean -x` |
 

@@ -1,24 +1,34 @@
 diff --git a/node_modules/@mastra/factory/dist/integrations/slack/slack.js b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
-index ab558c5..440760a 100644
+index f5a18ed..bf904b4 100644
 --- a/node_modules/@mastra/factory/dist/integrations/slack/slack.js
 +++ b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
-@@ -344,7 +344,13 @@ function createChannelSessionStartHook(deps) {
+@@ -334,7 +334,7 @@ function createChannelSessionStartHook(deps) {
+ 		});
+ 		const modeId = session.mode.get();
+ 		const activeThreadId = session.thread.getId();
+-		if (await migratePersistedModelSelection({
++		const persistedModelId = await migratePersistedModelSelection({
+ 			getMetadata: async () => activeThreadId ? (await session.thread.getById({ threadId: activeThreadId }))?.metadata ?? {} : {},
+ 			modeId,
+ 			set: (key, value) => activeThreadId ? session.thread.setSettingOn({
+@@ -343,7 +343,14 @@ function createChannelSessionStartHook(deps) {
+ 				value
  			}) : Promise.resolve(),
  			threadId: activeThreadId ?? void 0
- 		});
--		if (persistedModelId) {
-+		// Provenance marker: the id THIS hook last derived (sender's default, else the
+-		})) for (const agentType of SUBAGENT_TYPES) {
++		});
++		// Provenance marker: the id THIS hook last derived (the owner's default, else the
 +		// factory default). A pin equal to it, or a legacy pin with no marker, was
 +		// nobody's choice and re-resolves so a changed default reaches the thread; a
 +		// pin that diverges from it is a deliberate switch and is never overwritten.
 +		const derivedModelId = await session.thread.getSetting({ key: DERIVED_MODEL_KEY });
 +		const userPickedModel = Boolean(persistedModelId) && typeof derivedModelId === "string" && persistedModelId !== derivedModelId;
-+		if (persistedModelId && userPickedModel) {
- 			await hydrateFactorySession(session, {
- 				orgId: owner.orgId,
- 				factoryProjectId: owner.factoryProjectId,
-@@ -401,6 +407,18 @@ function createChannelSessionStartHook(deps) {
- 					value: modelId
++		if (userPickedModel) for (const agentType of SUBAGENT_TYPES) {
+ 			const modelId = await session.thread.getSetting({ key: pinnedSubagentModelKey(agentType) });
+ 			if (typeof modelId === "string") await applySubagentModel(session, agentType, modelId);
+ 		}
+@@ -361,9 +368,22 @@ function createChannelSessionStartHook(deps) {
+ 					value: selectedModelId
  				});
  			}
 +			const appliedModelId = session.model.get();
@@ -34,10 +44,6 @@ index ab558c5..440760a 100644
 +				});
 +			}
  		}
- 		await applyPersonalMemorySettings(session, {
- 			memorySettings,
-@@ -409,6 +427,7 @@ function createChannelSessionStartHook(deps) {
- 		});
  	};
  }
 +const DERIVED_MODEL_KEY = "slackDerivedModelId";
