@@ -1,8 +1,8 @@
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/model.js b/node_modules/@mastra/code-sdk/dist/agents/model.js
-index 3914345..1670403 100644
+index daa029d..8f17f85 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/model.js
 +++ b/node_modules/@mastra/code-sdk/dist/agents/model.js
-@@ -162,7 +162,7 @@ function getDynamicModel({ requestContext }, settingsPath) {
+@@ -200,7 +200,7 @@ function getDynamicModel({ requestContext }, settingsPath, { modeless = false }
  	const state = controller?.getState?.();
  	const pendingState = state?.mastracodePendingModelFallback;
  	const pendingFallback = pendingState && (pendingState.threadId === void 0 || typeof pendingState.threadId === "string" && pendingState.threadId === controller?.threadId) ? pendingState : void 0;

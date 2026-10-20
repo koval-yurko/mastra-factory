@@ -1,5 +1,5 @@
 diff --git a/node_modules/@mastra/server/dist/server/handlers/auth.js b/node_modules/@mastra/server/dist/server/handlers/auth.js
-index 150da8b..427529b 100644
+index 9286bad..0def0f6 100644
 --- a/node_modules/@mastra/server/dist/server/handlers/auth.js
 +++ b/node_modules/@mastra/server/dist/server/handlers/auth.js
 @@ -8,7 +8,34 @@ import { z } from "zod/v4";

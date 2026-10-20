@@ -25,10 +25,19 @@
  * the same reason: the server reads it from its cwd, so a release and a rollback
  * carry the image tags, ceilings and secret lists they were built with.
  *
+ * Last, it puts `patches/` into the output. `mastra build` installs a fresh,
+ * unpatched copy of every external package into `.mastra/output/node_modules`,
+ * so `patch-package` (root `postinstall`) never reaches what the server runs.
+ * A patch for a package installed there is applied to it with `patch`; a
+ * patch for a package the bundler inlined from the patched root `node_modules`
+ * is checked line by line against the bundle. A patch that reaches neither
+ * fails the build, so a release carries every patch or does not exist.
+ *
  * Run as `node src/build/complete-output.ts` (Node strips the types). It uses
  * only `node:` modules and import-free first-party ones, so it runs without a
  * build of its own.
  */
+import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +60,14 @@ export interface CompleteOutputResult {
   publicEntries: string[];
   /** Every image the catalog names, shared image first. */
   sandboxImages: string[];
+  /** Every file in `patches/`, and how it reached the output. */
+  patches: AppliedPatch[];
+}
+
+export interface AppliedPatch {
+  file: string;
+  /** `installed`: applied to `<output>/node_modules`. `bundled`: found in the output's `.mjs` files. */
+  via: 'installed' | 'bundled';
 }
 
 export function completeOutput({
@@ -94,7 +111,82 @@ export function completeOutput({
   const { catalog, images } = readSandboxSources(root, inputDate);
   writeFileSync(join(output, SANDBOX_CATALOG_FILE), `${JSON.stringify(catalog, null, 2)}\n`);
 
-  return { ui: `mastra@${cliVersion}`, publicEntries, sandboxImages: images.map(image => image.tag) };
+  // 5. The patches, into what the server runs.
+  const patches = applyPatchesToOutput(root, output);
+
+  return { ui: `mastra@${cliVersion}`, publicEntries, sandboxImages: images.map(image => image.tag), patches };
+}
+
+function applyPatchesToOutput(root: string, output: string): AppliedPatch[] {
+  const patchDir = join(root, 'patches');
+  if (!existsSync(patchDir)) return [];
+  let bundle: string | undefined;
+  return readdirSync(patchDir)
+    .filter(file => file.endsWith('.patch'))
+    .sort()
+    .map(file => {
+      // patch-package names a patch `<name with / as +>+<version>.patch`; its
+      // nested (`++`), sequenced and `.dev` forms are not used here.
+      const parts = file.slice(0, -'.patch'.length).split('+');
+      const version = parts.pop();
+      const name = parts.join('/');
+      if (!version || !/^\d+\.\d+\.\d+/.test(version) || !name || parts.includes('') || file.endsWith('.dev.patch')) {
+        throw new Error(`patches/${file}: not a plain <package>+<version>.patch name.`);
+      }
+      const patchFile = join(patchDir, file);
+      const packageJson = join(output, 'node_modules', name, 'package.json');
+
+      if (existsSync(packageJson)) {
+        const installed = (JSON.parse(readFileSync(packageJson, 'utf8')) as { version: string }).version;
+        if (installed !== version) {
+          throw new Error(`patches/${file}: the output installs ${name}@${installed}, not ${version}.`);
+        }
+        // Already applied (a second run on the same output) is not an error.
+        if (runPatch(output, patchFile, ['--reverse', '--dry-run']).status !== 0) {
+          const result = runPatch(output, patchFile, []);
+          if (result.status !== 0) {
+            throw new Error(`patches/${file} does not apply to ${output}/node_modules/${name}:\n${result.stdout}${result.stderr}`);
+          }
+        }
+        return { file, via: 'installed' as const };
+      }
+
+      // Not installed in the output, so the bundler inlined it: every added
+      // line must be in the bundle. Whitespace, quotes and semicolons are
+      // dropped first, because the bundler rewrites them.
+      bundle ??= normalize(
+        readdirSync(output)
+          .filter(entry => entry.endsWith('.mjs'))
+          .map(entry => readFileSync(join(output, entry), 'utf8'))
+          .join('\n'),
+      );
+      const missing = addedLines(readFileSync(patchFile, 'utf8')).filter(line => !bundle!.includes(normalize(line)));
+      if (missing.length > 0) {
+        throw new Error(
+          `patches/${file}: ${name} is not installed in the output, and the bundle lacks ${missing.length} added line(s), first: ${missing[0]}`,
+        );
+      }
+      return { file, via: 'bundled' as const };
+    });
+}
+
+function runPatch(output: string, patchFile: string, flags: string[]) {
+  return spawnSync('patch', ['--strip', '1', '--forward', '--batch', '--silent', '--directory', output, '--input', patchFile, ...flags], {
+    encoding: 'utf8',
+  });
+}
+
+/** The `+` lines of a unified diff that carry code: no file headers, blanks, lone braces or comments. */
+function addedLines(diff: string): string[] {
+  return diff
+    .split('\n')
+    .filter(line => line.startsWith('+') && !line.startsWith('+++'))
+    .map(line => line.slice(1).trim())
+    .filter(line => normalize(line).length > 3 && !line.startsWith('//'));
+}
+
+function normalize(code: string): string {
+  return code.replace(/[\s'";]/g, '');
 }
 
 // Run directly: `node src/build/complete-output.ts` from the repo root.
@@ -102,4 +194,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const result = completeOutput({ root: process.cwd() });
   console.log(`[build] Factory UI from ${result.ui}; copied src/mastra/public/{${result.publicEntries.join(',')}} into .mastra/output`);
   console.log(`[build] sandbox catalog names ${result.sandboxImages.join(', ')}`);
+  console.log(`[build] patches: ${result.patches.map(patch => `${patch.file} (${patch.via})`).join(', ') || 'none'}`);
 }

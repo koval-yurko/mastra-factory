@@ -1,7 +1,7 @@
 /**
  * The post-build step on a fake repo in a temporary folder: a fake CLI UI, a
  * stale public/factory, a skill override, a fake server build, and a minimal
- * sandbox/ tree.
+ * sandbox/ tree. The patch tests add a patches/ folder and run the real `patch`.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,6 +43,7 @@ describe('completeOutput', () => {
       ui: 'mastra@9.9.9',
       publicEntries: ['factory', 'factory-skills'],
       sandboxImages: [expect.stringMatching(/^factory-sandbox:2026-10-01-[0-9a-f]{12}$/)],
+      patches: [],
     });
     expect(readFileSync(join(root, '.mastra/output/factory/index.html'), 'utf8')).toBe('new ui');
     expect(existsSync(join(root, '.mastra/output/factory/assets/app.js'))).toBe(true);
@@ -85,5 +86,77 @@ describe('completeOutput', () => {
   it('fails when the CLI ships no UI', () => {
     rmSync(join(root, 'node_modules/mastra/dist/factory'), { recursive: true });
     expect(() => completeOutput({ root, inputDate })).toThrow(/no prebuilt Factory UI/);
+  });
+
+  describe('patches', () => {
+    const installedPatch = [
+      'diff --git a/node_modules/@scope/pkg/dist/a.js b/node_modules/@scope/pkg/dist/a.js',
+      '--- a/node_modules/@scope/pkg/dist/a.js',
+      '+++ b/node_modules/@scope/pkg/dist/a.js',
+      '@@ -1,3 +1,3 @@',
+      ' const a = 1;',
+      '-const b = 2;',
+      '+const b = process.env.PATCHED ?? 3;',
+      ' export { a, b };',
+      '',
+    ].join('\n');
+    const bundledPatch = [
+      'diff --git a/node_modules/inlined/dist/b.js b/node_modules/inlined/dist/b.js',
+      '--- a/node_modules/inlined/dist/b.js',
+      '+++ b/node_modules/inlined/dist/b.js',
+      '@@ -1,2 +1,3 @@',
+      ' function f() {',
+      '+\tconst who = process.env.WHO ?? "local-user";',
+      '+\t// a comment the bundler may drop',
+      ' }',
+      '',
+    ].join('\n');
+
+    beforeEach(() => {
+      write('patches/@scope+pkg+1.2.3.patch', installedPatch);
+      write('.mastra/output/node_modules/@scope/pkg/package.json', JSON.stringify({ version: '1.2.3' }));
+      write('.mastra/output/node_modules/@scope/pkg/dist/a.js', 'const a = 1;\nconst b = 2;\nexport { a, b };\n');
+      write('patches/inlined+4.5.6.patch', bundledPatch);
+      write('.mastra/output/routes-abc.mjs', "function f() {\n\tconst who = process.env.WHO ?? 'local-user'\n}\n");
+    });
+
+    const patched = () => readFileSync(join(root, '.mastra/output/node_modules/@scope/pkg/dist/a.js'), 'utf8');
+
+    it('applies a patch to the installed copy and finds an inlined one in the bundle', () => {
+      const { patches } = completeOutput({ root, inputDate });
+
+      expect(patches).toEqual([
+        { file: '@scope+pkg+1.2.3.patch', via: 'installed' },
+        { file: 'inlined+4.5.6.patch', via: 'bundled' },
+      ]);
+      expect(patched()).toBe('const a = 1;\nconst b = process.env.PATCHED ?? 3;\nexport { a, b };\n');
+    });
+
+    it('accepts an output that is already patched', () => {
+      completeOutput({ root, inputDate });
+      completeOutput({ root, inputDate });
+
+      expect(patched()).toBe('const a = 1;\nconst b = process.env.PATCHED ?? 3;\nexport { a, b };\n');
+    });
+
+    it('fails when the output installs another version', () => {
+      write('.mastra/output/node_modules/@scope/pkg/package.json', JSON.stringify({ version: '1.2.4' }));
+      expect(() => completeOutput({ root, inputDate })).toThrow(/installs @scope\/pkg@1\.2\.4, not 1\.2\.3/);
+    });
+
+    it('fails when the patch does not apply', () => {
+      write('.mastra/output/node_modules/@scope/pkg/dist/a.js', 'const a = 1;\nconst b = 5;\nexport { a, b };\n');
+      expect(() => completeOutput({ root, inputDate })).toThrow(/@scope\+pkg\+1\.2\.3\.patch does not apply/);
+    });
+
+    it('fails when an inlined patch is not in the bundle', () => {
+      write('.mastra/output/routes-abc.mjs', 'function f() {}\n');
+      expect(() => completeOutput({ root, inputDate })).toThrow(/inlined is not installed in the output, and the bundle lacks 1 added line/);
+    });
+
+    it('fails on a patch-package name form it does not handle', () => {
+      write('patches/@scope+pkg+1.2.3.dev.patch', installedPatch);
+      expect(() => completeOutput({ root, inputDate })).toThrow(/not a plain <package>\+<version>\.patch name/);
+    });
   });
 });
