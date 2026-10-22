@@ -11,3 +11,326 @@ index daa029d..8f17f85 100644
  	if (!modelId) {
  		if (!controller) throw new Error("No model available: this run started without a controller session context, so no model selection could be resolved.");
  		throw new Error("No model selected. Use /models to select a model first.");
+diff --git a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
+index c82bb38..ccf2454 100644
+--- a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
++++ b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
+@@ -69,14 +69,47 @@ export declare function sessionInstructionRoots(workingDir: string, instructionR
+  * from that ref and the other roots are skipped; without one no project files
+  * load.
+  */
+-export declare function loadSessionInstructions({ workingDir, instructionRoots, configDir, untrustedCheckout, baseRef, skipGlobal, }: {
++export declare function loadSessionInstructions({ workingDir, instructionRoots, configDir, untrustedCheckout, baseRef, skipGlobal, snapshot, }: {
+     workingDir: string;
+     instructionRoots?: readonly string[];
+     configDir?: string;
+     untrustedCheckout?: boolean;
+     baseRef?: string;
+     skipGlobal?: boolean;
++    /** Project files read inside a remote sandbox (`readSandboxInstructionSnapshot`). */
++    snapshot?: SandboxInstructionSnapshot;
+ }): InstructionSource[];
++/** Project instruction files read inside a remote sandbox, by absolute sandbox path. */
++export interface SandboxInstructionSnapshot {
++    files: Map<string, string>;
++    /** Git ref the files were read from (untrusted checkouts). */
++    ref?: string;
++    /** False while a root directory is missing in the sandbox. */
++    complete: boolean;
++}
++/**
++ * Read the project instruction files `loadSessionInstructions` looks for from
++ * inside a remote sandbox, in one command. Rejects when the command fails.
++ */
++export declare function readSandboxInstructionSnapshot({ sandbox, workingDir, instructionRoots, configDir, untrustedCheckout, baseRef, }: {
++    sandbox: {
++        executeCommand(command: string, args?: string[], options?: {
++            timeout?: number;
++            maxRetainedBytes?: number;
++        }): Promise<{
++            exitCode: number;
++            stdout?: string;
++            stderr?: string;
++        }>;
++    };
++    workingDir: string;
++    instructionRoots?: readonly string[];
++    configDir?: string;
++    untrustedCheckout?: boolean;
++    baseRef?: string;
++}): Promise<SandboxInstructionSnapshot>;
++/** A reader over a `readSandboxInstructionSnapshot` result. */
++export declare function createSnapshotInstructionReader(snapshot: SandboxInstructionSnapshot): InstructionFileReader;
+ /**
+  * Paths of loaded instruction sources, each project source also under its
+  * root's canonical path, so reactive reminders never repeat a file the
+diff --git a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
+index 73cfc83..88ca5b6 100644
+--- a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
++++ b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
+@@ -221,17 +221,92 @@ function sessionInstructionRoots(workingDir, instructionRoots) {
+ * tree: with a `baseRef` the first root (the session's own checkout) is served
+ * from that ref and the other roots are skipped; without one no project files
+ * load.
++*
++* `snapshot` (from `readSandboxInstructionSnapshot`) serves project files read
++* inside a remote sandbox, whose paths do not exist on the host.
+ */
+-function loadSessionInstructions({ workingDir, instructionRoots, configDir, untrustedCheckout = false, baseRef, skipGlobal = false }) {
++function loadSessionInstructions({ workingDir, instructionRoots, configDir, untrustedCheckout = false, baseRef, skipGlobal = false, snapshot }) {
+ 	const [primary, ...others] = sessionInstructionRoots(workingDir, instructionRoots);
+-	const sources = loadAgentInstructions(primary, configDir, untrustedCheckout ? baseRef ? createGitRefInstructionReader(primary, baseRef) : {
++	const snapshotReader = snapshot ? createSnapshotInstructionReader(snapshot) : void 0;
++	const sources = loadAgentInstructions(primary, configDir, untrustedCheckout ? baseRef ? snapshotReader ?? createGitRefInstructionReader(primary, baseRef) : {
+ 		exists: () => false,
+ 		read: () => ""
+-	} : void 0, { skipGlobal });
++	} : snapshotReader, { skipGlobal });
+ 	if (untrustedCheckout) return sources;
+-	for (const root of others) sources.push(...loadAgentInstructions(root, configDir, void 0, { skipGlobal: true }));
++	for (const root of others) sources.push(...loadAgentInstructions(root, configDir, snapshotReader, { skipGlobal: true }));
+ 	return sources;
+ }
++/** Per-command deadline for the sandbox read, so a hung sandbox cannot block the prompt. */
++const SANDBOX_INSTRUCTION_TIMEOUT_MS = 1e4;
++function sandboxShellQuote(value) {
++	return `'${value.replace(/'/g, `'\\''`)}'`;
++}
++/**
++* Read the project instruction files `loadSessionInstructions` looks for from
++* inside a remote sandbox, in one command. An untrusted checkout reads its
++* first root from `baseRef` with `git show`, as `createGitRefInstructionReader`
++* does on the host. Resolves `{ files, ref, complete }`: `complete` is false
++* while a root directory is missing (the clone is not there yet), so callers
++* do not keep that result. Rejects when the command fails.
++*/
++async function readSandboxInstructionSnapshot({ sandbox, workingDir, instructionRoots, configDir = DEFAULT_CONFIG_DIR, untrustedCheckout = false, baseRef }) {
++	const allRoots = sessionInstructionRoots(workingDir, instructionRoots);
++	const roots = untrustedCheckout ? allRoots.slice(0, 1) : allRoots;
++	const locations = PROJECT_LOCATIONS.map((loc) => loc === ".mastracode" ? configDir : loc);
++	const candidates = roots.flatMap((root) => locations.flatMap((location) => INSTRUCTION_FILES.map((filename) => ({
++		root,
++		path: join(location ? join(root, location) : root, filename)
++	}))));
++	const script = [
++		...roots.map((root, index) => `[ -d ${sandboxShellQuote(root)} ] && printf 'R %d\\n' ${index}`),
++		...candidates.map(({ root, path }, index) => {
++			const emit = (read) => `{ printf 'F %d\\n' ${index}; ${read} | base64 | tr -d '\\n'; printf '\\n'; }`;
++			if (!untrustedCheckout) return `[ -f ${sandboxShellQuote(path)} ] && ${emit(`cat ${sandboxShellQuote(path)}`)}`;
++			const rel = relative(root, path).split(sep).join("/");
++			const [first, second] = [`origin/${baseRef}`, baseRef].map((ref) => {
++				const object = sandboxShellQuote(`${ref}:${rel}`);
++				return {
++					test: `[ "$(git -C ${sandboxShellQuote(root)} cat-file -t ${object} 2>/dev/null)" = blob ]`,
++					read: `git -C ${sandboxShellQuote(root)} show ${object}`
++				};
++			});
++			return `if ${first.test}; then ${emit(first.read)}; elif ${second.test}; then ${emit(second.read)}; fi`;
++		}),
++		"true"
++	].join("\n");
++	const result = await sandbox.executeCommand("sh", ["-c", script], {
++		timeout: SANDBOX_INSTRUCTION_TIMEOUT_MS,
++		maxRetainedBytes: Infinity
++	});
++	if (result.exitCode !== 0) throw new Error(`Reading instruction files in the sandbox failed (exit ${result.exitCode}): ${result.stderr ?? ""}`);
++	const files = /* @__PURE__ */ new Map();
++	const presentRoots = /* @__PURE__ */ new Set();
++	const lines = (result.stdout ?? "").split("\n");
++	for (let i = 0; i < lines.length; i++) {
++		const match = /^([RF]) (\d+)$/.exec(lines[i]);
++		if (!match) continue;
++		const index = Number(match[2]);
++		if (match[1] === "R") presentRoots.add(index);
++		else if (candidates[index]) files.set(candidates[index].path, Buffer.from(lines[++i] ?? "", "base64").toString("utf-8"));
++	}
++	return {
++		files,
++		...untrustedCheckout ? { ref: baseRef } : {},
++		complete: presentRoots.size === roots.length
++	};
++}
++/** A reader over a `readSandboxInstructionSnapshot` result. */
++function createSnapshotInstructionReader(snapshot) {
++	return {
++		...snapshot.ref ? { ref: snapshot.ref } : {},
++		exists: (path) => snapshot.files.has(path),
++		read: (path) => {
++			const content = snapshot.files.get(path);
++			if (content === void 0) throw new Error(`Not in the sandbox snapshot: ${path}`);
++			return content;
++		}
++	};
++}
+ /**
+ * Paths of loaded instruction sources, each project source also under its
+ * root's canonical path, so reactive reminders never repeat a file the
+@@ -270,6 +345,6 @@ function formatAgentInstructions(sources) {
+ 	return `\n${AGENT_INSTRUCTIONS_HEADING}\n\n${sections.join("\n\n")}\n`;
+ }
+ //#endregion
+-export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, sessionInstructionRoots };
++export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, createSnapshotInstructionReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, readSandboxInstructionSnapshot, sessionInstructionRoots };
+ 
+ //# sourceMappingURL=agent-instructions.js.map
+\ No newline at end of file
+diff --git a/node_modules/@mastra/code-sdk/dist/index.js b/node_modules/@mastra/code-sdk/dist/index.js
+index 11dbbbe..b752ebe 100644
+--- a/node_modules/@mastra/code-sdk/dist/index.js
++++ b/node_modules/@mastra/code-sdk/dist/index.js
+@@ -43,6 +43,7 @@ import { getToolCategory } from "./permissions.js";
+ import { PluginManager } from "./plugins/manager.js";
+ import { PluginSignalLane } from "./plugins/signal-lane.js";
+ import { PlanRejectionAbortProcessor } from "./processors/plan-rejection-abort.js";
++import { SandboxInstructionsProcessor } from "./processors/sandbox-instructions.js";
+ import { createGitHubCopilotGateway } from "./providers/github-copilot-gateway.js";
+ import { assembleSchedulePrompt } from "./schedules/prompt.js";
+ import { ThreadScheduler, scheduleSignalAttributes, shortScheduleId } from "./schedules/scheduler.js";
+@@ -588,6 +589,7 @@ async function createMastraCodeAgentController(config) {
+ 	const mastraCodeInputProcessors = [
+ 		...Array.isArray(config?.inputProcessors) ? config.inputProcessors : [],
+ 		new PlanRejectionAbortProcessor(),
++		new SandboxInstructionsProcessor({ getWorkspace: (requestContext) => codeAgent.getWorkspace({ requestContext }) }),
+ 		...backgroundToolsEnabled ? [createBackgroundWorkSignalProcessor()] : [],
+ 		new AgentsMDInjector({
+ 			isEnabled: ({ requestContext }) => {
+diff --git a/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.d.ts b/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.d.ts
+new file mode 100644
+index 0000000..744bf78
+--- /dev/null
++++ b/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.d.ts
+@@ -0,0 +1,21 @@
++/**
++ * Adds the project instruction files (AGENTS.md, CLAUDE.md) of a session whose
++ * workspace runs in a remote sandbox, read inside that sandbox. Runs inside the
++ * agent run, never in the controller's session startup.
++ */
++import type { Processor, ProcessInputStepArgs } from '@mastra/core/processors';
++import type { MessageList } from '@mastra/core/agent';
++import type { RequestContext } from '@mastra/core/request-context';
++/** System-message tag this processor owns. */
++export declare const SANDBOX_INSTRUCTIONS_TAG = "mastracode-sandbox-instructions";
++export declare class SandboxInstructionsProcessor implements Processor<'mastracode-sandbox-instructions'> {
++    id: "mastracode-sandbox-instructions";
++    name: string;
++    constructor({ getWorkspace }: {
++        /** The workspace the agent runs against for this request. */
++        getWorkspace: (requestContext: RequestContext) => unknown;
++    });
++    processInputStep({ messageList, requestContext }: ProcessInputStepArgs): Promise<{
++        messageList: MessageList;
++    }>;
++}
+diff --git a/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.js b/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.js
+new file mode 100644
+index 0000000..80e3a0f
+--- /dev/null
++++ b/node_modules/@mastra/code-sdk/dist/processors/sandbox-instructions.js
+@@ -0,0 +1,107 @@
++import { AGENT_INSTRUCTIONS_HEADING, formatInstructionSource, loadSessionInstructions, readSandboxInstructionSnapshot } from "../agents/prompts/agent-instructions.js";
++//#region src/processors/sandbox-instructions.ts
++/** System-message tag this processor owns, so each step replaces its block instead of stacking one. */
++const SANDBOX_INSTRUCTIONS_TAG = "mastracode-sandbox-instructions";
++/** How long a sandbox read is reused: the same window as the skill staleness check. */
++const SANDBOX_INSTRUCTION_CACHE_MS = 3e4;
++/**
++* Adds the project instruction files (AGENTS.md, CLAUDE.md) of a session whose
++* workspace runs in a remote sandbox. The prompt builder reads them off the
++* host filesystem, where the sandbox's checkout path does not exist.
++*
++* Runs inside the agent run, never in the controller's session startup:
++* `getWorkspace` resolves the agent's workspace for the request, as the
++* workspace-instructions processor does (step processors get no agent), and it
++* starts the sandbox (and waits for its setup, which clones the repository)
++* before the first model call, because the files are in the clone. A local or
++* absent sandbox adds nothing and leaves the prompt builder in charge.
++*/
++var SandboxInstructionsProcessor = class {
++	id = "mastracode-sandbox-instructions";
++	name = "Sandbox Instructions Processor";
++	#getWorkspace;
++	#cache = /* @__PURE__ */ new Map();
++	constructor({ getWorkspace }) {
++		this.#getWorkspace = getWorkspace;
++	}
++	async processInputStep({ messageList, requestContext }) {
++		let block;
++		try {
++			block = await this.#resolve(requestContext);
++		} catch (error) {
++			console.warn("[mastracode] Could not read instruction files from the sandbox:", error instanceof Error ? error.message : String(error));
++			return { messageList };
++		}
++		messageList.clearSystemMessages(SANDBOX_INSTRUCTIONS_TAG);
++		if (block) messageList.addSystem({
++			role: "system",
++			content: block
++		}, SANDBOX_INSTRUCTIONS_TAG);
++		return { messageList };
++	}
++	async #resolve(requestContext) {
++		if (!requestContext) return "";
++		const workspace = await this.#getWorkspace(requestContext);
++		const sandbox = workspace?.sandbox;
++		if (!sandbox || sandbox.provider === "local" || typeof sandbox.executeCommand !== "function") return "";
++		const controller = requestContext.get("controller");
++		let state = controller?.getState?.();
++		const untrustedCheckout = state?.untrustedCheckout === true;
++		const baseRef = typeof state?.baseRef === "string" ? state.baseRef : void 0;
++		if (untrustedCheckout && !baseRef) return "";
++		if (sandbox.status !== "running" && typeof sandbox.ensureRunning === "function") await sandbox.ensureRunning();
++		if (sandbox._startPromise) await sandbox._startPromise;
++		if (!state?.projectPath) {
++			await this.#getWorkspace(requestContext);
++			state = controller?.getState?.();
++		}
++		const workingDir = state?.projectPath || await workspace.filesystem?.base?.();
++		if (!workingDir) return "";
++		const instructionRoots = Array.isArray(state?.instructionRoots) ? state.instructionRoots : void 0;
++		const configDir = typeof state?.configDir === "string" ? state.configDir : void 0;
++		const snapshot = await this.#snapshot({
++			sandbox,
++			workingDir,
++			instructionRoots,
++			configDir,
++			untrustedCheckout,
++			baseRef
++		});
++		const sources = loadSessionInstructions({
++			workingDir,
++			instructionRoots,
++			configDir,
++			untrustedCheckout,
++			baseRef,
++			skipGlobal: true,
++			snapshot
++		});
++		if (sources.length === 0) return "";
++		return `${AGENT_INSTRUCTIONS_HEADING}\n\n${sources.map(formatInstructionSource).join("\n\n")}`;
++	}
++	/** One sandbox read per cache window; a result with a missing root (no clone yet) is not kept. */
++	#snapshot(input) {
++		const key = JSON.stringify([input.sandbox.id, input.workingDir, input.instructionRoots ?? [], input.configDir ?? "", input.untrustedCheckout, input.baseRef ?? ""]);
++		const now = Date.now();
++		for (const [entryKey, entry] of this.#cache) if (now - entry.at > SANDBOX_INSTRUCTION_CACHE_MS) this.#cache.delete(entryKey);
++		const cached = this.#cache.get(key);
++		if (cached) return cached.snapshot;
++		const entry = {
++			at: now,
++			snapshot: readSandboxInstructionSnapshot(input).then((snapshot) => {
++				if (snapshot.complete) entry.at = Date.now();
++				else if (this.#cache.get(key) === entry) this.#cache.delete(key);
++				return snapshot;
++			}, (error) => {
++				if (this.#cache.get(key) === entry) this.#cache.delete(key);
++				throw error;
++			})
++		};
++		this.#cache.set(key, entry);
++		return entry.snapshot;
++	}
++};
++//#endregion
++export { SANDBOX_INSTRUCTIONS_TAG, SandboxInstructionsProcessor };
++
++//# sourceMappingURL=sandbox-instructions.js.map
