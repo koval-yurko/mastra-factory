@@ -163,6 +163,19 @@ context is its own folder, so a `COPY` can reach only the files in that folder. 
 pinned version. A skill that tells the agent how to use a project's tools belongs in that
 repository's `.claude/skills/`: a Factory session reads it from the clone once the container runs.
 
+**Repository instructions.** The session agent puts the clone's `AGENTS.md` into its system prompt, or
+`CLAUDE.md` when there is no `AGENTS.md`. It looks at the clone root, then `.claude/`, then
+`.mastracode/`, and uses the first file it finds. Unpatched, `@mastra/code-sdk` looks for these files
+on this host, where `/workspace/<repo>` does not exist, so a docker session got none of them. The patch
+in `patches/@mastra+code-sdk+1.14.0.patch` adds an input processor to the session agent. It reads the
+files inside the container with one command and keeps the result for 30 seconds. A pull request review
+reads them from the base branch with `git show`, never from the pull request. The processor runs inside
+the agent run, before the first model call, so the first message of a session starts the container
+and waits for the clone and the setup command. Do not move this read into the session startup (the
+agent's `instructions` callback): the first version of this patch did that, and every new session
+failed with `Session startup cancelled`. A `CLAUDE.md` in a subdirectory and an `@path` import are not
+loaded.
+
 **The session contract.** Every image must have these. The image pipeline checks them on the finished
 image and removes an image that fails:
 
