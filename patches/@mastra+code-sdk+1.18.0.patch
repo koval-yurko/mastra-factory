@@ -1,8 +1,8 @@
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/model.js b/node_modules/@mastra/code-sdk/dist/agents/model.js
-index daa029d..8f17f85 100644
+index e566467..f3722da 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/model.js
 +++ b/node_modules/@mastra/code-sdk/dist/agents/model.js
-@@ -200,7 +200,7 @@ function getDynamicModel({ requestContext }, settingsPath, { modeless = false }
+@@ -276,7 +276,7 @@ function getDynamicModel({ requestContext }, settingsPath, { modeless = false, d
  	const state = controller?.getState?.();
  	const pendingState = state?.mastracodePendingModelFallback;
  	const pendingFallback = pendingState && (pendingState.threadId === void 0 || typeof pendingState.threadId === "string" && pendingState.threadId === controller?.threadId) ? pendingState : void 0;
@@ -65,7 +65,7 @@ index c82bb38..ccf2454 100644
   * Paths of loaded instruction sources, each project source also under its
   * root's canonical path, so reactive reminders never repeat a file the
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
-index 73cfc83..88ca5b6 100644
+index 1fb8283..f78ec57 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
 +++ b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
 @@ -221,17 +221,92 @@ function sessionInstructionRoots(workingDir, instructionRoots) {
@@ -165,17 +165,17 @@ index 73cfc83..88ca5b6 100644
  /**
  * Paths of loaded instruction sources, each project source also under its
  * root's canonical path, so reactive reminders never repeat a file the
-@@ -270,6 +345,6 @@ function formatAgentInstructions(sources) {
+@@ -269,6 +344,6 @@ function formatAgentInstructions(sources) {
+ 	const sections = sources.map(formatInstructionSource);
  	return `\n${AGENT_INSTRUCTIONS_HEADING}\n\n${sections.join("\n\n")}\n`;
  }
- //#endregion
 -export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, sessionInstructionRoots };
 +export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, createSnapshotInstructionReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, readSandboxInstructionSnapshot, sessionInstructionRoots };
  
  //# sourceMappingURL=agent-instructions.js.map
 \ No newline at end of file
 diff --git a/node_modules/@mastra/code-sdk/dist/index.js b/node_modules/@mastra/code-sdk/dist/index.js
-index 11dbbbe..b752ebe 100644
+index 5897338..f0a99aa 100644
 --- a/node_modules/@mastra/code-sdk/dist/index.js
 +++ b/node_modules/@mastra/code-sdk/dist/index.js
 @@ -43,6 +43,7 @@ import { getToolCategory } from "./permissions.js";
@@ -186,7 +186,7 @@ index 11dbbbe..b752ebe 100644
  import { createGitHubCopilotGateway } from "./providers/github-copilot-gateway.js";
  import { assembleSchedulePrompt } from "./schedules/prompt.js";
  import { ThreadScheduler, scheduleSignalAttributes, shortScheduleId } from "./schedules/scheduler.js";
-@@ -588,6 +589,7 @@ async function createMastraCodeAgentController(config) {
+@@ -619,6 +620,7 @@ async function createMastraCodeAgentController(config) {
  	const mastraCodeInputProcessors = [
  		...Array.isArray(config?.inputProcessors) ? config.inputProcessors : [],
  		new PlanRejectionAbortProcessor(),

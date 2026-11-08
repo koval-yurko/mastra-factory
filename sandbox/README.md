@@ -167,7 +167,7 @@ repository's `.claude/skills/`: a Factory session reads it from the clone once t
 `CLAUDE.md` when there is no `AGENTS.md`. It looks at the clone root, then `.claude/`, then
 `.mastracode/`, and uses the first file it finds. Unpatched, `@mastra/code-sdk` looks for these files
 on this host, where `/workspace/<repo>` does not exist, so a docker session got none of them. The patch
-in `patches/@mastra+code-sdk+1.14.0.patch` adds an input processor to the session agent. It reads the
+in `patches/@mastra+code-sdk+1.18.0.patch` adds an input processor to the session agent. It reads the
 files inside the container with one command and keeps the result for 30 seconds. A pull request review
 reads them from the base branch with `git show`, never from the pull request. The processor runs inside
 the agent run, before the first model call, so the first message of a session starts the container

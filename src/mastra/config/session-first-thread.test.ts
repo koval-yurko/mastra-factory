@@ -1,6 +1,6 @@
 /**
- * The `@mastra/core` patch (`patches/@mastra+core+1.78.0.patch`) that names an
- * unscoped session's first thread after its resource. The web UI opens a new
+ * The `@mastra/core` patch (`patches/@mastra+core+1.82.0.patch`) that names an
+ * new session's first thread after its resource. The web UI opens a new
  * chat as thread `<resourceId>`, but a request without a thread id can create
  * the session first. Unpatched, that session gets a random-id thread, and the
  * later request for thread `<resourceId>` creates it and supersedes the run
@@ -79,12 +79,17 @@ describe('first thread of a new session', () => {
     expect(await threadIds(storage, 'chat-2')).toEqual([session.thread.getId()]);
   });
 
-  it('keeps a random id for a scoped session', async () => {
-    const { controller } = controllerWithSlowStartup();
+  it('names a tagged session too, and gives the next tagged session on that resource a random id', async () => {
+    // Core 1.82 replaced `scope` with `tags`. Factory 0.23 sessions with tags (Slack,
+    // start-coordinator) got the resource-named thread, so the port keeps that.
+    const { controller, storage } = controllerWithSlowStartup();
     await controller.init();
 
-    const session = await controller.createSession({ resourceId: 'chat-3', id: 'chat-3::slack', ownerId: 'factory', scope: 'slack' });
+    const first = await controller.createSession({ resourceId: 'chat-3', id: 'chat-3::a', ownerId: 'factory', tags: { factoryProjectId: 'a' } });
+    const second = await controller.createSession({ resourceId: 'chat-3', id: 'chat-3::b', ownerId: 'factory', tags: { factoryProjectId: 'b' } });
 
-    expect(session.thread.getId()).not.toBe('chat-3');
+    expect(first.thread.getId()).toBe('chat-3');
+    expect(second.thread.getId()).not.toBe('chat-3');
+    expect(await threadIds(storage, 'chat-3')).toHaveLength(2);
   });
 });

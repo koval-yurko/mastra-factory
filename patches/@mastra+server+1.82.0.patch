@@ -1,9 +1,9 @@
 diff --git a/node_modules/@mastra/server/dist/server/handlers/auth.js b/node_modules/@mastra/server/dist/server/handlers/auth.js
-index 9286bad..0def0f6 100644
+index 0d1886b..922e087 100644
 --- a/node_modules/@mastra/server/dist/server/handlers/auth.js
 +++ b/node_modules/@mastra/server/dist/server/handlers/auth.js
 @@ -8,7 +8,34 @@ import { z } from "zod/v4";
- //#region src/server/handlers/auth.ts
+ // src/server/handlers/auth.ts
  let _buildCapabilitiesPromise;
  function loadBuildCapabilities() {
 -	if (!_buildCapabilitiesPromise) _buildCapabilitiesPromise = import("@mastra/core/auth/ee").then((m) => m.buildCapabilities).catch(() => {

@@ -1,17 +1,17 @@
 diff --git a/node_modules/@mastra/factory/dist/integrations/slack/slack.js b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
-index f5a18ed..bf904b4 100644
+index 624fa17..c94c4ff 100644
 --- a/node_modules/@mastra/factory/dist/integrations/slack/slack.js
 +++ b/node_modules/@mastra/factory/dist/integrations/slack/slack.js
-@@ -334,7 +334,7 @@ function createChannelSessionStartHook(deps) {
+@@ -388,7 +388,7 @@ function createChannelSessionStartHook(deps) {
+ 			value: sessionId
  		});
  		const modeId = session.mode.get();
- 		const activeThreadId = session.thread.getId();
 -		if (await migratePersistedModelSelection({
 +		const persistedModelId = await migratePersistedModelSelection({
  			getMetadata: async () => activeThreadId ? (await session.thread.getById({ threadId: activeThreadId }))?.metadata ?? {} : {},
  			modeId,
  			set: (key, value) => activeThreadId ? session.thread.setSettingOn({
-@@ -343,7 +343,14 @@ function createChannelSessionStartHook(deps) {
+@@ -397,7 +397,14 @@ function createChannelSessionStartHook(deps) {
  				value
  			}) : Promise.resolve(),
  			threadId: activeThreadId ?? void 0
@@ -27,7 +27,7 @@ index f5a18ed..bf904b4 100644
  			const modelId = await session.thread.getSetting({ key: pinnedSubagentModelKey(agentType) });
  			if (typeof modelId === "string") await applySubagentModel(session, agentType, modelId);
  		}
-@@ -361,9 +368,22 @@ function createChannelSessionStartHook(deps) {
+@@ -415,9 +422,22 @@ function createChannelSessionStartHook(deps) {
  					value: selectedModelId
  				});
  			}
