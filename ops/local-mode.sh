@@ -44,6 +44,7 @@ case ${1:-} in
   status)
     print "HOLD:    $([[ -e $HOLD_FILE ]] && print set || print 'not set')"
     print "agent:   $(factory_loaded && print "loaded, pid $(factory_pid)" || print 'not loaded')"
+    print "studio:  $(launchctl print "gui/$UID/$STUDIO_LABEL" >/dev/null 2>&1 && print loaded || print 'not loaded')"
     print "current: $(link_target current || true)"
     if pid=$(lsof -nP -iTCP:4111 -sTCP:LISTEN -t 2>/dev/null | head -n 1) && [[ -n $pid ]]; then
       print "port 4111: pid $pid, cwd $(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"

@@ -19,6 +19,8 @@ readonly HOLD_FILE=$RELEASES_DIR/HOLD
 readonly FACTORY_LABEL=ai.mastra.factory
 readonly FACTORY_PLIST=$HOME/Library/LaunchAgents/$FACTORY_LABEL.plist
 readonly FACTORY_URL=http://127.0.0.1:4111
+readonly STUDIO_LABEL=ai.mastra.studio
+readonly STUDIO_PLIST=$HOME/Library/LaunchAgents/$STUDIO_LABEL.plist
 readonly DB_SERVICE=app-db
 
 readonly KEEP_RELEASES=5
@@ -143,16 +145,27 @@ health_ok() {
   [[ $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$FACTORY_URL/health") == 200 ]]
 }
 
-restart_factory() {
-  if factory_loaded; then
-    launchctl kickstart -k "gui/$UID/$FACTORY_LABEL"
+# Usage: restart_agent <label> <plist>
+restart_agent() {
+  if launchctl print "gui/$UID/$1" >/dev/null 2>&1; then
+    launchctl kickstart -k "gui/$UID/$1"
   else
-    launchctl bootstrap "gui/$UID" "$FACTORY_PLIST" 2>/dev/null || true
-    launchctl kickstart "gui/$UID/$FACTORY_LABEL"
+    launchctl bootstrap "gui/$UID" "$2" 2>/dev/null || true
+    launchctl kickstart "gui/$UID/$1"
+  fi
+}
+
+# Studio follows the server: restarted and stopped with it. It has no health
+# gate, so a Studio fault is reported but never fails an activation.
+restart_factory() {
+  restart_agent "$FACTORY_LABEL" "$FACTORY_PLIST"
+  if [[ -e $STUDIO_PLIST ]]; then
+    restart_agent "$STUDIO_LABEL" "$STUDIO_PLIST" || say "warning: could not restart $STUDIO_LABEL"
   fi
 }
 
 stop_factory() {
+  launchctl bootout "gui/$UID/$STUDIO_LABEL" 2>/dev/null || true
   launchctl bootout "gui/$UID/$FACTORY_LABEL" 2>/dev/null || true
   local deadline=$(( EPOCHSECONDS + 60 ))
   while health_ok && (( EPOCHSECONDS < deadline )); do sleep 2; done

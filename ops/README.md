@@ -130,7 +130,9 @@ brew install cloudflared
 ```
 
 `<TOKEN>`: Cloudflare Zero Trust > Networks > Tunnels > create tunnel. Then add a public hostname:
-subdomain `factory`, domain `kovalchuk.win`, type **HTTP**, URL `127.0.0.1:4111`.
+subdomain `factory`, domain `kovalchuk.win`, type **HTTP**, URL `127.0.0.1:4111`. For Studio, add a
+second one: subdomain `studio`, URL `127.0.0.1:3000` (`ai.mastra.studio`), and set
+`MASTRACODE_ALLOWED_ORIGINS=https://studio.kovalchuk.win` so its browser calls to the API pass CORS.
 
 In `.env`, then restart the server:
 
@@ -157,6 +159,9 @@ lsof -nP -iTCP:4111 -sTCP:LISTEN             # 127.0.0.1:4111 only; *:4111 or [:
 ```bash
 sudo lsof -nP -iTCP -sTCP:LISTEN | grep -vE '127\.0\.0\.1|\[::1\]'   # no node, cloudflared, 4111 or 54329
 ```
+
+One known exception: `node … *:3000`. `mastra studio` has no bind-host option. It serves only the
+static Studio UI, which the tunnel already makes public; every API call still needs a Factory sign-in.
 
 ### 3 — cloudflared is outbound-only, on 7844
 
@@ -208,14 +213,14 @@ Zsh, run from the repo root as the deployment user (never with `sudo`). Wrong ar
 | `local-mode.sh` | `on`: sets `HOLD` (CI still builds, but does not deploy), waits for idle work, stops the service. `off`: starts `releases/current`, checks health, clears `HOLD`. `status`: shows `HOLD`, the agent, the current release and what holds port 4111. | You, around a local `npm run build && npm run start` or `npm run dev` | `ops/local-mode.sh on` · `off` · `status` |
 | `deploy-notify.sh` | Posts the result of a `deploy` run to Slack: deployed, held, rolled back, down or failed (`actions-runner/README.md`, "Slack messages"). Posts nothing while `FACTORY_DEPLOY_SLACK_WEBHOOK_URL` is empty. | CI, in the last job of every `deploy` run | — |
 | `release-store.sh` | Copies a finished build (`.mastra/output`) into a new release folder as an APFS clone and writes `release.json`. Refuses a build without the Factory UI or `factory-skills/`. | CI, in its checkout after `npm run build`; not for daily use | `ops/release-store.sh <commit sha>` |
-| `install.sh` | Creates `~/Library/Logs/mastra-factory/`, links the Colima, Factory and runner plists into `~/Library/LaunchAgents`, copies the log-rotation conf to `/etc/newsyslog.d/`. Starts nothing; safe to re-run. Refuses another checkout or an unregistered runner. | You, once at set-up, and after changing the newsyslog conf (asks for `sudo` itself) | `ops/install.sh` |
+| `install.sh` | Creates `~/Library/Logs/mastra-factory/`, links the Colima, Factory, Studio and runner plists into `~/Library/LaunchAgents`, copies the log-rotation conf to `/etc/newsyslog.d/`. Starts nothing; safe to re-run. Refuses another checkout or an unregistered runner. | You, once at set-up, and after changing the newsyslog conf (asks for `sudo` itself) | `ops/install.sh` |
 | `factory-start.sh` | Waits up to 10 min for the Docker engine, then starts `npm run start:release` (`releases/current`), or `npm run start` before the first release. Pins Node in `NODE_BIN`. | launchd (`ai.mastra.factory.plist`); never by hand | — (`grep '^\[factory\]' ~/Library/Logs/mastra-factory/out.log` shows what it started) |
 | `release-lib.sh` | Shared code of the five release scripts: paths and limits at its top, Factory sign-in, idle check, `pg_dump`, link switch, health check, pruning. | Sourced by the scripts above; never run | `zsh -c 'source ops/release-lib.sh; factory_sign_in && echo token-ok'` (checks the deploy login) |
 
 The release scripts need `FACTORY_DEPLOY_EMAIL` and `FACTORY_DEPLOY_PASSWORD` in `.env` (an account
 that administers the Factory organization; `chmod 600 .env`), plus `jq`, `curl` and a running
 Docker engine. `deploy-notify.sh` reads `FACTORY_DEPLOY_SLACK_WEBHOOK_URL` from `.env`. A deploy never removes sandbox containers. After changing `NODE_BIN`, re-run
-`actions-runner/register.sh` and restart both agents.
+`actions-runner/register.sh` and restart the Factory, Studio and runner agents.
 
 Before any activation (deploy or rollback), with `FACTORY_SANDBOX_PROVIDER=docker`, every sandbox
 image that the release's `output/sandbox-catalog.json` names must exist on the engine, or the
@@ -227,9 +232,10 @@ activation stops and names the tag (`sandbox/README.md`, "The image check at dep
 | --- | --- |
 | `launchagents/ai.mastra.colima.plist` | `colima start … --foreground` — the Docker engine |
 | `launchagents/ai.mastra.factory.plist` | `caffeinate` + `factory-start.sh` — the server, `NODE_ENV=production` |
+| `launchagents/ai.mastra.studio.plist` | `mastra studio` on `:3000`, process name `mastra-studio` — the Studio UI for `studio.kovalchuk.win`, API at `https://factory.kovalchuk.win`. Deploy, rollback and `local-mode.sh` restart and stop it together with the server, without a prompt. |
 | `../actions-runner/ai.mastra.runner.plist` | the GitHub Actions runner (`actions-runner/README.md`) |
 | `factory-start.sh` | The start wrapper ("Scripts" above) |
-| `newsyslog/ai.mastra.factory.conf` | Rotates the six logs in `~/Library/Logs/mastra-factory/` (7 × 10 MB, bzip2) |
+| `newsyslog/ai.mastra.factory.conf` | Rotates the eight logs in `~/Library/Logs/mastra-factory/` (7 × 10 MB, bzip2) |
 | `install.sh` | Places all of the above ("Scripts" above) |
 
 They are agents, not daemons: Colima needs a login session, so everything starts at login and a
@@ -246,6 +252,7 @@ exists (`npm run build`, until the first release), and register the runner
 ops/install.sh                                                                   # run as zsh, from the repo root
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.colima.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.factory.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.studio.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.mastra.runner.plist
 launchctl kickstart gui/$(id -u)/ai.mastra.factory                               # bootstrap does not always start it
 sudo pmset -c sleep 0 disablesleep 1 autorestart 1 powernap 0                    # stay awake on AC
@@ -255,14 +262,14 @@ sudo defaults write /Library/Preferences/.GlobalPreferences MultipleSessionEnabl
 Re-run `ops/install.sh` after changing the newsyslog conf (it is copied, not linked). A changed
 plist needs `bootout` and `bootstrap` of that agent.
 
-Way back: `launchctl bootout gui/$(id -u)/ai.mastra.factory` (then `…runner`, `…colima`). To stop
+Way back: `launchctl bootout gui/$(id -u)/ai.mastra.factory` (then `…studio`, `…runner`, `…colima`). To stop
 it for good, also remove the links in `~/Library/LaunchAgents/` and
 `/etc/newsyslog.d/ai.mastra.factory.conf`.
 
 ## Supervision checkpoints
 
 ```bash
-# 1 — three agents, each with a pid and 0
+# 1 — four agents, each with a pid and 0
 launchctl list | grep ai.mastra
 # 2 — Colima owns the VM
 DOCKER_HOST="unix://$HOME/.colima/default/docker.sock" docker info >/dev/null && echo ok
@@ -281,7 +288,7 @@ defaults read /Library/Preferences/.GlobalPreferences MultipleSessionEnabled   #
 Reading failures:
 
 - `-` and `78` in `launchctl list`: launchd refused the plist. A pid that changes each time: a
-  crash loop — read `err.log` (server), `runner.err.log` or `colima.err.log`.
+  crash loop — read `err.log` (server), `studio.err.log`, `runner.err.log` or `colima.err.log`.
 - `err.log` repeats `Output directory … does not exist`: no build and no release.
 - `[factory] docker not ready after 600s`: Colima is not up — checkpoint 2.
 - `-` and `0` with `runs = 0` in `launchctl print gui/$(id -u)/<label>`: registered, never started —

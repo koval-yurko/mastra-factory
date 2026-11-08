@@ -52,6 +52,7 @@ readonly CONF_NAME=ai.mastra.factory.conf
 for required in \
   "$REPO_ROOT/ops/launchagents/ai.mastra.colima.plist" \
   "$REPO_ROOT/ops/launchagents/ai.mastra.factory.plist" \
+  "$REPO_ROOT/ops/launchagents/ai.mastra.studio.plist" \
   "$REPO_ROOT/actions-runner/ai.mastra.runner.plist" \
   "$REPO_ROOT/ops/newsyslog/$CONF_NAME"; do
   if [[ ! -f "$required" ]]; then
@@ -95,6 +96,7 @@ print "[install] log directory: $LOG_DIR"
 # and linking keeps the repo copy the only copy (AD-5). Edit the file in the
 # repo, re-bootstrap the agent, done.
 for plist in ops/launchagents/ai.mastra.colima.plist ops/launchagents/ai.mastra.factory.plist \
+  ops/launchagents/ai.mastra.studio.plist \
   actions-runner/ai.mastra.runner.plist; do
   ln -sfn "$REPO_ROOT/$plist" "$AGENT_DIR/${plist:t}"
   print "[install] linked $AGENT_DIR/${plist:t} -> $REPO_ROOT/$plist"

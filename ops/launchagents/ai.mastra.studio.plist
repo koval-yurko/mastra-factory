@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.mastra.studio</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/koval/dev/test/mastra-factory</string>
+
+  <!-- Static Studio UI on :3000 (tunnel: studio.kovalchuk.win). The browser calls the API at
+       factory.kovalchuk.win, which needs a Factory sign-in and must list
+       https://studio.kovalchuk.win in MASTRACODE_ALLOWED_ORIGINS. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/koval/.nvm/versions/node/v24.19.0/bin/node</string>
+    <string>--title=mastra-studio</string>
+    <string>/Users/koval/dev/test/mastra-factory/node_modules/.bin/mastra</string>
+    <string>studio</string>
+    <string>-p</string>
+    <string>3000</string>
+    <string>-h</string>
+    <string>factory.kovalchuk.win</string>
+    <string>-s</string>
+    <string>443</string>
+    <string>-x</string>
+    <string>https</string>
+  </array>
+
+  <!-- Same pinned Node as NODE_BIN in ops/factory-start.sh (here and in ProgramArguments);
+       bump them together. --title names the process mastra-studio in ps and Activity Monitor. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/koval/.nvm/versions/node/v24.19.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/koval/Library/Logs/mastra-factory/studio.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/koval/Library/Logs/mastra-factory/studio.err.log</string>
+</dict>
+</plist>

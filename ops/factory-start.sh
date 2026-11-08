@@ -16,7 +16,8 @@ zmodload zsh/datetime   # EPOCHSECONDS
 # and `nvm use` is a shell function that does not exist here, so nothing else puts
 # it on the path. The version is pinned rather than read from ~/.nvm/alias/default
 # because supervision wants one deterministic runtime, not whichever Node a later
-# `nvm alias default` happens to select. Bumping Node means editing this line.
+# `nvm alias default` happens to select. Bumping Node means editing this line
+# and the PATH in ops/launchagents/ai.mastra.studio.plist.
 readonly NODE_BIN=/Users/koval/.nvm/versions/node/v24.19.0/bin
 export PATH=$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
