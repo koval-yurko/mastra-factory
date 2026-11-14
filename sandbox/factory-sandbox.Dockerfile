@@ -14,9 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # generic toolchain — no specific target repo yet
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential python3 python3-pip python3-venv ripgrep jq unzip \
+      build-essential python3 python3-pip python3-venv ripgrep jq unzip lsof \
  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
+
+# Headless Chromium for browser tests of web UIs, at the revision Playwright
+# 1.65.1 expects — pinned; bump the version to upgrade. --with-deps installs its
+# system libraries; the last command fails the build if one is missing.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx -y playwright@1.65.1 install --with-deps --only-shell chromium \
+ && rm -rf /var/lib/apt/lists/* /root/.npm \
+ && /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell --version
 
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

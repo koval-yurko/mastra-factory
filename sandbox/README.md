@@ -151,10 +151,19 @@ them; a project in another team needs its own pair of names.
 **The shared image** (`factory-sandbox.Dockerfile`) is `node:22-bookworm-slim` plus `git`,
 `ca-certificates`, `curl`, `gnupg`, `openssh-client`, `less` and the GitHub CLI (`gh`, from
 `https://cli.github.com/packages` under its own `signed-by` keyring). A second layer adds a generic
-toolchain: `build-essential`, `python3`, `python3-pip`, `python3-venv`, `ripgrep`, `jq`, `unzip`. On
-bookworm, `python3-pip` is an externally-managed environment (PEP 668), so a session must use
+toolchain: `build-essential`, `python3`, `python3-pip`, `python3-venv`, `ripgrep`, `jq`, `unzip`,
+`lsof`. On bookworm, `python3-pip` is an externally-managed environment (PEP 668), so a session must use
 `python3 -m venv`. `corepack enable` makes `npm`, `pnpm` and `yarn` resolve. It is built with an empty
 build context and copies nothing.
+
+The shared image also has headless Chromium for browser tests of web UIs: the Chromium headless shell
+of Playwright **1.65.1** and its system libraries, in `/ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`). A
+session installs only the npm package, at the same version: `npm i playwright@1.65.1`, then
+`chromium.launch()` finds the browser and downloads nothing. Another Playwright version expects another
+browser revision; for it, `npx playwright install --only-shell chromium` downloads only the browser,
+because the libraries are already in the image. Headed Chromium is not installed: the container has no
+display. To upgrade, bump the version in the Dockerfile and here. The shell adds about 290 MB to the
+image.
 
 **A project image** (`projects/<owner>/<name>/Dockerfile`) is written from scratch for that repository.
 It does not use `FROM` with the shared image, so it holds only the tools its sessions use. Its build
