@@ -1,8 +1,8 @@
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/model.js b/node_modules/@mastra/code-sdk/dist/agents/model.js
-index e566467..f3722da 100644
+index 1edf430..592b867 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/model.js
 +++ b/node_modules/@mastra/code-sdk/dist/agents/model.js
-@@ -276,7 +276,7 @@ function getDynamicModel({ requestContext }, settingsPath, { modeless = false, d
+@@ -281,7 +281,7 @@ function getDynamicModel({ requestContext }, settingsPath, { modeless = false, d
  	const state = controller?.getState?.();
  	const pendingState = state?.mastracodePendingModelFallback;
  	const pendingFallback = pendingState && (pendingState.threadId === void 0 || typeof pendingState.threadId === "string" && pendingState.threadId === controller?.threadId) ? pendingState : void 0;
@@ -12,10 +12,10 @@ index e566467..f3722da 100644
  		if (!controller) throw new Error("No model available: this run started without a controller session context, so no model selection could be resolved.");
  		throw new Error("No model selected. Use /models to select a model first.");
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
-index c82bb38..ccf2454 100644
+index 1924a56..4a06199 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
 +++ b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.d.ts
-@@ -69,14 +69,47 @@ export declare function sessionInstructionRoots(workingDir: string, instructionR
+@@ -92,14 +92,47 @@ export declare function sessionInstructionRoots(workingDir: string, instructionR
   * from that ref and the other roots are skipped; without one no project files
   * load.
   */
@@ -65,10 +65,10 @@ index c82bb38..ccf2454 100644
   * Paths of loaded instruction sources, each project source also under its
   * root's canonical path, so reactive reminders never repeat a file the
 diff --git a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
-index 1fb8283..f78ec57 100644
+index 50b6fca..3ad35d9 100644
 --- a/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
 +++ b/node_modules/@mastra/code-sdk/dist/agents/prompts/agent-instructions.js
-@@ -221,17 +221,92 @@ function sessionInstructionRoots(workingDir, instructionRoots) {
+@@ -566,17 +566,92 @@ function sessionInstructionRoots(workingDir, instructionRoots) {
  * tree: with a `baseRef` the first root (the session's own checkout) is served
  * from that ref and the other roots are skipped; without one no project files
  * load.
@@ -165,28 +165,29 @@ index 1fb8283..f78ec57 100644
  /**
  * Paths of loaded instruction sources, each project source also under its
  * root's canonical path, so reactive reminders never repeat a file the
-@@ -269,6 +344,6 @@ function formatAgentInstructions(sources) {
+@@ -614,6 +689,6 @@ function formatAgentInstructions(sources) {
  	const sections = sources.map(formatInstructionSource);
  	return `\n${AGENT_INSTRUCTIONS_HEADING}\n\n${sections.join("\n\n")}\n`;
  }
--export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, sessionInstructionRoots };
-+export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefReminderReader, createSnapshotInstructionReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadSessionInstructions, readSandboxInstructionSnapshot, sessionInstructionRoots };
+-export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefInstructionReaderAsync, createGitRefReminderReader, createGitRefReminderReaderAsync, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadAgentInstructionsAsync, loadSessionInstructions, loadSessionInstructionsAsync, sessionInstructionRoots };
++export { AGENT_INSTRUCTIONS_HEADING, createGitRefInstructionReader, createGitRefInstructionReaderAsync, createGitRefReminderReader, createGitRefReminderReaderAsync, createSnapshotInstructionReader, formatAgentInstructions, formatInstructionSource, getStaticallyLoadedInstructionPaths, instructionSourcePaths, loadAgentInstructions, loadAgentInstructionsAsync, loadSessionInstructions, loadSessionInstructionsAsync, readSandboxInstructionSnapshot, sessionInstructionRoots };
  
  //# sourceMappingURL=agent-instructions.js.map
 \ No newline at end of file
 diff --git a/node_modules/@mastra/code-sdk/dist/index.js b/node_modules/@mastra/code-sdk/dist/index.js
-index 5897338..f0a99aa 100644
+index 30e130f..06d5ee1 100644
 --- a/node_modules/@mastra/code-sdk/dist/index.js
 +++ b/node_modules/@mastra/code-sdk/dist/index.js
-@@ -43,6 +43,7 @@ import { getToolCategory } from "./permissions.js";
+@@ -29,7 +29,7 @@ import { MASTRA_GATEWAY_PROVIDER, OBSERVABILITY_AUTH_PREFIX, loadSettings, resol
+ import { getToolCategory } from "./permissions.js";
  import { PluginManager } from "./plugins/manager.js";
  import { PluginSignalLane } from "./plugins/signal-lane.js";
- import { PlanRejectionAbortProcessor } from "./processors/plan-rejection-abort.js";
-+import { SandboxInstructionsProcessor } from "./processors/sandbox-instructions.js";
- import { createGitHubCopilotGateway } from "./providers/github-copilot-gateway.js";
- import { assembleSchedulePrompt } from "./schedules/prompt.js";
- import { ThreadScheduler, scheduleSignalAttributes, shortScheduleId } from "./schedules/scheduler.js";
-@@ -619,6 +620,7 @@ async function createMastraCodeAgentController(config) {
+-import { PlanRejectionAbortProcessor } from "./processors/plan-rejection-abort.js";
++import { PlanRejectionAbortProcessor } from "./processors/plan-rejection-abort.js"; import { SandboxInstructionsProcessor } from "./processors/sandbox-instructions.js";
+ import { createAmazonBedrockGateway } from "./providers/amazon-bedrock-gateway.js";
+ import { createOutcomeScorer } from "./evals/scorers/outcome.js";
+ import { createEfficiencyScorer } from "./evals/scorers/efficiency.js";
+@@ -620,6 +620,7 @@ async function createMastraCodeAgentController(config) {
  	const mastraCodeInputProcessors = [
  		...Array.isArray(config?.inputProcessors) ? config.inputProcessors : [],
  		new PlanRejectionAbortProcessor(),

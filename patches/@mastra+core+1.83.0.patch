@@ -1,10 +1,10 @@
-diff --git a/node_modules/@mastra/core/dist/agent-controller-BDds1y5w.js b/node_modules/@mastra/core/dist/agent-controller-BDds1y5w.js
-index bed4c7c..34cc1b2 100644
---- a/node_modules/@mastra/core/dist/agent-controller-BDds1y5w.js
-+++ b/node_modules/@mastra/core/dist/agent-controller-BDds1y5w.js
-@@ -7645,7 +7645,17 @@ var AgentController = class {
- 				const metadata = t.metadata ?? {};
- 				return scopeEntries.every(([key, value]) => metadata[key] === value);
+diff --git a/node_modules/@mastra/core/dist/agent-controller-BhkzVgCi.js b/node_modules/@mastra/core/dist/agent-controller-BhkzVgCi.js
+index fbd93f4..7b0fa32 100644
+--- a/node_modules/@mastra/core/dist/agent-controller-BhkzVgCi.js
++++ b/node_modules/@mastra/core/dist/agent-controller-BhkzVgCi.js
+@@ -7983,7 +7983,17 @@ var AgentController = class {
+ 					return scopeEntries.every(([key, value]) => values[key] === value);
+ 				}
  			});
 -			if (candidates.length === 0 && overrides?.createInitialThread !== false) await session.thread.create({ requestContext });
 +			if (candidates.length === 0 && overrides?.createInitialThread !== false) {
@@ -21,13 +21,13 @@ index bed4c7c..34cc1b2 100644
  			else if (candidates.length > 0) {
  				const mostRecent = [...candidates].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
  				await this.config.threadLock?.acquire(mostRecent.id);
-diff --git a/node_modules/@mastra/core/dist/agent-controller-DWhmVNOa.cjs b/node_modules/@mastra/core/dist/agent-controller-DWhmVNOa.cjs
-index 978e425..eb77b82 100644
---- a/node_modules/@mastra/core/dist/agent-controller-DWhmVNOa.cjs
-+++ b/node_modules/@mastra/core/dist/agent-controller-DWhmVNOa.cjs
-@@ -7645,7 +7645,17 @@ var AgentController = class {
- 				const metadata = t.metadata ?? {};
- 				return scopeEntries.every(([key, value]) => metadata[key] === value);
+diff --git a/node_modules/@mastra/core/dist/agent-controller-DCh02MMY.cjs b/node_modules/@mastra/core/dist/agent-controller-DCh02MMY.cjs
+index 39631c1..12b9a2e 100644
+--- a/node_modules/@mastra/core/dist/agent-controller-DCh02MMY.cjs
++++ b/node_modules/@mastra/core/dist/agent-controller-DCh02MMY.cjs
+@@ -7983,7 +7983,17 @@ var AgentController = class {
+ 					return scopeEntries.every(([key, value]) => values[key] === value);
+ 				}
  			});
 -			if (candidates.length === 0 && overrides?.createInitialThread !== false) await session.thread.create({ requestContext });
 +			if (candidates.length === 0 && overrides?.createInitialThread !== false) {

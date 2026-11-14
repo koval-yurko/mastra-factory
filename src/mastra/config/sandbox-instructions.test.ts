@@ -1,5 +1,5 @@
 /**
- * The `@mastra/code-sdk` patch (`patches/@mastra+code-sdk+1.18.0.patch`) that
+ * The `@mastra/code-sdk` patch (`patches/@mastra+code-sdk+1.19.0.patch`) that
  * reads a session's AGENTS.md / CLAUDE.md inside the sandbox. Unpatched, the
  * prompt builder looks for `/workspace/<repo>/AGENTS.md` on the host and finds
  * nothing. The patch adds `SandboxInstructionsProcessor` to the code agent: it

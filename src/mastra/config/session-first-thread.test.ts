@@ -1,5 +1,5 @@
 /**
- * The `@mastra/core` patch (`patches/@mastra+core+1.82.0.patch`) that names an
+ * The `@mastra/core` patch (`patches/@mastra+core+1.83.0.patch`) that names an
  * new session's first thread after its resource. The web UI opens a new
  * chat as thread `<resourceId>`, but a request without a thread id can create
  * the session first. Unpatched, that session gets a random-id thread, and the
