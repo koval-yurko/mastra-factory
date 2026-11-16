@@ -54,6 +54,10 @@ constraints and architecture decisions are in `docs/architecture.md`.
 - Code reaches production only through a push to `main` (`.github/workflows/deploy.yml` on the
   self-hosted runner). Never run `npm run build` to update the live server; use the release
   scripts in `ops/` (`deploy.sh`, `rollback.sh`, `local-mode.sh`).
+- Runtime proof before a deploy uses the `verify-factory` skill (a disposable copy with fakes);
+  after a deploy, the `verify-production` skill (`https://factory.kovalchuk.win`, the
+  `FACTORY_TEST_*` login from SSM). Never list environment variables with `env | cut` or a similar
+  line tool: a multi-line secret prints in full.
 
 ## Conventions that differ from defaults
 

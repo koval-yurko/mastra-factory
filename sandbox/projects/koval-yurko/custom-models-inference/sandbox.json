@@ -1,0 +1,14 @@
+{
+  "secrets": [
+    "TF_CLOUD_ORGANIZATION",
+    "TF_CLOUD_PROJECT",
+    "TF_TOKEN_app_terraform_io",
+    "GOOGLE_CREDENTIALS",
+    "HF_TOKEN",
+    "GCP_PROJECT_ID",
+    "GCP_REGION",
+    "BILLING_ACCOUNT",
+    "INVOKER_EMAIL",
+    "BUDGET_AMOUNT"
+  ]
+}

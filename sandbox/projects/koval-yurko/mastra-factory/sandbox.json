@@ -1,4 +1,5 @@
 {
   "memoryGib": 3,
-  "cpus": 2
+  "cpus": 2,
+  "secrets": ["FACTORY_TEST_EMAIL", "FACTORY_TEST_PASSWORD"]
 }

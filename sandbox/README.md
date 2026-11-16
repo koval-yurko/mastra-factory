@@ -146,6 +146,40 @@ To add another project, add a parameter `VERCEL_PROJECT_<NAME>_ID` (for example
 server after the deploy. All projects must be in the `VERCEL_ORG_ID` team, and the token must reach
 them; a project in another team needs its own pair of names.
 
+The secrets of `koval-yurko/custom-models-inference` are the keys of that repository's `.env.example`,
+under the same names, with one exception. Its `README.md` and `CLAUDE.md` say what each value is and
+how to obtain it. The non-secret values are in SSM too, so one place holds them all. Every listed
+name needs a value, including the ones that `.env.example` marks optional (`GCP_REGION`,
+`BUDGET_AMOUNT`):
+
+| Name | What it is |
+|---|---|
+| `TF_CLOUD_ORGANIZATION`, `TF_CLOUD_PROJECT`, `TF_TOKEN_app_terraform_io` | HCP Terraform organization, project and API token |
+| `GOOGLE_CREDENTIALS` | the **content** of the service account key JSON, not a path, on **one line** (`jq -c . key.json`) |
+| `HF_TOKEN` | Hugging Face token |
+| `GCP_PROJECT_ID`, `GCP_REGION`, `BILLING_ACCOUNT`, `INVOKER_EMAIL`, `BUDGET_AMOUNT` | the project values |
+
+The exception is `GOOGLE_APPLICATION_CREDENTIALS`. The repository expects the path of a key file, and
+SSM gives values, not files. The project image sets `GOOGLE_APPLICATION_CREDENTIALS=/root/.gcp/key.json`,
+and its `ENTRYPOINT` writes `GOOGLE_CREDENTIALS` to that file (mode `0600`) when the container
+starts. It must be the `ENTRYPOINT`: Factory replaces the image `CMD` with its own command. The key
+has `roles/owner` on the GCP project, so the agent can change real infrastructure. The repository's
+`CLAUDE.md` tells the agent to run apply, deploy and destroy only when the user asks.
+
+**Warning:** store every secret value on one line. A multi-line value leaks when a command lists
+environment names line by line: `env | cut -d= -f1` prints every line after the first in full. This
+leaked a pretty-printed key once (2026-11-16).
+
+The secrets of `koval-yurko/mastra-factory` are the login that the `verify-production` skill
+(`.claude/skills/verify-production/`) uses to sign in to the production server:
+
+| Name | What it is |
+|---|---|
+| `FACTORY_TEST_EMAIL`, `FACTORY_TEST_PASSWORD` | a Factory login on `https://factory.kovalchuk.win`; now the operator login, a copy of `FACTORY_DEPLOY_EMAIL`/`FACTORY_DEPLOY_PASSWORD` |
+
+Every session of this repository gets the operator login and can act with full operator rights on
+production. A password change needs both copies updated: `.env` and these parameters.
+
 ## Images
 
 **The shared image** (`factory-sandbox.Dockerfile`) is `node:22-bookworm-slim` plus `git`,
@@ -169,7 +203,9 @@ image.
 It does not use `FROM` with the shared image, so it holds only the tools its sessions use. Its build
 context is its own folder, so a `COPY` can reach only the files in that folder. The image for
 `koval-yurko/eleven-labs-english-agent` adds the EAS CLI (`eas-cli`) and the Vercel CLI, each at a
-pinned version. A skill that tells the agent how to use a project's tools belongs in that
+pinned version. The image for `koval-yurko/custom-models-inference` adds Terraform, tflint and the Google
+Cloud CLI, each at a pinned version, plus `direnv` and `python3`; Terraform and tflint are checked against
+their release checksums. A skill that tells the agent how to use a project's tools belongs in that
 repository's `.claude/skills/`: a Factory session reads it from the clone once the container runs.
 
 **Repository instructions.** The session agent puts the clone's `AGENTS.md` into its system prompt, or
