@@ -134,6 +134,15 @@ describe('validation', () => {
     );
   });
 
+  it('accepts the fakes server only on 127.0.0.1', async () => {
+    await expect(load({ FACTORY_FAKES_URL: 'http://127.0.0.1:4191' })).resolves.toBeDefined();
+    for (const value of ['https://api.github.com', 'http://localhost:4191', 'http://10.0.0.5:4191', 'http://127.0.0.1:4191/']) {
+      await expect(load({ FACTORY_FAKES_URL: value })).rejects.toThrow(
+        'FACTORY_FAKES_URL is invalid: must be http://127.0.0.1:<port>',
+      );
+    }
+  });
+
   it('validates a value that came from Parameter Store', async () => {
     vi.mocked(loadParameters).mockResolvedValue({ MASTRACODE_MAX_SANDBOXES: 'three' });
 

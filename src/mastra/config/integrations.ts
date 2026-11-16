@@ -28,6 +28,8 @@ import { LinearIntegration } from '@mastra/factory/integrations/linear/integrati
 import { SlackIntegration } from '@mastra/factory/integrations/slack/integration';
 import { publicUrl } from './public-url';
 import { env } from './env';
+import { fakesUrl } from './fakes-url';
+import { installFakesRedirect } from '../verify-fakes/redirect';
 import { customTools } from '../tools';
 import { liveSessions } from '../ops/live-sessions';
 
@@ -36,6 +38,11 @@ import { liveSessions } from '../ops/live-sessions';
 // down takes it exactly as the environment gave it, where a whitespace-only
 // value is still truthy and still signs `state`.
 const githubWebhookSecretRaw = env.GITHUB_APP_WEBHOOK_SECRET;
+
+// Verification runs only: send GitHub API and OAuth requests, and Anthropic
+// requests that carry the fake model key, to the fakes server before any
+// integration below can make one. A no-op while the key is unset.
+installFakesRedirect(fakesUrl);
 
 // Direct GitHub App fallback: when the platform-backed integration isn't in
 // play (self-hosted / local deploys), a complete GITHUB_APP_* env group wires

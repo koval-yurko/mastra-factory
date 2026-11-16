@@ -5,7 +5,7 @@
  *
  * `createParameterStoreTool` takes the store and the `.env` check so the test
  * can pass fakes; `../index` builds the tool from `parameterStore` and
- * `isSetLocally` in `../../config/env`, and only when
+ * `isSetLocally` in `../config/env`, and only when
  * `FACTORY_SSM_PARAMETER_PATH` is set.
  */
 import { createTool } from '@mastra/core/tools';

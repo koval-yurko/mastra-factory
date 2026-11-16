@@ -56,6 +56,7 @@ now moved, and so has the assembly itself: the entry imports `factory.ts` and no
 | `sandbox-catalog.ts` | What `sandbox/sandbox.json`, a project's `sandbox.json` and the built `sandbox-catalog.json` may say, and the host bounds on ceilings. No imports, so `src/build/` runs it under bare Node. |
 | `positive-int.ts` | The positive-integer parser every capacity knob is read through. Reads no environment of its own. |
 | `public-url.ts` | The browser-facing origin, trimmed, with a blank value reading as unset so the `??` fallbacks downstream fire. The single read site for `MASTRACODE_PUBLIC_URL`, which has consumers in two different concerns. |
+| `fakes-url.ts` | Where the fakes server listens (`../verify-fakes/`), for verification runs only; unset in production. The single read site for `FACTORY_FAKES_URL`, which has consumers in two concerns: `integrations.ts` sends this process's GitHub API and OAuth requests to the fake, and `sandbox.ts` makes git in session containers clone from it. |
 | `factory.ts` | The assembly: the `new MastraFactory({ … })` call that puts the five concerns together, the `configVersion` literal, and the single read site for `MASTRACODE_DISPATCH_MAX_IN_FLIGHT` and `MASTRACODE_ALLOWED_ORIGINS` — the two keys only that call takes. |
 
 `database-url.ts` exists so that neither consumer of the connection string has to import the other

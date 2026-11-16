@@ -5,7 +5,7 @@
  * so the agent can relay it.
  *
  * `createContext7Tools` takes the API key so the test can pass one; `../index`
- * passes `CONTEXT7_API_KEY` from `../../config/env`, which may be unset.
+ * passes `CONTEXT7_API_KEY` from `../config/env`, which may be unset.
  */
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';

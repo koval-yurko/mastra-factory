@@ -28,6 +28,7 @@ import { DockerSandbox, type DockerSandboxOptions } from '@mastra/docker';
 import { PlatformSandbox, createRepoTemplate as createPlatformRepoTemplate } from '@mastra/platform-workspace';
 import { E2BSandbox, createRepoTemplate as createE2BRepoTemplate } from '@mastra/e2b';
 import { env, projectSecretName, projectSecrets } from './env';
+import { fakesUrl } from './fakes-url';
 import { positiveInt } from './positive-int';
 import { SANDBOX_CATALOG_FILE, normalizeSlug, parseSandboxCatalog, type SandboxCatalog } from './sandbox-catalog';
 import type { MastraSandbox } from '@mastra/core/workspace';
@@ -84,7 +85,8 @@ const ssmProjectSecrets: ProjectSecretSource = { values: projectSecrets, paramet
 /**
  * The env a project's Docker session containers get: exactly the secrets its
  * catalog entry lists, under the same names. Nothing else from the host reaches
- * a container — there is no secret every session gets. Anything in the
+ * a container — there is no secret every session gets. (A verification run adds
+ * one non-secret git setting, `githubFakeSandboxEnv` below.) Anything in the
  * container (the agent, or a repo it has cloned) can read these, so a project
  * lists only credentials scoped for that. `sandbox/README.md` is the record.
  *
@@ -177,6 +179,34 @@ const DOCKER_SANDBOX_PIDS_LIMIT = 4096;
 const DOCKER_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
+ * Verification runs only: the sandbox env that makes git clone, fetch and push
+ * `https://github.com/...` through the fakes server (`../verify-fakes/`)
+ * instead. Empty when `fakeUrl` is unset, which is always the case in production.
+ *
+ * The fake listens on the host's 127.0.0.1 (`./env` allows nothing else). A
+ * Colima container (`docker`) reaches that as `host.docker.internal`; a local
+ * sandbox (`local`, the no-Docker verify mode) runs on the host and reaches it
+ * as 127.0.0.1 itself. `GIT_CONFIG_PARAMETERS` is
+ * git's own `-c` channel: Factory sets `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` on each
+ * git command for its credentials, and git reads both channels, so neither
+ * replaces the other. Factory's credential header is scoped to the
+ * `https://github.com/<repo>` URL, so it is not sent to the rewritten URL.
+ *
+ * Exported for `sandbox.test.ts` only — nothing else imports it.
+ */
+export function githubFakeSandboxEnv(
+  where: 'docker' | 'local',
+  fakeUrl: string | undefined = fakesUrl,
+): Record<string, string> {
+  if (!fakeUrl) return {};
+  const host = where === 'docker' ? 'host.docker.internal' : '127.0.0.1';
+  const port = new URL(fakeUrl).port;
+  return {
+    GIT_CONFIG_PARAMETERS: `'url.http://${host}:${port}/.insteadof'='https://github.com/'`,
+  };
+}
+
+/**
  * Build the Docker sandbox options for one session.
  *
  * `repoFullName` picks the session's project in the catalog; a project's own
@@ -209,7 +239,10 @@ export function dockerSandboxOptions(
   // and whole microseconds.
   const memoryBytes = Math.round((project?.memoryGib ?? catalog.default.memoryGib) * BYTES_PER_GIB);
   const cpus = project?.cpus ?? catalog.default.cpus;
-  const containerEnv = slug && project ? projectSandboxEnv(slug, project.secrets, secrets) : {};
+  const containerEnv = {
+    ...(slug && project ? projectSandboxEnv(slug, project.secrets, secrets) : {}),
+    ...githubFakeSandboxEnv('docker'),
+  };
 
   return {
     // The sandbox identity Factory keys its get-or-create on, so a reconnecting
@@ -376,7 +409,7 @@ export function selectSandbox(
       env.MASTRACODE_LOCAL_SANDBOX_ROOT?.trim() || join(homedir(), '.mastracode', 'web', 'sandboxes'),
       ctx.sessionId,
     ),
-    env: localSandboxEnv(),
+    env: { ...localSandboxEnv(), ...githubFakeSandboxEnv('local') },
   });
 }
 

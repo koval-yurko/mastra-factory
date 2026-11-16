@@ -87,6 +87,7 @@ const NO_SECRETS = secretsFor({});
 const {
   LOCAL_SANDBOX_ENV_KEYS,
   dockerSandboxOptions,
+  githubFakeSandboxEnv,
   liveDockerSandboxes,
   loadSandboxCatalog,
   localSandboxEnv,
@@ -321,6 +322,26 @@ describe('dockerSandboxOptions', () => {
   it('keys the sandbox on the session id, so a reconnect reattaches instead of provisioning a second container', () => {
     expect(dockerSandboxOptions('session-one', undefined, CATALOG).id).toBe('session-one');
     expect(dockerSandboxOptions('session-two', undefined, CATALOG).id).toBe('session-two');
+  });
+});
+
+describe('githubFakeSandboxEnv', () => {
+  it('is empty without a fake, so production sandboxes get no git setting', () => {
+    expect(githubFakeSandboxEnv('docker', undefined)).toEqual({});
+    expect(githubFakeSandboxEnv('local', undefined)).toEqual({});
+    expect(dockerSandboxOptions('session-abc', undefined, CATALOG, NO_SECRETS).env).toBeUndefined();
+  });
+
+  it('rewrites github.com to the fake as a Colima container reaches the host', () => {
+    expect(githubFakeSandboxEnv('docker', 'http://127.0.0.1:4191')).toEqual({
+      GIT_CONFIG_PARAMETERS: "'url.http://host.docker.internal:4191/.insteadof'='https://github.com/'",
+    });
+  });
+
+  it('rewrites github.com to the fake on loopback for a local sandbox', () => {
+    expect(githubFakeSandboxEnv('local', 'http://127.0.0.1:4191')).toEqual({
+      GIT_CONFIG_PARAMETERS: "'url.http://127.0.0.1:4191/.insteadof'='https://github.com/'",
+    });
   });
 });
 

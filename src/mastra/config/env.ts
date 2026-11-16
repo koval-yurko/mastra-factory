@@ -96,6 +96,9 @@ const systemSpecs = {
   MASTRACODE_LOCAL_SANDBOX_ROOT: optional,
   MASTRACODE_MAX_SANDBOXES: matching(/^[0-9]+$/, 'a whole number')({ default: undefined }),
   MASTRACODE_DISPATCH_MAX_IN_FLIGHT: optional,
+  // Verification runs only (`.claude/skills/verify-factory/`): the fakes server (GitHub and Anthropic).
+  // Loopback only, so no value can send GitHub traffic to another host.
+  FACTORY_FAKES_URL: matching(/^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/, 'http://127.0.0.1:<port>')({ default: undefined }),
 
   // GitHub bots allowed to trigger work, besides this deployment's own App.
   MASTRACODE_GITHUB_AUTHORIZED_BOTS: optional,
