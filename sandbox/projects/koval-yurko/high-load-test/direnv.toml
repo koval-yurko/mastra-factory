@@ -1,0 +1,8 @@
+# The clone lands under /workspace; allowing that prefix replaces `direnv allow`,
+# which no session runs. Logging is off: every `sh` prints nothing extra.
+[global]
+log_format = "-"
+hide_env_diff = true
+
+[whitelist]
+prefix = ["/workspace"]

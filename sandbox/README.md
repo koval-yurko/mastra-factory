@@ -180,6 +180,20 @@ The secrets of `koval-yurko/mastra-factory` are the login that the `verify-produ
 Every session of this repository gets the operator login and can act with full operator rights on
 production. A password change needs both copies updated: `.env` and these parameters.
 
+The secrets of `koval-yurko/high-load-test` are the 20 active names of that repository's
+`.env.example`, with the same spelling. Its comments say what each value is and where to create it;
+they are not restated here. The 3 values that are not secret (`AWS_REGION`, `TF_CLOUD_PROJECT`,
+`K6_PROMETHEUS_RW_TREND_STATS`) are parameters too, because SSM is the only way a value reaches the
+container. Do not create `GRAFANA_CLOUD_ACCESS_POLICY_TOKEN`: it is commented out there. When that file
+adds or removes a name, change `secrets` in the project's `sandbox.json` in the same way.
+
+**Warning:** `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` give the agent the whole reach of that IAM
+user. Use an IAM user that only this deployment uses, limited to the account in `AWS_ACCOUNT_ID`.
+
+The repository derives more names in its `.envrc`: `TFE_TOKEN`, the `TF_VAR_*` aliases and
+`K6_CLOUD_STACK_ID`. Do not create parameters for them. The project image loads `.envrc` itself (see
+"Images").
+
 ## Images
 
 **The shared image** (`factory-sandbox.Dockerfile`) is `node:22-bookworm-slim` plus `git`,
@@ -207,6 +221,18 @@ pinned version. The image for `koval-yurko/custom-models-inference` adds Terrafo
 Cloud CLI, each at a pinned version, plus `direnv` and `python3`; Terraform and tflint are checked against
 their release checksums. A skill that tells the agent how to use a project's tools belongs in that
 repository's `.claude/skills/`: a Factory session reads it from the clone once the container runs.
+
+The image for `koval-yurko/high-load-test` adds Terraform, the AWS CLI v2, k6, jq and direnv, each at a
+pinned version. Terraform must match the repository's `required_version`. It has no Docker: the
+repository's service images are built outside the sandbox. Its `/bin/sh` is `direnv-sh`, a shim that
+runs `direnv export` for the current directory and then runs `dash`. Every session command is a new
+`docker exec … sh -c`, which no profile or start script reaches, so this is how each command gets the
+values of the clone's `.envrc` with no prefix. `direnv.toml` allows `/workspace`, which replaces
+`direnv allow`, and turns off the direnv log. The shim adds about 8 ms to each `sh`. Limits:
+
+- `.envrc` loads when an `sh` starts. A command that starts outside the clone and then runs `cd` into it
+  gets the values only in a new `sh` (a script, or `sh -c`).
+- A `RUN` line after the shim in that Dockerfile runs through it. Keep the shim the last step.
 
 **Repository instructions.** The session agent puts the clone's `AGENTS.md` into its system prompt, or
 `CLAUDE.md` when there is no `AGENTS.md`. It looks at the clone root, then `.claude/`, then

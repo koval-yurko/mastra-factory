@@ -1,0 +1,9 @@
+#!/bin/bash
+# /bin/sh in this image. Each agent command is a new `docker exec ... sh -c`, which
+# no profile or start script reaches, so this loads the clone's .envrc for the
+# current directory (as direnv does in a local shell) and then runs dash.
+# Skipped while direnv evaluates .envrc itself, which may start sh again.
+if [ -z "${DIRENV_IN_ENVRC:-}" ]; then
+  eval "$(direnv export bash)"
+fi
+exec /usr/bin/dash "$@"
